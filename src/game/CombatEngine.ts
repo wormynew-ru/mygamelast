@@ -3,7 +3,7 @@
  * ZERO dependencies on React, DOM, or CV logic.
  */
 
-import type { PlayerStats, MonsterStats, CombatResult } from './types';
+import type { PlayerStats, MonsterStats, CombatResult, Item } from './types';
 
 /**
  * XP curve: exponential growth.
@@ -184,4 +184,133 @@ export function createPlayer(): PlayerStats {
     critChance: 0.15, // 15%
     critMultiplier: 1.5, // 1.5x damage on crit
   };
+}
+
+/**
+ * Compute effective player stats including all equipped item bonuses.
+ */
+export function getEffectivePlayerStats(
+  player: PlayerStats,
+  equippedItemIds: string[],
+  itemsCatalog: Record<string, Item>
+): PlayerStats {
+  let attackBonus = 0;
+  let defenseBonus = 0;
+  let maxHpBonus = 0;
+  let critChanceBonus = 0;
+
+  for (const itemId of equippedItemIds) {
+    const item = itemsCatalog[itemId];
+    if (!item || item.type !== 'EQUIPMENT' || !item.stats) {
+      continue;
+    }
+    attackBonus += item.stats.attack ?? 0;
+    defenseBonus += item.stats.defense ?? 0;
+    maxHpBonus += item.stats.maxHp ?? 0;
+    critChanceBonus += item.stats.critChance ?? 0;
+  }
+
+  return {
+    ...player,
+    attack: player.attack + attackBonus,
+    defense: player.defense + defenseBonus,
+    maxHp: player.maxHp + maxHpBonus,
+    hp: Math.min(player.hp, player.maxHp + maxHpBonus),
+    critChance: Math.min(1, player.critChance + critChanceBonus),
+  };
+}
+
+/**
+ * Apply a consumable item's healing effect to the player.
+ */
+export function useConsumableItem(player: PlayerStats, item: Item): PlayerStats {
+  if (item.type !== 'CONSUMABLE' || !item.effect?.hpRestore) {
+    return player;
+  }
+
+  return {
+    ...player,
+    hp: Math.min(player.maxHp, player.hp + item.effect.hpRestore),
+  };
+}
+
+/**
+ * Roll for an item drop from a level's drop table.
+ * Returns the first dropped item ID or null if nothing dropped.
+ */
+export function rollItemDrop(
+  dropTable: ReadonlyArray<{ itemId: string; chance: number }>,
+  rng: () => number = Math.random
+): string | null {
+  for (const entry of dropTable) {
+    if (rng() < entry.chance) {
+      return entry.itemId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Calculate incoming damage from a monster counter-attack.
+ * Active plank hold (isBlocking = true) mitigates 70% of monster attack power
+ * and allows a full block (0 damage) if defense covers the reduced strike.
+ */
+export function calculateMonsterCounterAttack(
+  player: PlayerStats,
+  monsterAttack: number,
+  isBlocking: boolean
+): { player: PlayerStats; damageTaken: number; wasBlocked: boolean } {
+  if (isBlocking) {
+    const mitigatedAttack = Math.floor(monsterAttack * 0.3);
+    const damageTaken = Math.max(0, mitigatedAttack - player.defense);
+    return {
+      player: {
+        ...player,
+        hp: Math.max(0, player.hp - damageTaken),
+      },
+      damageTaken,
+      wasBlocked: true,
+    };
+  }
+
+  const updated = applyDamageToPlayer(player, monsterAttack);
+  return {
+    player: updated,
+    damageTaken: player.hp - updated.hp,
+    wasBlocked: false,
+  };
+}
+
+/**
+ * Get time between monster counter-attacks in ms.
+ * Bosses attack faster as they enter enraged phases.
+ */
+export function getMonsterAttackIntervalMs(monster: MonsterStats): number {
+  if (!monster.isBoss) {
+    return 7000;
+  }
+  const phase = getBossPhase(monster);
+  if (phase >= 2) return 4000;
+  if (phase === 1) return 5000;
+  return 6000;
+}
+
+/**
+ * Duration (in ms) before a monster strike when warning telegraph activates.
+ */
+export const ATTACK_WARNING_WINDOW_MS = 1500;
+
+/**
+ * Check whether the enemy counter-attack warning telegraph is active for the current cycle.
+ */
+export function isMonsterAttackWarningActive(
+  elapsedMs: number,
+  intervalMs: number,
+  warningWindowMs: number = ATTACK_WARNING_WINDOW_MS
+): boolean {
+  if (intervalMs <= 0 || warningWindowMs <= 0) {
+    return false;
+  }
+  const warningThreshold = Math.max(0, intervalMs - warningWindowMs);
+  return elapsedMs >= warningThreshold && elapsedMs < intervalMs;
 }

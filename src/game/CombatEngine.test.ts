@@ -14,8 +14,17 @@ import {
   isMonsterDead,
   getBossPhase,
   createPlayer,
+  getEffectivePlayerStats,
+  useConsumableItem,
+  rollItemDrop,
+  calculateMonsterCounterAttack,
+  getMonsterAttackIntervalMs,
+  ATTACK_WARNING_WINDOW_MS,
+  isMonsterAttackWarningActive,
 } from './CombatEngine';
-import type { PlayerStats, MonsterStats } from './types';
+import { ITEMS } from './data/items';
+import { evaluateNewAchievements } from './data/achievements';
+import type { PlayerStats, MonsterStats, GameState } from './types';
 
 describe('CombatEngine', () => {
   describe('calculateXPForLevel', () => {
@@ -309,6 +318,152 @@ describe('CombatEngine', () => {
       expect(player.defense).toBe(5);
       expect(player.critChance).toBe(0.15);
       expect(player.critMultiplier).toBe(1.5);
+    });
+  });
+
+  describe('getEffectivePlayerStats', () => {
+    it('adds equipment stat bonuses without mutating base player', () => {
+      const base = createPlayer();
+      const effective = getEffectivePlayerStats(
+        base,
+        ['RUNNING_SHOES', 'WEIGHT_BELT', 'ARMOR_VEST'],
+        ITEMS
+      );
+
+      expect(effective.attack).toBe(base.attack + 2 + 3);
+      expect(effective.defense).toBe(base.defense + 5);
+      expect(base.attack).toBe(10);
+    });
+
+    it('ignores consumables and unknown item IDs', () => {
+      const base = createPlayer();
+      const effective = getEffectivePlayerStats(
+        base,
+        ['PROTEIN_SHAKE', 'NON_EXISTENT'],
+        ITEMS
+      );
+
+      expect(effective.attack).toBe(base.attack);
+      expect(effective.defense).toBe(base.defense);
+    });
+  });
+
+  describe('useConsumableItem', () => {
+    it('restores HP capped at maxHp', () => {
+      const wounded: PlayerStats = { ...createPlayer(), hp: 60, maxHp: 100 };
+      const healed = useConsumableItem(wounded, ITEMS.PROTEIN_SHAKE);
+      expect(healed.hp).toBe(100);
+
+      const slightlyWounded: PlayerStats = { ...createPlayer(), hp: 40, maxHp: 100 };
+      const healedPartial = useConsumableItem(slightlyWounded, ITEMS.ENERGY_BAR);
+      expect(healedPartial.hp).toBe(65);
+    });
+
+    it('leaves stats unchanged for non-consumable items', () => {
+      const wounded: PlayerStats = { ...createPlayer(), hp: 50, maxHp: 100 };
+      const result = useConsumableItem(wounded, ITEMS.RUNNING_SHOES);
+      expect(result.hp).toBe(50);
+    });
+  });
+
+  describe('rollItemDrop', () => {
+    it('returns matching item when rng falls below drop chance', () => {
+      const table = [
+        { itemId: 'ENERGY_BAR', chance: 0.3 },
+        { itemId: 'PROTEIN_SHAKE', chance: 0.5 },
+      ];
+      const rng = vi.fn().mockReturnValueOnce(0.8).mockReturnValueOnce(0.2);
+
+      expect(rollItemDrop(table, rng)).toBe('PROTEIN_SHAKE');
+    });
+
+    it('returns null when no drop succeeds', () => {
+      const table = [{ itemId: 'ARMOR_VEST', chance: 0.25 }];
+      expect(rollItemDrop(table, () => 0.99)).toBeNull();
+    });
+  });
+
+  describe('calculateMonsterCounterAttack & intervals', () => {
+    it('reduces damage and allows full block during plank hold', () => {
+      const player = createPlayer(); // defense 5
+      const unblocked = calculateMonsterCounterAttack(player, 15, false);
+      expect(unblocked.wasBlocked).toBe(false);
+      expect(unblocked.damageTaken).toBe(10); // 15 - 5
+
+      const blocked = calculateMonsterCounterAttack(player, 15, true);
+      expect(blocked.wasBlocked).toBe(true);
+      expect(blocked.damageTaken).toBe(0); // floor(15*0.3)=4 <= 5 defense
+    });
+
+    it('speeds up attack interval in boss phases', () => {
+      const boss: MonsterStats = {
+        id: 'BOSS_KING_BURGER',
+        name: 'King Burger',
+        hp: 200,
+        maxHp: 200,
+        attack: 15,
+        defense: 5,
+        xpReward: 150,
+        isBoss: true,
+        phaseThresholds: [0.7, 0.4],
+      };
+
+      expect(getMonsterAttackIntervalMs(boss)).toBe(6000);
+      expect(getMonsterAttackIntervalMs({ ...boss, hp: 130 })).toBe(5000);
+      expect(getMonsterAttackIntervalMs({ ...boss, hp: 60 })).toBe(4000);
+    });
+
+    it('activates attack warning strictly within the final warning window before strike', () => {
+      expect(ATTACK_WARNING_WINDOW_MS).toBe(1500);
+
+      expect(isMonsterAttackWarningActive(5499, 7000)).toBe(false);
+      expect(isMonsterAttackWarningActive(5500, 7000)).toBe(true);
+      expect(isMonsterAttackWarningActive(6999, 7000)).toBe(true);
+      expect(isMonsterAttackWarningActive(7000, 7000)).toBe(false);
+
+      // Boss enraged shorter intervals (4000ms -> warns at 2500ms..3999ms)
+      expect(isMonsterAttackWarningActive(2499, 4000)).toBe(false);
+      expect(isMonsterAttackWarningActive(2500, 4000)).toBe(true);
+
+      // Edge cases: invalid interval or warning window larger than interval
+      expect(isMonsterAttackWarningActive(0, 0)).toBe(false);
+      expect(isMonsterAttackWarningActive(100, 1000, 1500)).toBe(true);
+    });
+  });
+
+  describe('evaluateNewAchievements', () => {
+    it('unlocks achievements matching workout & progression milestones without duplicates', () => {
+      const state: GameState = {
+        player: { ...createPlayer(), level: 5 },
+        inventory: { items: new Map(), equippedItems: [] },
+        currentLevel: null,
+        unlockedLevels: ['LEVEL_1'],
+        completedLevels: ['LEVEL_5'],
+        unlockedAchievements: ['FIRST_REP'],
+        currentEnemy: null,
+        workoutStats: { totalReps: 55, totalHoldSeconds: 35, monstersDefeated: 2 },
+        settings: {
+          soundEnabled: true,
+          voiceEnabled: false,
+          cameraFacingMode: 'user',
+          exerciseConfigs: {},
+          exerciseCalibration: {
+            squatBottomAngle: 90,
+            pushupBottomAngle: 90,
+            plankMinBodyAngle: 160,
+            jumpingJackPeakArmAngle: 135,
+          },
+          language: 'ru',
+        },
+      };
+
+      const unlocked = evaluateNewAchievements(state);
+      expect(unlocked).not.toContain('FIRST_REP');
+      expect(unlocked).toContain('FIFTY_REPS');
+      expect(unlocked).toContain('PLANK_SURVIVOR');
+      expect(unlocked).toContain('FIRST_VICTORY');
+      expect(unlocked).toContain('BOSS_SLAYER');
+      expect(unlocked).toContain('VETERAN_HERO');
     });
   });
 });

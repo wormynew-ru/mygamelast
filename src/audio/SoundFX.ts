@@ -23,6 +23,7 @@ export type SoundType =
   | 'POWER_UP'      // Level up/achievement
   | 'COMBO'         // Combo multiplier
   | 'DAMAGE'        // Player takes damage
+  | 'WARNING'       // Incoming enemy attack telegraph
   | 'VICTORY';      // Battle won
 
 /**
@@ -74,7 +75,14 @@ export class SoundFX {
    */
   async init(): Promise<void> {
     if (this.audioContext) {
-      return; // Already initialized
+      if (this.audioContext.state === 'suspended') {
+        try {
+          await this.audioContext.resume();
+        } catch (err) {
+          console.warn('Failed to resume Web Audio API:', err);
+        }
+      }
+      return;
     }
 
     try {
@@ -94,6 +102,16 @@ export class SoundFX {
     } catch (err) {
       console.warn('Failed to initialize Web Audio API:', err);
     }
+  }
+
+  /**
+   * Check if audio context is unlocked and ready to play.
+   */
+  isUnlocked(): boolean {
+    if (!this.config.enabled) {
+      return true;
+    }
+    return this.audioContext !== null && this.audioContext.state === 'running';
   }
 
   /**
@@ -122,6 +140,9 @@ export class SoundFX {
         break;
       case 'DAMAGE':
         this.playDamage();
+        break;
+      case 'WARNING':
+        this.playWarning();
         break;
       case 'VICTORY':
         this.playVictory();
@@ -357,6 +378,37 @@ export class SoundFX {
 
     osc.start(now);
     osc.stop(now + 0.2);
+  }
+
+  /**
+   * Play urgent two-tone wind-up chime before an enemy/boss attack lands.
+   */
+  private playWarning(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const now = this.audioContext.currentTime;
+    const pulses = [
+      { freq: 520, offset: 0, duration: 0.08 },
+      { freq: 780, offset: 0.1, duration: 0.1 },
+    ];
+
+    pulses.forEach(({ freq, offset, duration }) => {
+      const osc = this.audioContext!.createOscillator();
+      osc.type = 'triangle';
+      const startTime = now + offset;
+      osc.frequency.setValueAtTime(freq, startTime);
+
+      const env = this.audioContext!.createGain();
+      env.gain.setValueAtTime(0, startTime);
+      env.gain.linearRampToValueAtTime(0.32, startTime + 0.01);
+      env.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+
+      osc.connect(env);
+      env.connect(this.masterGain!);
+
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    });
   }
 
   /**

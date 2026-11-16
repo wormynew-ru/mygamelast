@@ -1,326 +1,695 @@
 /**
- * BattleScreen - Main combat UI.
- * Subscribes to WorkoutSession state and displays:
- * - Video feed with skeleton overlay
- * - Player/Monster HP bars
- * - Rep counter and exercise state
- * - Monster sprite with damage animation
- * - Combat controls (pause, surrender)
+ * BattleScreen - Main combat arena UI.
+ * Mounts the live camera video/canvas and binds a WorkoutSession instance.
+ * ZERO direct imports from PoseTracker, CombatEngine, or SoundFX.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { WorkoutSession, SessionStatus } from '../session/WorkoutSession';
-import { useGameStore } from '../game/store';
-import { MONSTERS } from '../game/data/monsters';
-import { useTranslation } from '../i18n/useTranslation';
-import { t as translate } from '../i18n';
+import { Volume2, Pause, Play, LogOut, Shield, Trophy, AlertTriangle } from 'lucide-react';
+import {
+  createWorkoutSessionForBattle,
+  type WorkoutSession,
+  type SessionStatus,
+} from '../session/WorkoutSession';
+import { useGameStore, selectEffectivePlayerStats } from '../game/store';
+import { createMonster, MONSTERS } from '../game/data/monsters';
+import { EXERCISES, type ExerciseId } from '../game/data/exercises';
+import { getLevelById } from '../game/data/levels';
+import { ITEMS } from '../game/data/items';
+import { type AchievementId } from '../game/data/achievements';
+import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 
 interface BattleScreenProps {
-  session: WorkoutSession;
+  levelId?: string;
+  exerciseId: ExerciseId;
   onExit: () => void;
+  onStartNextLevel?: (nextLevelId: string, exerciseId: ExerciseId) => void;
 }
 
-/**
- * HP Bar component with gradient and animation.
- */
-function HPBar({
+const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
+  BURGER: 'monster.BURGER.name',
+  PIZZA: 'monster.PIZZA.name',
+  SODA: 'monster.SODA.name',
+  DONUT: 'monster.DONUT.name',
+  BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.name',
+};
+
+const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
+  SQUAT: 'exercise.SQUAT.name',
+  PUSH_UP: 'exercise.PUSH_UP.name',
+  PLANK: 'exercise.PLANK.name',
+  JUMPING_JACK: 'exercise.JUMPING_JACK.name',
+};
+
+const ITEM_NAME_KEYS: Record<string, TranslationKey> = {
+  PROTEIN_SHAKE: 'item.PROTEIN_SHAKE.name',
+  ENERGY_BAR: 'item.ENERGY_BAR.name',
+  RUNNING_SHOES: 'item.RUNNING_SHOES.name',
+  WEIGHT_BELT: 'item.WEIGHT_BELT.name',
+  ARMOR_VEST: 'item.ARMOR_VEST.name',
+};
+
+const ACHIEVEMENT_NAME_KEYS: Record<AchievementId, TranslationKey> = {
+  FIRST_REP: 'achievement.FIRST_REP.name',
+  FIFTY_REPS: 'achievement.FIFTY_REPS.name',
+  PLANK_SURVIVOR: 'achievement.PLANK_SURVIVOR.name',
+  FIRST_VICTORY: 'achievement.FIRST_VICTORY.name',
+  BOSS_SLAYER: 'achievement.BOSS_SLAYER.name',
+  GEAR_COLLECTOR: 'achievement.GEAR_COLLECTOR.name',
+  VETERAN_HERO: 'achievement.VETERAN_HERO.name',
+};
+
+const PHASE_KEYS: Record<string, TranslationKey> = {
+  IDLE: 'phase.IDLE',
+  DOWN: 'phase.DOWN',
+  UP: 'phase.UP',
+  TRANSITION: 'phase.TRANSITION',
+};
+
+function formatHoldDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+const HPBar = memo(function HPBar({
   current,
   max,
   label,
-  color = 'green'
+  tone,
 }: {
   current: number;
   max: number;
   label: string;
-  color?: 'green' | 'red';
+  tone: 'player' | 'enemy';
 }) {
-  const percentage = Math.max(0, (current / max) * 100);
-  const barColor = color === 'green'
-    ? 'from-green-500 to-green-600'
-    : 'from-red-500 to-red-600';
+  const percentage = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
+  const fillClass = tone === 'player' ? 'bg-emerald-500' : 'bg-red-500';
 
   return (
     <div className="w-full">
-      <div className="flex justify-between text-sm font-semibold mb-1">
-        <span>{label}</span>
-        <span>{current} / {max}</span>
+      <div className="flex justify-between items-baseline text-sm font-semibold mb-1.5 gap-2">
+        <span className="text-slate-100 truncate">{label}</span>
+        <span className="font-numeric text-xs text-slate-300 shrink-0">
+          {current} / {max}
+        </span>
       </div>
-      <div className="w-full h-6 bg-gray-700 rounded-full overflow-hidden border-2 border-gray-600">
+      <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
         <motion.div
-          className={`h-full bg-gradient-to-r ${barColor}`}
-          initial={{ width: '100%' }}
+          className={`h-full ${fillClass}`}
+          initial={false}
           animate={{ width: `${percentage}%` }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
         />
       </div>
     </div>
   );
-}
+});
 
-/**
- * Monster sprite with damage shake animation.
- */
-function MonsterSprite({
-  sprite,
-  name,
-  isDamaged
-}: {
-  sprite: string;
-  name: string;
-  isDamaged: boolean;
-}) {
-  return (
-    <motion.div
-      className="flex flex-col items-center"
-      animate={isDamaged ? { x: [-10, 10, -10, 10, 0] } : {}}
-      transition={{ duration: 0.4 }}
-    >
-      <div className="text-8xl mb-4">{sprite}</div>
-      <h2 className="text-2xl font-bold text-white">{name}</h2>
-    </motion.div>
-  );
-}
-
-/**
- * Exercise state indicator with phase colors.
- */
-function ExerciseStateIndicator({
-  phase,
-  repCount
-}: {
-  phase: string;
-  repCount: number;
-}) {
-  const phaseColors: Record<string, string> = {
-    IDLE: 'bg-gray-500',
-    DOWN: 'bg-yellow-500',
-    UP: 'bg-blue-500',
-    TRANSITION: 'bg-green-500',
-  };
-
-  const bgColor = phaseColors[phase] || 'bg-gray-500';
-  const phaseKey = `phase.${phase}` as const;
-
-  return (
-    <div className="flex items-center gap-4">
-      <div className="flex flex-col items-center">
-        <div className="text-5xl font-bold text-white mb-2">{repCount}</div>
-        <div className="text-sm text-gray-400">{translate('battle.reps')}</div>
-      </div>
-      <div className="flex flex-col items-center">
-        <div className={`w-16 h-16 rounded-full ${bgColor} flex items-center justify-center text-white font-bold text-xs`}>
-          {translate(phaseKey)}
-        </div>
-        <div className="text-xs text-gray-400 mt-1">{translate('battle.phase')}</div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Victory/Defeat overlay.
- */
-function BattleEndOverlay({
-  result,
-  onContinue,
-  onRetry
-}: {
-  result: 'victory' | 'defeat';
-  onContinue: () => void;
-  onRetry: () => void;
-}) {
-  const isVictory = result === 'victory';
-
-  return (
-    <motion.div
-      className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <div className="bg-gray-800 rounded-lg p-8 text-center max-w-md">
-        <div className="text-6xl mb-4">{isVictory ? '🎉' : '💀'}</div>
-        <h2 className="text-3xl font-bold text-white mb-2">
-          {translate(isVictory ? 'battle.victory' : 'battle.defeat')}
-        </h2>
-        <p className="text-gray-400 mb-6">
-          {translate(isVictory ? 'battle.victoryMessage' : 'battle.defeatMessage')}
-        </p>
-        <div className="flex gap-4 justify-center">
-          <button
-            onClick={onRetry}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
-          >
-            {translate(isVictory ? 'battle.nextFight' : 'battle.tryAgain')}
-          </button>
-          <button
-            onClick={onContinue}
-            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition"
-          >
-            {translate('battle.exit')}
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-/**
- * Main BattleScreen component.
- */
-export function BattleScreen({ session, onExit }: BattleScreenProps) {
+export function BattleScreen({
+  levelId,
+  exerciseId,
+  onExit,
+  onStartNextLevel,
+}: BattleScreenProps) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sessionRef = useRef<WorkoutSession | null>(null);
+  const lastCombatEventIdRef = useRef<number>(0);
+  const lastAttackEventIdRef = useRef<number>(0);
+  const damageTimerRef = useRef<number | null>(null);
+  const heroHitTimerRef = useRef<number | null>(null);
 
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>(session.getStatus());
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
+    state: 'STARTING',
+    exerciseState: null,
+    currentEnemy: useGameStore.getState().currentEnemy,
+    autoPauseReason: null,
+    isAudioUnlocked: true,
+    bossPhase: 0,
+    nextAttackProgress: 0,
+    monsterAttackIntervalMs: 7000,
+    isAttackWarning: false,
+    lastCombatEvent: null,
+    lastMonsterAttackEvent: null,
+    victorySummary: null,
+  });
   const [isDamaged, setIsDamaged] = useState(false);
+  const [isHeroHit, setIsHeroHit] = useState(false);
 
-  const player = useGameStore((state) => state.player);
+  const basePlayer = useGameStore((state) => state.player);
+  const equippedItems = useGameStore((state) => state.inventory.equippedItems);
   const enemy = useGameStore((state) => state.currentEnemy);
+  const startCombat = useGameStore((state) => state.startCombat);
+  const endCombat = useGameStore((state) => state.endCombat);
+  const revivePlayer = useGameStore((state) => state.revivePlayer);
 
-  // Subscribe to session state changes
+  const effectivePlayer = useMemo(
+    () => selectEffectivePlayerStats(useGameStore.getState()),
+    [basePlayer, equippedItems]
+  );
+
+  const exerciseDef = EXERCISES[exerciseId];
+  const levelDef = levelId ? getLevelById(levelId) : undefined;
+  const initialMonsterId = levelDef?.monsterId ?? enemy?.id ?? 'BURGER';
+
   useEffect(() => {
+    const videoEl = videoRef.current;
+    const canvasEl = canvasRef.current;
+    if (!videoEl || !canvasEl) {
+      return undefined;
+    }
+
+    const session = createWorkoutSessionForBattle({
+      videoElement: videoEl,
+      canvasElement: canvasEl,
+      exerciseId,
+      levelId,
+    });
+    sessionRef.current = session;
+
     const unsubscribe = session.onStateChange((status) => {
       setSessionStatus(status);
 
-      // Trigger damage animation when enemy HP changes
-      if (status.currentEnemy && enemy && status.currentEnemy.hp < enemy.hp) {
+      if (status.lastCombatEvent && status.lastCombatEvent.id !== lastCombatEventIdRef.current) {
+        lastCombatEventIdRef.current = status.lastCombatEvent.id;
         setIsDamaged(true);
-        setTimeout(() => setIsDamaged(false), 400);
+        if (damageTimerRef.current !== null) {
+          window.clearTimeout(damageTimerRef.current);
+        }
+        damageTimerRef.current = window.setTimeout(() => {
+          setIsDamaged(false);
+          damageTimerRef.current = null;
+        }, 320);
+      }
+
+      if (
+        status.lastMonsterAttackEvent &&
+        status.lastMonsterAttackEvent.id !== lastAttackEventIdRef.current
+      ) {
+        lastAttackEventIdRef.current = status.lastMonsterAttackEvent.id;
+        setIsHeroHit(true);
+        if (heroHitTimerRef.current !== null) {
+          window.clearTimeout(heroHitTimerRef.current);
+        }
+        heroHitTimerRef.current = window.setTimeout(() => {
+          setIsHeroHit(false);
+          heroHitTimerRef.current = null;
+        }, 450);
       }
     });
 
-    return unsubscribe;
-  }, [session, enemy]);
+    void session.start();
 
-  const handlePause = () => {
+    return () => {
+      if (damageTimerRef.current !== null) {
+        window.clearTimeout(damageTimerRef.current);
+        damageTimerRef.current = null;
+      }
+      if (heroHitTimerRef.current !== null) {
+        window.clearTimeout(heroHitTimerRef.current);
+        heroHitTimerRef.current = null;
+      }
+      unsubscribe();
+      session.stop();
+      sessionRef.current = null;
+    };
+  }, [exerciseId, levelId]);
+
+  const handlePauseToggle = () => {
+    const session = sessionRef.current;
+    if (!session) return;
+
     if (sessionStatus.state === 'ACTIVE') {
-      session.pause();
+      session.pause('USER');
     } else if (sessionStatus.state === 'PAUSED') {
       session.resume();
     }
   };
 
   const handleSurrender = () => {
-    session.stop();
+    if (useGameStore.getState().player.hp <= 0) {
+      revivePlayer();
+    }
+    sessionRef.current?.stop();
+    endCombat();
     onExit();
+  };
+
+  const handleUnlockAudio = () => {
+    void sessionRef.current?.unlockAudio();
   };
 
   const handleRetry = () => {
-    session.reset();
-    // TODO: Start new fight with next monster
+    if (useGameStore.getState().player.hp <= 0) {
+      revivePlayer();
+    }
+    const template = MONSTERS[initialMonsterId] ?? MONSTERS.BURGER;
+    const freshEnemy = createMonster(template);
+    startCombat(freshEnemy);
+    sessionRef.current?.reset(freshEnemy);
   };
 
-  const handleContinue = () => {
-    session.stop();
-    onExit();
+  const handleNextFight = () => {
+    if (levelDef?.nextLevelId && onStartNextLevel) {
+      const nextLevel = getLevelById(levelDef.nextLevelId);
+      if (nextLevel) {
+        onStartNextLevel(nextLevel.id, nextLevel.recommendedExercise);
+        return;
+      }
+    }
+    handleRetry();
   };
 
-  if (!enemy) {
-    return (
-      <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
-        <p className="text-white text-xl">{translate('battle.noEnemy')}</p>
-      </div>
-    );
-  }
+  const displayEnemy = enemy ?? sessionStatus.currentEnemy;
+  const enemyId = displayEnemy?.id ?? initialMonsterId;
+  const monsterTemplate = MONSTERS[enemyId] ?? MONSTERS.BURGER;
+  const monsterName = MONSTER_NAME_KEYS[enemyId]
+    ? t(MONSTER_NAME_KEYS[enemyId])
+    : monsterTemplate.name;
 
-  const monsterTemplate = MONSTERS[enemy.id];
-  const monsterNameKey = `monster.${enemy.id}.name` as any;
+  const exerciseState = sessionStatus.exerciseState;
+  const visibility = exerciseState?.visibility ?? 'VISIBLE';
+  const phaseKey = PHASE_KEYS[exerciseState?.phase ?? 'IDLE'] ?? 'phase.IDLE';
+
+  const nextLevel = levelDef?.nextLevelId ? getLevelById(levelDef.nextLevelId) : undefined;
+  const canAdvance = sessionStatus.state === 'VICTORY' && Boolean(nextLevel && onStartNextLevel);
+
+  const attackTimerPercent = Math.round(
+    Math.max(0, Math.min(1, sessionStatus.nextAttackProgress)) * 100
+  );
+  const secondsUntilAttack = Math.max(
+    0,
+    ((1 - sessionStatus.nextAttackProgress) * sessionStatus.monsterAttackIntervalMs) / 1000
+  ).toFixed(1);
+  const isWarningActive = sessionStatus.state === 'ACTIVE' && sessionStatus.isAttackWarning;
 
   return (
-    <div className="w-full h-screen bg-gray-900 flex flex-col overflow-hidden">
+    <div className="w-full h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       {/* Header: HP Bars */}
-      <div className="bg-gray-800 p-4 border-b-2 border-gray-700">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+      <header
+        className={`bg-slate-900 border-b transition-colors px-6 py-3.5 shrink-0 ${
+          isHeroHit || isWarningActive ? 'border-red-500/80' : 'border-slate-800'
+        }`}
+      >
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
           <HPBar
-            current={player.hp}
-            max={player.maxHp}
-            label={`${translate('battle.player')} (${translate('stats.level')} ${player.level})`}
-            color="green"
+            current={effectivePlayer.hp}
+            max={effectivePlayer.maxHp}
+            label={`${t('battle.player')} · ${t('stats.level')} ${basePlayer.level}`}
+            tone="player"
           />
           <HPBar
-            current={enemy.hp}
-            max={enemy.maxHp}
-            label={translate(monsterNameKey)}
-            color="red"
+            current={displayEnemy?.hp ?? 0}
+            max={displayEnemy?.maxHp ?? monsterTemplate.maxHp}
+            label={monsterName}
+            tone="enemy"
           />
         </div>
-      </div>
+      </header>
 
-      {/* Main Content: Video + Monster */}
+      {/* Arena Split */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Video Feed (2/3 width on desktop) */}
-        <div className="flex-1 relative bg-black">
-          <video
-            ref={videoRef}
-            className="absolute inset-0 w-full h-full object-cover"
-            playsInline
-            muted
-            autoPlay
-          />
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full"
-          />
+        {/* Camera + Skeleton Canvas */}
+        <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
+          <video ref={videoRef} className="hidden" playsInline muted autoPlay />
+          <canvas ref={canvasRef} className="w-full h-full object-contain" />
 
-          {/* FPS Counter */}
-          {sessionStatus.fps && (
-            <div className="absolute top-4 left-4 bg-black bg-opacity-60 px-3 py-1 rounded text-white text-sm">
-              {sessionStatus.fps} FPS
+          {/* Top-left Exercise & FPS Info */}
+          <div className="absolute top-4 left-4 bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg text-xs text-slate-200 flex items-center gap-2">
+            <span className="font-semibold">{t(EXERCISE_NAME_KEYS[exerciseId])}</span>
+            {typeof sessionStatus.fps === 'number' && sessionStatus.fps > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-numeric text-slate-400">
+                  {sessionStatus.fps} {t('battle.fps')}
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Audio Unlock Banner (iOS / Safari autoplay policy) */}
+          {!sessionStatus.isAudioUnlocked && (
+            <button
+              onClick={handleUnlockAudio}
+              className="absolute top-4 right-4 inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs px-3.5 py-2 rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Volume2 className="w-4 h-4" />
+              <span>{t('battle.tapToEnableSound')}</span>
+            </button>
+          )}
+
+          {/* Visibility Warning Scrim */}
+          {sessionStatus.state === 'ACTIVE' && visibility !== 'VISIBLE' && (
+            <div className="absolute bottom-4 left-4 right-4 max-w-xl mx-auto bg-amber-500/95 text-slate-950 px-4 py-2.5 rounded-lg text-center text-sm font-semibold">
+              {visibility === 'NOT_VISIBLE'
+                ? t('battle.visibilityNone')
+                : t('battle.visibilityLow')}
             </div>
           )}
 
-          {/* Error Message */}
+          {/* Starting / Loading Overlay */}
+          {sessionStatus.state === 'STARTING' && (
+            <div className="absolute inset-0 bg-slate-950/85 flex items-center justify-center p-6">
+              <div className="text-center space-y-3">
+                <div className="w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-sm text-slate-200 font-medium">{t('battle.starting')}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Paused Overlay */}
+          {sessionStatus.state === 'PAUSED' && (
+            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center p-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full text-center space-y-4">
+                <h3 className="text-xl font-bold text-white">{t('battle.paused')}</h3>
+                {sessionStatus.autoPauseReason === 'LOW_VISIBILITY' && (
+                  <p className="text-xs text-amber-400">{t('battle.autoPausedVisibility')}</p>
+                )}
+                {sessionStatus.autoPauseReason === 'TAB_HIDDEN' && (
+                  <p className="text-xs text-amber-400">{t('battle.autoPausedTab')}</p>
+                )}
+                <button
+                  onClick={handlePauseToggle}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-colors"
+                >
+                  {t('battle.resume')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Overlay */}
           {sessionStatus.state === 'ERROR' && (
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-red-600 text-white px-6 py-4 rounded-lg">
-              <p className="font-bold">{translate('battle.error')}</p>
-              <p className="text-sm">{sessionStatus.errorMessage}</p>
+            <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center p-6">
+              <div className="bg-slate-900 border border-red-800 rounded-xl p-6 max-w-md w-full text-center space-y-3">
+                <h3 className="text-lg font-bold text-red-400">{t('battle.error')}</h3>
+                <p className="text-sm text-slate-300">
+                  {sessionStatus.errorMessage || t('error.unknown')}
+                </p>
+                <button
+                  onClick={handleSurrender}
+                  className="mt-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  {t('battle.exit')}
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Right Panel: Monster + Stats (1/3 width on desktop) */}
-        <div className="w-full md:w-80 bg-gray-800 p-6 flex flex-col items-center justify-center gap-6">
-          <MonsterSprite
-            sprite={monsterTemplate.sprite}
-            name={translate(monsterNameKey)}
-            isDamaged={isDamaged}
-          />
+        {/* Right Combat HUD Panel */}
+        <aside className="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 p-6 flex flex-col justify-between gap-5 shrink-0">
+          {/* Monster Sprite + Counter-attack Timer */}
+          <div className="flex flex-col items-center text-center pt-1 space-y-3">
+            {sessionStatus.bossPhase > 0 && (
+              <div className="text-xs font-semibold text-red-400">
+                {t('battle.bossEnrage')} {sessionStatus.bossPhase}
+              </div>
+            )}
 
-          {sessionStatus.exerciseState && (
-            <ExerciseStateIndicator
-              phase={sessionStatus.exerciseState.phase}
-              repCount={sessionStatus.exerciseState.repCount}
-            />
-          )}
-
-          {/* Controls */}
-          <div className="flex flex-col gap-3 w-full">
-            <button
-              onClick={handlePause}
-              className="w-full px-4 py-3 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold rounded-lg transition"
+            <motion.div
+              animate={
+                isDamaged
+                  ? { x: [-8, 8, -6, 6, 0], scale: [1, 0.94, 1] }
+                  : isWarningActive
+                    ? { scale: [1, 1.12, 1.04], rotate: [0, -5, 5, 0] }
+                    : { scale: 1, rotate: 0, x: 0 }
+              }
+              transition={
+                isDamaged
+                  ? { duration: 0.25 }
+                  : isWarningActive
+                    ? { duration: 0.45, repeat: Infinity, ease: 'easeInOut' }
+                    : { duration: 0.2 }
+              }
+              className="text-7xl select-none"
             >
-              {translate(sessionStatus.state === 'PAUSED' ? 'battle.resume' : 'battle.pause')}
+              {monsterTemplate.sprite}
+            </motion.div>
+
+            <h2 className="text-xl font-bold text-white">{monsterName}</h2>
+
+            {/* Enemy Counter-Attack Bar */}
+            <div
+              className={`w-full rounded-lg p-3 space-y-1.5 border transition-colors ${
+                isWarningActive
+                  ? 'bg-red-950/35 border-red-500/80'
+                  : 'bg-slate-950 border-slate-800'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 font-medium truncate ${
+                    isWarningActive ? 'text-red-300 font-semibold' : 'text-slate-400'
+                  }`}
+                >
+                  {isWarningActive && <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                  <span className="truncate">
+                    {isWarningActive ? t('battle.attackIncoming') : t('battle.enemyAttackTimer')}
+                  </span>
+                </span>
+                <span
+                  className={`font-numeric font-semibold shrink-0 ${
+                    isWarningActive ? 'text-red-400' : 'text-amber-400'
+                  }`}
+                >
+                  {secondsUntilAttack}s
+                </span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-[width] duration-150 ${
+                    isWarningActive ? 'bg-red-500' : 'bg-amber-500'
+                  }`}
+                  style={{ width: `${attackTimerPercent}%` }}
+                />
+              </div>
+              {isWarningActive && exerciseId === 'PLANK' && (
+                <div className="flex items-center justify-center gap-1.5 text-xs text-sky-300 font-medium pt-0.5">
+                  <Shield className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('battle.plankBlockHint')}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Damage / Block Popups */}
+            <div className="min-h-[24px] flex flex-col items-center gap-1">
+              <AnimatePresence mode="wait">
+                {sessionStatus.lastCombatEvent && (
+                  <motion.div
+                    key={sessionStatus.lastCombatEvent.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                    className={`font-numeric text-sm font-bold ${
+                      sessionStatus.lastCombatEvent.wasCritical
+                        ? 'text-amber-400'
+                        : 'text-emerald-400'
+                    }`}
+                  >
+                    -{sessionStatus.lastCombatEvent.damage} HP
+                    {sessionStatus.lastCombatEvent.wasCritical
+                      ? ` · ${t('battle.criticalHit')}`
+                      : ''}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence mode="wait">
+                {sessionStatus.lastMonsterAttackEvent && (
+                  <motion.div
+                    key={sessionStatus.lastMonsterAttackEvent.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold font-numeric ${
+                      sessionStatus.lastMonsterAttackEvent.wasBlocked
+                        ? 'text-sky-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {sessionStatus.lastMonsterAttackEvent.wasBlocked && (
+                      <Shield className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {sessionStatus.lastMonsterAttackEvent.wasBlocked
+                        ? `${t('battle.blocked')} (-${sessionStatus.lastMonsterAttackEvent.damageTaken} HP)`
+                        : `${t('battle.incomingDamage')}: -${sessionStatus.lastMonsterAttackEvent.damageTaken} HP`}
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          {/* Exercise Telemetry */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+            {exerciseDef.trackingType === 'hold' ? (
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs text-slate-400">{t('battle.holdTime')}</div>
+                  <div className="font-numeric text-3xl font-bold text-white mt-0.5">
+                    {formatHoldDuration(exerciseState?.holdDurationMs ?? 0)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-slate-400">{t('battle.phase')}</div>
+                  <div
+                    className={`text-sm font-semibold mt-1 ${
+                      exerciseState?.isHolding ? 'text-emerald-400' : 'text-amber-400'
+                    }`}
+                  >
+                    {exerciseState?.isHolding ? t('battle.holding') : t('battle.notHolding')}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs text-slate-400">{t('battle.reps')}</div>
+                  <div className="font-numeric text-4xl font-bold text-white mt-0.5">
+                    {exerciseState?.repCount ?? 0}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-slate-400">{t('battle.phase')}</div>
+                  <div className="text-sm font-semibold text-amber-400 mt-1">
+                    {t(phaseKey)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Battle Controls */}
+          <div className="flex flex-col gap-2.5">
+            <button
+              onClick={handlePauseToggle}
+              disabled={sessionStatus.state !== 'ACTIVE' && sessionStatus.state !== 'PAUSED'}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              {sessionStatus.state === 'PAUSED' ? (
+                <Play className="w-4 h-4" />
+              ) : (
+                <Pause className="w-4 h-4" />
+              )}
+              <span>
+                {sessionStatus.state === 'PAUSED' ? t('battle.resume') : t('battle.pause')}
+              </span>
             </button>
+
             <button
               onClick={handleSurrender}
-              className="w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
             >
-              {translate('battle.surrender')}
+              <LogOut className="w-4 h-4" />
+              <span>{t('battle.surrender')}</span>
             </button>
           </div>
-        </div>
+        </aside>
       </div>
 
-      {/* Battle End Overlay */}
+      {/* Victory / Defeat Modal */}
       <AnimatePresence>
         {(sessionStatus.state === 'VICTORY' || sessionStatus.state === 'DEFEAT') && (
-          <BattleEndOverlay
-            result={sessionStatus.state === 'VICTORY' ? 'victory' : 'defeat'}
-            onContinue={handleContinue}
-            onRetry={handleRetry}
-          />
+          <motion.div
+            className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-7 max-w-md w-full text-center space-y-5">
+              <div className="text-5xl" aria-hidden="true">
+                {sessionStatus.state === 'VICTORY' ? '🏆' : '💀'}
+              </div>
+
+              <div>
+                <h2 className="font-display text-3xl font-bold text-white">
+                  {t(sessionStatus.state === 'VICTORY' ? 'battle.victory' : 'battle.defeat')}
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  {t(
+                    sessionStatus.state === 'VICTORY'
+                      ? 'battle.victoryMessage'
+                      : 'battle.defeatMessage'
+                  )}
+                </p>
+                {sessionStatus.state === 'DEFEAT' && (
+                  <p className="text-xs text-amber-400 mt-2">{t('battle.hpRecoveredHint')}</p>
+                )}
+              </div>
+
+              {sessionStatus.state === 'VICTORY' && sessionStatus.victorySummary && (
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">{t('battle.xpGained')}</span>
+                    <span className="font-numeric font-semibold text-amber-400">
+                      +{sessionStatus.victorySummary.xpGained} XP
+                    </span>
+                  </div>
+
+                  {sessionStatus.victorySummary.leveledUp && (
+                    <div className="text-emerald-400 font-semibold">
+                      {t('battle.levelUp')} ({t('stats.level')} {basePlayer.level})
+                    </div>
+                  )}
+
+                  {sessionStatus.victorySummary.droppedItemId && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{t('battle.itemDropped')}</span>
+                      <span className="font-semibold text-white">
+                        {ITEM_NAME_KEYS[sessionStatus.victorySummary.droppedItemId]
+                          ? t(ITEM_NAME_KEYS[sessionStatus.victorySummary.droppedItemId])
+                          : ITEMS[sessionStatus.victorySummary.droppedItemId]?.name}
+                      </span>
+                    </div>
+                  )}
+
+                  {sessionStatus.victorySummary.unlockedLevelId && (
+                    <div className="text-sky-400 text-xs font-medium pt-1">
+                      {t('battle.levelUnlocked')}
+                    </div>
+                  )}
+
+                  {sessionStatus.victorySummary.newlyUnlockedAchievements.length > 0 && (
+                    <div className="pt-2 border-t border-slate-800 text-left space-y-1">
+                      <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+                        <Trophy className="w-3.5 h-3.5" />
+                        <span>{t('battle.achievementsUnlocked')}</span>
+                      </div>
+                      <ul className="space-y-0.5 text-xs text-slate-200">
+                        {sessionStatus.victorySummary.newlyUnlockedAchievements.map((achId) => {
+                          const key = ACHIEVEMENT_NAME_KEYS[achId as AchievementId];
+                          return <li key={achId}>· {key ? t(key) : achId}</li>;
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={canAdvance ? handleNextFight : handleRetry}
+                  className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+                >
+                  {t(canAdvance ? 'battle.nextFight' : 'battle.tryAgain')}
+                </button>
+                <button
+                  onClick={handleSurrender}
+                  className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+                >
+                  {t('battle.exit')}
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -14,5 +14,5 @@ export type { PushUpConfig } from './PushUpDetector';
 export { PlankDetector } from './PlankDetector';
 export type { PlankConfig } from './PlankDetector';
 
-// Future detectors:
-// export { JumpingJackDetector } from './JumpingJackDetector';
+export { JumpingJackDetector } from './JumpingJackDetector';
+export type { JumpingJackConfig } from './JumpingJackDetector';

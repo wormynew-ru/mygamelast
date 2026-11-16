@@ -96,254 +96,179 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 
 ### 6.1 What's Already Implemented ✅
 
-#### **Vision System (100% complete, 72 tests)**
-- ✅ `src/vision/types.ts` — Base interfaces (`ExerciseDetector`, `ExerciseState`, `PoseLandmark` enum)
-- ✅ `src/vision/angleMath.ts` — Math utilities (angles 2D/3D, EMA smoothing, hysteresis, distances) + 32 tests
-- ✅ `src/vision/PoseTracker.ts` — Camera capture, MediaPipe PoseLandmarker, skeleton rendering + 10 tests
-- ✅ `src/vision/exercises/SquatDetector.ts` — FSM-based squat detector with hysteresis + 30 tests
-- ⚠️ `src/vision/exercises/PushUpDetector.ts` — Push-up detector (side selection, 3D coords, FSM) + 9/11 tests (2 failing due to test fixture geometry)
-- ✅ `src/vision/exercises/index.ts` — Detector registry (exports SquatDetector, PushUpDetector)
+#### **Vision System (100% complete, 109 tests)**
+- ✅ `src/vision/types.ts` — Base interfaces (`ExerciseDetector` with optional `worldLandmarks`, `ExerciseState`, `PoseLandmark` enum, rep & hold support)
+- ✅ `src/vision/angleMath.ts` — Zero-allocation 2D/3D vector math utilities (angles 2D/3D, EMA smoothing, hysteresis, distances) + 32 tests
+- ✅ `src/vision/PoseTracker.ts` — Camera capture, MediaPipe PoseLandmarker (`pose_landmarker_lite`, adaptive inference throttling, GPU→CPU delegate fallback, batched 60 FPS `alpha: false` canvas skeleton rendering, `worldLandmarks` forwarding), local `/mediapipe/` loading with CDN fallback + 10 tests
+- ✅ `src/vision/exercises/SquatDetector.ts` — FSM-based squat detector with bilateral leg averaging, right-leg fallback, frame-0 EMA init, and hysteresis + 31 tests
+- ✅ `src/vision/exercises/PushUpDetector.ts` — Push-up detector (hysteresis side switching, 3D `worldLandmarks` angle support, frame-0 EMA init, FSM) + 13 tests
+- ✅ `src/vision/exercises/PlankDetector.ts` — Hold-based plank detector (`isHolding`, `holdDurationMs`, hysteresis side switching, frame-0 EMA init, 3D `worldLandmarks` support, grace period) + 17 tests
+- ✅ `src/vision/exercises/JumpingJackDetector.ts` — Rep-based jumping jack detector (bilateral arm abduction + normalized leg spread ratio, zero-allocation visibility checks) + 6 tests
+- ✅ `src/vision/exercises/index.ts` — Detector registry (exports all 4 detectors)
 
 #### **Audio System (100% complete, 10 tests)**
-- ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (NO external mp3/wav files) + 10 tests
+- ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (8 synthesized sounds incl. `WARNING` two-tone strike alert, NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
 
-#### **Game System (100% complete, 25 tests)**
-- ✅ `src/game/types.ts` — RPG interfaces
-- ✅ `src/game/CombatEngine.ts` — Damage calculation, crits, XP, leveling, boss phases + 25 tests
-- ✅ `src/game/store.ts` — Zustand store with persistence (version 1, migration support)
-- ✅ `src/game/data/` — exercises, monsters, items configs
+#### **Game System (100% complete, 35 tests)**
+- ✅ `src/game/types.ts` — RPG, WorkoutStats, Achievement, and `ExerciseCalibrationSettings` interfaces
+- ✅ `src/game/CombatEngine.ts` — Damage calculation, crits, XP, leveling, boss phases, monster counter-attacks + Plank hold blocking (`calculateMonsterCounterAttack`, `getMonsterAttackIntervalMs`, `ATTACK_WARNING_WINDOW_MS`, `isMonsterAttackWarningActive`), equipment bonuses (`getEffectivePlayerStats`), consumable healing (`useConsumableItem`), loot drops (`rollItemDrop`) + 35 tests
+- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 3`, `migrateGameState`), consumable usage, player revive, workout stats, achievements sync, persistent per-exercise angle thresholds, language hydration sync
+- ✅ `src/game/data/` — `exercises.ts` (4 exercises), `monsters.ts` (4 monsters + boss), `items.ts` (5 items), `levels.ts` (5 progressive campaign stages + drop tables), `achievements.ts` (7 data-driven achievements + pure `evaluateNewAchievements`)
 
-#### **Session Layer (100% complete, 0 tests - integration layer)**
-- ✅ `src/session/WorkoutSession.ts` — Coordinator (CV→Combat→Audio→Store glue)
+#### **Session Layer (100% complete, 10 tests)**
+- ✅ `src/session/WorkoutSession.ts` — Coordinator (CV→Exercise→Combat→Audio→Store glue), ~100ms steady-state HUD throttling with immediate discrete event emission, `worldLandmarks` forwarding, localized camera/MediaPipe error mapping, rep & 1s hold-tick damage, monster counter-attack timer, 1.5s once-per-cycle `WARNING` sound/voice telegraph & `isAttackWarning` state, Plank block defense, `DEFEAT` state, gear bonuses without mutating base stats, level unlock & loot drops, achievement syncing, Screen Wake Lock, `visibilitychange` auto-pause, 5s `LOW_VISIBILITY` auto-pause, audio unlock API, `createExerciseDetector` + `applyExerciseCalibration` + `createWorkoutSessionForBattle` + 10 tests
 
-#### **UI Layer (MVP complete, manual testing)**
-- ✅ `src/ui/MainMenu.tsx` — Start screen with player stats, animated with Framer Motion
-- ✅ `src/ui/BattleScreen.tsx` — Combat UI (HP bars, monster sprite, video feed, controls, victory/defeat overlay)
-- ✅ `src/ui/CalibrationSandbox.tsx` — Test/calibration screen
-- ✅ `src/App.tsx` — Root component with screen routing (Menu/Battle/Calibration)
+#### **Localization Layer (100% complete)**
+- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries (type-checked `TranslationKey`) including PWA, achievements, counter-attacks, and calibration sliders
+- ✅ `src/i18n/index.ts` & `src/i18n/useTranslation.ts` — Translation helpers & React hook synced with Zustand store
+
+#### **PWA & Offline Assets (100% complete)**
+- ✅ `vite.config.ts` & `src/main.tsx` — `vite-plugin-pwa` with Web App Manifest (`id: '/'`, `display: 'standalone'`), `registerSW({ immediate: true })`, `CacheFirst` Service Worker caching for `/mediapipe/`, fonts, and CDN fallbacks
+- ✅ `public/mediapipe/` — Locally bundled `pose_landmarker_lite.task` (5.6 MB) and all 6 `@mediapipe/tasks-vision` WASM/JS runtime files for offline execution
+- ✅ `public/icon.svg`, `public/pwa-192x192.png`, `public/pwa-512x512.png`, `public/pwa-maskable-512x512.png`, `public/apple-touch-icon.png` — Complete multi-platform PWA & iOS icon set
+- ✅ `src/ui/PWAInstallButton.tsx` — In-app Chromium install prompt (`beforeinstallprompt`), iOS Safari installation modal, and `OfflineIndicator`
+
+#### **UI Layer (Complete MVP+ Campaign Loop)**
+- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (effective stats + gear bonuses, workout stats), PWA install CTA, 7-badge Achievements grid, navigation to Campaign, Quick Battle, Inventory, Calibration, Settings
+- ✅ `src/ui/LevelSelectScreen.tsx` — 5-stage campaign selector (Soda → Donut → Burger → Pizza → King Burger Boss) + 4-exercise selector
+- ✅ `src/ui/InventoryScreen.tsx` — Equipment equip/unequip + consumable healing items
+- ✅ `src/ui/SettingsScreen.tsx` — RU/EN language switcher, Sound/Voice toggles, Front/Rear camera selector, in-app reset confirmation modal
+- ✅ `src/ui/BattleScreen.tsx` — Live video/canvas binding via `WorkoutSession`, rep & hold-timer HUDs, enemy counter-attack countdown bar + 1.5s wind-up telegraph (`AlertTriangle` label, red bar/border highlight, emoji wind-up shake, Plank block hint), Plank block / damage popups, boss phase alerts, visibility warnings, audio unlock button, victory loot/XP/achievements summary, and Defeat HP revive flow
+- ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 4 detectors) with persistent live angle-threshold sliders and localized camera error handling
+- ✅ `src/App.tsx` — Root screen router + global `OfflineIndicator` (no `window.alert` / `window.confirm`)
 
 ### 6.2 Test Coverage Summary
 
-**Total: 116/118 tests passing (98.3% ✅), 2 known issues**
+**Total: 164/164 tests passing across 9 test files (100% ✅)**
 
 | File | Tests | Status |
 |------|-------|--------|
 | `angleMath.test.ts` | 32 | ✅ Pass |
-| `SquatDetector.test.ts` | 30 | ✅ Pass |
-| `CombatEngine.test.ts` | 25 | ✅ Pass |
-| `PushUpDetector.test.ts` | 9/11 | ⚠️ 2 failing (test fixture geometry issue, detector works) |
+| `SquatDetector.test.ts` | 31 | ✅ Pass |
+| `PushUpDetector.test.ts` | 13 | ✅ Pass |
+| `PlankDetector.test.ts` | 17 | ✅ Pass |
+| `JumpingJackDetector.test.ts` | 6 | ✅ Pass |
 | `PoseTracker.test.ts` | 10 | ✅ Pass |
 | `SoundFX.test.ts` | 10 | ✅ Pass |
-
-**Edge cases tested:**
-- ✅ Complete full squat/push-up (all FSM phases)
-- ✅ Incomplete reps (partial depth, no rep counted)
-- ✅ Jitter at angle boundaries (no double-counting)
-- ✅ Loss of visibility (FSM pause/resume)
-- ✅ Rapid consecutive reps
-- ✅ Extreme angles (very shallow, very deep)
-- ✅ Interrupted reps (abort mid-descent)
+| `CombatEngine.test.ts` | 35 | ✅ Pass |
+| `WorkoutSession.test.ts` | 10 | ✅ Pass |
 
 ### 6.3 What's NOT Implemented Yet ❌
 
-#### **Missing Detectors:**
-- ❌ `PlankDetector.ts` — Plank hold detection (hold-based: `isHolding`, `holdDurationMs`, side selection, 3D coords)
-- ❌ `JumpingJackDetector.ts` — Jumping jack detection (rep-based)
-
-#### **Missing UI:**
-- ❌ Level selection screen (monster/exercise selection)
-- ❌ Inventory/equipment screen
-- ❌ Settings screen (language selector, audio controls)
-- ❌ "Tap to enable sound" prompt for audio unlock
-
-#### **Missing Features:**
-- ❌ Localization (`src/i18n/`) — RU/EN translations for UI strings, monster/item names
-- ❌ Equipment stat bonuses application in combat
-- ❌ Item drop system after monster defeat
-- ❌ Progression system (level unlocks, multiple monsters)
-- ❌ Boss fight phases UI (King Burger phase transitions)
-- ❌ Achievement system
-- ❌ PWA manifest & service worker with offline MediaPipe caching
-- ❌ Hold-based exercise support in combat system (damage ticks per second)
-
-#### **Missing Performance Features:**
-- ❌ Adaptive FPS throttling for MediaPipe inference (24-30 FPS, skip frames on slow devices)
-- ❌ `lite` model variant selection for mobile devices
-- ❌ Screen Wake Lock API integration (`navigator.wakeLock`)
-- ❌ Auto-pause on visibility loss (`visibilitychange` event, camera release)
-- ❌ Auto-pause combat when `LOW_VISIBILITY` > 5 seconds
-- ❌ Local MediaPipe model hosting in `public/mediapipe/` or Service Worker caching
-
-#### **Missing UI:**
-- ❌ Main menu screen
-- ❌ Battle screen (combat UI with monster sprites)
-- ❌ Level selection screen
-- ❌ Inventory/equipment screen
-- ❌ Settings screen (including language selector)
-- ❌ "Tap to enable sound" prompt for audio unlock
-
-#### **Missing Features:**
-- ❌ Progression system (level unlocks, XP curve)
-- ❌ Save/load game state with migration support
-- ❌ Boss fight phases
-- ❌ Achievement system
-- ❌ PWA manifest & service worker with offline MediaPipe caching
-- ❌ Hold-based exercise support in combat system (damage ticks per second)
+#### **Future Polish / Optional Enhancements:**
+- ⏳ Automated E2E synthetic webcam stream tests (real-time MediaPipe pose injection in Playwright CI)
 
 ### 6.4 File Structure Snapshot
 
 ```
+public/
+├── apple-touch-icon.png             ✅ 180x180 iOS home screen icon
+├── icon.svg                         ✅ Brand vector icon
+├── pwa-192x192.png                  ✅ 192x192 manifest icon
+├── pwa-512x512.png                  ✅ 512x512 manifest icon
+├── pwa-maskable-512x512.png         ✅ 512x512 padded maskable icon
+└── mediapipe/
+    ├── pose_landmarker_lite.task    ✅ Local MediaPipe pose model
+    └── wasm/                        ✅ 6 local WASM/JS runtime files
+
 src/
-├── vision/                          ✅ Complete (72 tests)
+├── vision/                          ✅ Complete (109 tests)
 │   ├── types.ts                    ✅ Interfaces (ExerciseDetector, rep/hold types)
 │   ├── angleMath.ts                ✅ Math utils (32 tests)
 │   ├── angleMath.test.ts           ✅
-│   ├── PoseTracker.ts              ✅ Camera + MediaPipe (10 tests)
+│   ├── PoseTracker.ts              ✅ Camera + local MediaPipe + CDN fallback (10 tests)
 │   ├── PoseTracker.test.ts         ✅
 │   └── exercises/
-│       ├── index.ts                ✅ Registry
-│       ├── SquatDetector.ts        ✅ FSM detector, rep-based (30 tests)
-│       └── SquatDetector.test.ts   ✅
+│       ├── index.ts                ✅ Registry (4 detectors)
+│       ├── SquatDetector.ts / .test.ts       ✅ (31 tests)
+│       ├── PushUpDetector.ts / .test.ts      ✅ (13 tests)
+│       ├── PlankDetector.ts / .test.ts       ✅ (17 tests)
+│       └── JumpingJackDetector.ts / .test.ts ✅ (6 tests)
 │
-├── session/                         ✅ Complete (0 tests - integration layer)
-│   └── WorkoutSession.ts           ✅ Coordinator (CV->Combat->Audio->Store glue)
+├── session/                         ✅ Complete (10 tests)
+│   ├── WorkoutSession.ts           ✅ Coordinator, throttled HUD, counter-attacks, attack warning, calibration, battle factory
+│   └── WorkoutSession.test.ts      ✅
 │
-├── game/                            ✅ Complete (25 tests)
-│   ├── types.ts                    ✅ RPG interfaces
-│   ├── CombatEngine.ts             ✅ Damage, crits, XP, boss phases (25 tests)
-│   ├── store.ts                    ✅ Zustand with persistence (version+migrate)
+├── game/                            ✅ Complete (35 tests)
+│   ├── types.ts                    ✅ RPG, WorkoutStats, Calibration & Achievement interfaces
+│   ├── CombatEngine.ts / .test.ts  ✅ Combat, counter-attacks, warning window, gear, consumables, drops (35 tests)
+│   ├── store.ts                    ✅ Zustand v3 persist + Map serializer
 │   └── data/
-│       ├── exercises.ts            ✅ 4 exercises
+│       ├── exercises.ts            ✅ 4 exercises (rep/hold)
 │       ├── monsters.ts             ✅ 4 monsters + boss
-│       └── items.ts                ✅ 5 items
+│       ├── items.ts                ✅ 5 items
+│       ├── levels.ts               ✅ 5 campaign stages + drop tables
+│       └── achievements.ts         ✅ 7 achievements + pure evaluator
 │
 ├── audio/                           ✅ Complete (10 tests)
-│   ├── SoundFX.ts                  ✅ 7 synthesized sounds
+│   ├── SoundFX.ts                  ✅ 8 synthesized sounds (incl. WARNING) + unlock check + speak()
 │   └── SoundFX.test.ts             ✅
 │
-├── i18n/                            ❌ NOT IMPLEMENTED
-│   ├── ru.ts                       ❌ Russian translations
-│   └── en.ts                       ❌ English translations
+├── i18n/                            ✅ Complete
+│   ├── index.ts                    ✅ Helpers & language list
+│   ├── useTranslation.ts           ✅ React hook synced with store
+│   ├── ru.ts                       ✅ Primary Russian translations
+│   └── en.ts                       ✅ Secondary English translations
 │
-└── ui/                              ⚠️ Only calibration screen
-    ├── CalibrationSandbox.tsx      ✅ Test/debug UI
-    └── App.tsx                     ✅ Root (loads sandbox)
+└── ui/                              ✅ Complete RPG & PWA UI Flow
+    ├── MainMenu.tsx                ✅ Hero profile, achievements grid, PWA CTA & hub
+    ├── LevelSelectScreen.tsx       ✅ Campaign & exercise selector
+    ├── InventoryScreen.tsx         ✅ Equipment & consumables
+    ├── SettingsScreen.tsx          ✅ Language, audio, camera, reset modal
+    ├── BattleScreen.tsx            ✅ Live CV arena + enemy counter-attack HUD
+    ├── CalibrationSandbox.tsx      ✅ Multi-exercise calibration + angle threshold sliders
+    └── PWAInstallButton.tsx        ✅ Chromium/iOS install prompt + OfflineIndicator
 ```
 
 ### 6.5 Build Status
 
 ```bash
 ✅ npm run typecheck  — Strict TypeScript, 0 errors
-⚠️ npm test           — 116/118 tests passing (98.3%, 2 PushUpDetector tests failing)
-✅ npm run build      — 429KB production bundle (136KB gzipped)
+✅ npm run lint       — ESLint strict boundaries & no-any, 0 errors / 0 warnings
+✅ npm test           — 164/164 tests passing (9/9 files)
+✅ npm run build      — Clean Vite production build + PWA manifest & Service Worker
 ```
-
-**Production-ready:** ✅ Yes (2 failing tests are test fixture issues, detectors work in production)
 
 ### 6.6 Architecture Compliance
 
-**Separation of Concerns (fully enforced):**
-- ✅ `src/vision/` — ZERO React/Zustand imports
-- ✅ `src/game/` — ZERO React/DOM imports (data only so far)
+**Separation of Concerns (fully enforced via ESLint):**
+- ✅ `src/vision/` — ZERO React/Zustand/`src/game/` imports
+- ✅ `src/game/` — ZERO React/DOM/`src/vision/` imports
 - ✅ `src/audio/` — ZERO React/Zustand imports
-- ✅ `src/ui/` — Subscribes to callbacks, no CV/game logic
-
-**Performance:**
-- ✅ 60 FPS camera loop via `requestAnimationFrame`
-- ✅ Canvas rendering bypasses React (direct `ctx` draw)
-- ✅ State updates only on rep changes, not per frame
+- ✅ `src/session/` — ZERO React imports
+- ✅ `src/ui/` — Subscribes to `WorkoutSession` and `store.ts`; BattleScreen has ZERO direct `PoseTracker`/`CombatEngine`/`SoundFX` imports
 
 ### 6.7 Quick Start for New Sessions
 
-**To run the calibration screen:**
 ```bash
 npm run dev
-# Open http://localhost:5173
-# Allow camera access
-# Start squatting to test detection
+# Opens on http://0.0.0.0:3000
 ```
 
 **⚠️ Mobile testing over local network:**
-- Browser security requires **HTTPS** for `getUserMedia()` over network
-- Use tunneling (ngrok, cloudflared) OR generate local SSL certificate
-- Plain HTTP works ONLY on `localhost` — blocked on `192.168.x.x`
-
-**To add a new exercise detector:**
-1. Create `src/vision/exercises/NewExerciseDetector.ts`
-2. Implement `ExerciseDetector` interface (reset, update, configure, getState, getConfig)
-3. Declare exercise type: `rep-based` (FSM with repCount) OR `hold-based` (isHolding + holdDurationMs)
-4. Add FSM with hysteresis for angle/distance thresholds
-5. Export from `src/vision/exercises/index.ts`
-6. Create `NewExerciseDetector.test.ts` with synthetic pose sequences
-7. Add to `src/game/data/exercises.ts` config
-
-**To implement WorkoutSession coordinator:**
-1. Create `src/session/WorkoutSession.ts`
-2. Orchestrate: `PoseTracker` -> `ExerciseDetector` -> `CombatEngine` -> `store` -> `SoundFX`
-3. Expose API: `start()`, `pause()`, `resume()`, `reset()`, `onStateChange(callback)`
-4. Handle both rep-based (damage per rep) and hold-based (damage per second) exercises
-5. Create unit tests with mocked dependencies
-
-**To implement combat system + store:**
-1. Create `src/game/CombatEngine.ts` with damage formulas (handle rep and hold damage separately)
-2. Create `src/game/store.ts` (Zustand) with `persist` middleware
-   - MUST include `version: 1` field
-   - MUST include `migrate: (persistedState, version) => {}` function for future upgrades
-3. Connect via `WorkoutSession`, not directly in UI
-4. Build battle UI in `src/ui/BattleScreen.tsx` (subscribe to store only)
-
-**To implement localization:**
-1. Create `src/i18n/ru.ts` and `src/i18n/en.ts` with translation objects
-2. Create `src/i18n/index.ts` with `t(key, lang)` helper function
-3. Externalize ALL user-facing strings from components (button labels, hints, monster/item names)
-4. Add language selector in settings
-5. Store selected language in Zustand store (persisted)
+- Browser security requires **HTTPS** for `getUserMedia()` over network (localhost/preview HTTPS works directly).
 
 ### 6.8 Known Limitations
 
-**Vision System:**
-- Only `SquatDetector` and `PushUpDetector` implemented (plank, jumping jacks need detectors)
-- `PushUpDetector` has 2 failing tests due to synthetic pose geometry (detector works in production)
-- No hold-based detectors yet (plank needs `isHolding` + `holdDurationMs`)
-- No adaptive FPS throttling — inference runs at 60 FPS (can overheat mobile devices)
-- No `lite` model variant for mobile — always uses `full` model
-- No Screen Wake Lock API — screen dims during long holds on mobile
-- No auto-pause on visibility loss or prolonged `LOW_VISIBILITY`
-- MediaPipe loads from CDN only — no local hosting or Service Worker caching for offline PWA
-
-**Core Systems:**
-- No localization layer — UI strings are hardcoded in English (RU/EN files not created)
-- No equipment stat bonuses in combat yet
-- No item drop system after victory
-- Only one monster available (Burger) — no level selection
-
-**Audio:**
-- `SoundFX.init()` called automatically without user gesture — may fail silently on iOS Safari due to autoplay policy
-- No "Tap to enable sound" prompt fallback
-
-**UI:**
-- CalibrationSandbox, MainMenu, BattleScreen only
-- No level selection, inventory, or settings screens
-- No PWA features (manifest, service worker, offline mode)
+- `CalibrationSandbox` and `BattleScreen` require browser camera permission (`getUserMedia`); devices without a webcam show a localized fallback notice.
+- Web Audio autoplay policies on mobile Safari/Chrome require a tap gesture to unlock audio; handled in `BattleScreen` via the "Tap to enable sound" prompt.
 
 ---
 
 ### 6.9 Session History & Timestamps
 
-**Latest update:** 2026-11-15 18:02 UTC (21:02 МСК)
+**Latest update:** 2026-11-15 22:53 UTC
 
 **Recent work:**
-- ✅ 2026-11-15: Implemented CombatEngine + store with persistence (25 tests)
-- ✅ 2026-11-15: Created WorkoutSession coordinator layer
-- ✅ 2026-11-15: Built BattleScreen + MainMenu UI with Framer Motion
-- ✅ 2026-11-15: Implemented PushUpDetector (side selection, 3D coords, 9/11 tests)
-- ✅ 2026-11-15: Added tsconfig.app.json to exclude tests from production build
+- ✅ 2026-11-15: Optimized pose recognition and game runtime (`PoseTracker` batched skeleton canvas rendering, adaptive inference throttling, GPU→CPU delegate fallback, `worldLandmarks` 3D pipeline; `SquatDetector` bilateral averaging & right-leg fallback; `PushUpDetector`/`PlankDetector` hysteresis side-switching, 3D world coords, & frame-0 EMA init; zero-alloc `angle3D` & `JumpingJackDetector`; `WorkoutSession` ~100ms HUD throttling + localized camera error mapping; `BattleScreen` memoized `HPBar` & `effectivePlayer` + timer cleanup; `CalibrationSandbox` throttled UI updates & 3D `worldLandmarks` forwarding; 164/164 tests + Chromium verification)
+- ✅ 2026-11-15: Implemented 1.5s enemy/boss attack wind-up telegraph (`ATTACK_WARNING_WINDOW_MS`, `isMonsterAttackWarningActive`, `SoundFX` `'WARNING'` two-tone chime + optional localized voice cue, once-per-cycle `WorkoutSession` trigger, `BattleScreen` warning HUD + emoji wind-up shake + Plank block hint)
+- ✅ 2026-11-15: Integrated PWA (`vite-plugin-pwa`, manifest, Service Worker `CacheFirst`, PNG/SVG icons, `PWAInstallButton`, `OfflineIndicator`) and bundled local MediaPipe WASM + `pose_landmarker_lite.task` in `public/mediapipe/` with CDN fallback
+- ✅ 2026-11-15: Implemented Monster/Boss counter-attack timer (`calculateMonsterCounterAttack`, `getMonsterAttackIntervalMs`), Plank hold blocking, `DEFEAT` flow with HP revive, and live counter-attack HUD in `BattleScreen`
+- ✅ 2026-11-15: Added 7 data-driven achievements (`src/game/data/achievements.ts`, MainMenu progress grid, Victory summary unlocks) and persistent per-exercise calibration angle sliders in `CalibrationSandbox`
+- ✅ 2026-11-15: Verified `typecheck`, `lint`, `vitest` (164/164), `vite build`, and live browser inspection across desktop and mobile viewports
 
 **Next session priorities:**
-1. PlankDetector.ts (hold-based exercise — new type)
-2. Localization (RU/EN translations)
-3. Level selection screen
-4. Fix PushUpDetector test fixtures (low priority, detector works)
+1. Consider E2E Playwright mock-stream harness for automated CV battle regression testing
 
 ---
 

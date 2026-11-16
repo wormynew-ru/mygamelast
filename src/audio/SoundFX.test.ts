@@ -62,6 +62,7 @@ describe('SoundFX', () => {
         soundFX.play('POWER_UP');
         soundFX.play('COMBO');
         soundFX.play('DAMAGE');
+        soundFX.play('WARNING');
         soundFX.play('VICTORY');
       }).not.toThrow();
     });

@@ -1,5 +1,5 @@
 /**
- * Tests for PushUpDetector - simplified with manual pose coordinates.
+ * Tests for PushUpDetector - verified 3D push-up pose coordinates.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -22,64 +22,83 @@ function createTestLandmarks(overrides: Partial<Record<number, Partial<Normalize
   return landmarks;
 }
 
+function feedFrames(
+  detector: PushUpDetector,
+  pose: NormalizedLandmark[],
+  count: number,
+  startTimestamp: number,
+  stepMs = 33
+): { state: ReturnType<PushUpDetector['getState']>; nextTimestamp: number } {
+  let state = detector.getState();
+  let ts = startTimestamp;
+  for (let i = 0; i < count; i++) {
+    state = detector.update(pose, ts);
+    ts += stepMs;
+  }
+  return { state, nextTimestamp: ts };
+}
+
 /**
- * Pre-calculated push-up poses with verified angles.
+ * Pre-calculated push-up poses with verified 3D angles:
+ * - Shoulder at (0.3, 0.4, 0), Hip at (0.5, 0.4, 0), Ankle at (0.7, 0.4, 0) => 180° straight body
+ * - Elbow below shoulder at (0.3, 0.55, 0)
+ * - Wrist positioned to produce exact elbow angles:
+ *   - extended: ~180°
+ *   - midDown: ~127°
+ *   - partial: ~110°
+ *   - bottom: ~79°
  */
 const PUSH_UP_POSES = {
-  // Extended arms (~160°)
   extended: createTestLandmarks({
     [PoseLandmark.LEFT_SHOULDER]: { x: 0.3, y: 0.4, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ELBOW]: { x: 0.4, y: 0.5, z: 0.1, visibility: 0.95 },
-    [PoseLandmark.LEFT_WRIST]: { x: 0.55, y: 0.52, z: 0.15, visibility: 0.95 },
-    [PoseLandmark.LEFT_HIP]: { x: 0.25, y: 0.6, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ANKLE]: { x: 0.2, y: 0.8, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ELBOW]: { x: 0.3, y: 0.55, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_WRIST]: { x: 0.3, y: 0.70, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_HIP]: { x: 0.5, y: 0.4, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ANKLE]: { x: 0.7, y: 0.4, z: 0, visibility: 0.95 },
     [PoseLandmark.RIGHT_SHOULDER]: { x: 0.3, y: 0.4, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ELBOW]: { x: 0.4, y: 0.5, z: -0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_WRIST]: { x: 0.55, y: 0.52, z: 0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_HIP]: { x: 0.25, y: 0.6, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ANKLE]: { x: 0.2, y: 0.8, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ELBOW]: { x: 0.3, y: 0.55, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_WRIST]: { x: 0.3, y: 0.70, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_HIP]: { x: 0.5, y: 0.4, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ANKLE]: { x: 0.7, y: 0.4, z: -0.1, visibility: 0.3 },
   }),
 
-  // Mid-descent (~120°)
   midDown: createTestLandmarks({
     [PoseLandmark.LEFT_SHOULDER]: { x: 0.3, y: 0.4, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ELBOW]: { x: 0.4, y: 0.5, z: 0.1, visibility: 0.95 },
-    [PoseLandmark.LEFT_WRIST]: { x: 0.48, y: 0.55, z: 0.18, visibility: 0.95 },
-    [PoseLandmark.LEFT_HIP]: { x: 0.25, y: 0.6, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ANKLE]: { x: 0.2, y: 0.8, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ELBOW]: { x: 0.3, y: 0.55, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_WRIST]: { x: 0.42, y: 0.64, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_HIP]: { x: 0.5, y: 0.4, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ANKLE]: { x: 0.7, y: 0.4, z: 0, visibility: 0.95 },
     [PoseLandmark.RIGHT_SHOULDER]: { x: 0.3, y: 0.4, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ELBOW]: { x: 0.4, y: 0.5, z: -0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_WRIST]: { x: 0.48, y: 0.55, z: 0.08, visibility: 0.3 },
-    [PoseLandmark.RIGHT_HIP]: { x: 0.25, y: 0.6, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ANKLE]: { x: 0.2, y: 0.8, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ELBOW]: { x: 0.3, y: 0.55, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_WRIST]: { x: 0.42, y: 0.64, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_HIP]: { x: 0.5, y: 0.4, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ANKLE]: { x: 0.7, y: 0.4, z: -0.1, visibility: 0.3 },
   }),
 
-  // Bottom position (~90°)
   bottom: createTestLandmarks({
     [PoseLandmark.LEFT_SHOULDER]: { x: 0.3, y: 0.4, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ELBOW]: { x: 0.4, y: 0.5, z: 0.1, visibility: 0.95 },
-    [PoseLandmark.LEFT_WRIST]: { x: 0.4, y: 0.65, z: 0.1, visibility: 0.95 },
-    [PoseLandmark.LEFT_HIP]: { x: 0.25, y: 0.6, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ANKLE]: { x: 0.2, y: 0.8, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ELBOW]: { x: 0.3, y: 0.55, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_WRIST]: { x: 0.45, y: 0.52, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_HIP]: { x: 0.5, y: 0.4, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ANKLE]: { x: 0.7, y: 0.4, z: 0, visibility: 0.95 },
     [PoseLandmark.RIGHT_SHOULDER]: { x: 0.3, y: 0.4, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ELBOW]: { x: 0.4, y: 0.5, z: -0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_WRIST]: { x: 0.4, y: 0.65, z: 0, visibility: 0.3 },
-    [PoseLandmark.RIGHT_HIP]: { x: 0.25, y: 0.6, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ANKLE]: { x: 0.2, y: 0.8, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ELBOW]: { x: 0.3, y: 0.55, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_WRIST]: { x: 0.45, y: 0.52, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_HIP]: { x: 0.5, y: 0.4, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ANKLE]: { x: 0.7, y: 0.4, z: -0.1, visibility: 0.3 },
   }),
 
-  // Partial depth (~110°, not deep enough)
   partial: createTestLandmarks({
     [PoseLandmark.LEFT_SHOULDER]: { x: 0.3, y: 0.4, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ELBOW]: { x: 0.4, y: 0.5, z: 0.1, visibility: 0.95 },
-    [PoseLandmark.LEFT_WRIST]: { x: 0.45, y: 0.58, z: 0.15, visibility: 0.95 },
-    [PoseLandmark.LEFT_HIP]: { x: 0.25, y: 0.6, z: 0, visibility: 0.95 },
-    [PoseLandmark.LEFT_ANKLE]: { x: 0.2, y: 0.8, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ELBOW]: { x: 0.3, y: 0.55, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_WRIST]: { x: 0.44, y: 0.60, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_HIP]: { x: 0.5, y: 0.4, z: 0, visibility: 0.95 },
+    [PoseLandmark.LEFT_ANKLE]: { x: 0.7, y: 0.4, z: 0, visibility: 0.95 },
     [PoseLandmark.RIGHT_SHOULDER]: { x: 0.3, y: 0.4, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ELBOW]: { x: 0.4, y: 0.5, z: -0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_WRIST]: { x: 0.45, y: 0.58, z: 0.05, visibility: 0.3 },
-    [PoseLandmark.RIGHT_HIP]: { x: 0.25, y: 0.6, z: -0.1, visibility: 0.3 },
-    [PoseLandmark.RIGHT_ANKLE]: { x: 0.2, y: 0.8, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ELBOW]: { x: 0.3, y: 0.55, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_WRIST]: { x: 0.44, y: 0.60, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_HIP]: { x: 0.5, y: 0.4, z: -0.1, visibility: 0.3 },
+    [PoseLandmark.RIGHT_ANKLE]: { x: 0.7, y: 0.4, z: -0.1, visibility: 0.3 },
   }),
 };
 
@@ -134,35 +153,37 @@ describe('PushUpDetector', () => {
 
   describe('full push-up rep', () => {
     it('should count rep after full cycle', () => {
-      detector.update(PUSH_UP_POSES.extended, 0);
+      let ts = 0;
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.extended, 3, ts));
       expect(detector.getState().repCount).toBe(0);
 
-      detector.update(PUSH_UP_POSES.midDown, 100);
-      detector.update(PUSH_UP_POSES.bottom, 200);
-      detector.update(PUSH_UP_POSES.midDown, 300);
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.bottom, 8, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts));
+      const { state } = feedFrames(detector, PUSH_UP_POSES.extended, 8, ts);
 
-      const state = detector.update(PUSH_UP_POSES.extended, 400);
       expect(state.repCount).toBe(1);
     });
   });
 
   describe('incomplete reps', () => {
     it('should not count rep if bottom depth not reached', () => {
-      detector.update(PUSH_UP_POSES.extended, 0);
-      detector.update(PUSH_UP_POSES.midDown, 100);
-      detector.update(PUSH_UP_POSES.partial, 200); // Not deep enough
-      detector.update(PUSH_UP_POSES.midDown, 300);
-      const state = detector.update(PUSH_UP_POSES.extended, 400);
+      let ts = 0;
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.extended, 3, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.partial, 8, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts));
+      const { state } = feedFrames(detector, PUSH_UP_POSES.extended, 8, ts);
 
       expect(state.repCount).toBe(0);
     });
 
     it('should not count rep if not returning to start position', () => {
-      detector.update(PUSH_UP_POSES.extended, 0);
-      detector.update(PUSH_UP_POSES.midDown, 100);
-      detector.update(PUSH_UP_POSES.bottom, 200);
-      detector.update(PUSH_UP_POSES.midDown, 300);
-      const state = detector.update(PUSH_UP_POSES.midDown, 400); // Not fully up
+      let ts = 0;
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.extended, 3, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.bottom, 8, ts));
+      const { state } = feedFrames(detector, PUSH_UP_POSES.midDown, 5, ts);
 
       expect(state.repCount).toBe(0);
     });
@@ -188,22 +209,14 @@ describe('PushUpDetector', () => {
 
   describe('rapid consecutive reps', () => {
     it('should count multiple reps', () => {
-      const sequence = [
-        PUSH_UP_POSES.extended,
-        PUSH_UP_POSES.midDown,
-        PUSH_UP_POSES.bottom,
-        PUSH_UP_POSES.midDown,
-        PUSH_UP_POSES.extended,
-        PUSH_UP_POSES.midDown,
-        PUSH_UP_POSES.bottom,
-        PUSH_UP_POSES.midDown,
-        PUSH_UP_POSES.extended,
-      ];
-
-      let state = detector.getState();
-      for (let i = 0; i < sequence.length; i++) {
-        state = detector.update(sequence[i], i * 100);
+      let ts = 0;
+      for (let rep = 0; rep < 2; rep++) {
+        ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.extended, 8, ts));
+        ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 4, ts));
+        ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.bottom, 8, ts));
+        ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.midDown, 4, ts));
       }
+      const { state } = feedFrames(detector, PUSH_UP_POSES.extended, 8, ts);
 
       expect(state.repCount).toBeGreaterThanOrEqual(2);
     });
@@ -211,9 +224,10 @@ describe('PushUpDetector', () => {
 
   describe('reset', () => {
     it('should reset rep count and phase', () => {
-      detector.update(PUSH_UP_POSES.extended, 0);
-      detector.update(PUSH_UP_POSES.bottom, 100);
-      detector.update(PUSH_UP_POSES.extended, 200);
+      let ts = 0;
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.extended, 3, ts));
+      ({ nextTimestamp: ts } = feedFrames(detector, PUSH_UP_POSES.bottom, 8, ts));
+      feedFrames(detector, PUSH_UP_POSES.extended, 8, ts);
 
       detector.reset();
       const state = detector.getState();
@@ -228,6 +242,41 @@ describe('PushUpDetector', () => {
 
       const config = detector.getConfig();
       expect(config.bottomAngleThreshold).toBe(85);
+    });
+  });
+
+  describe('worldLandmarks & dynamic side switching', () => {
+    it('switches selected side when the opposite side becomes clearly more visible', () => {
+      detector.update(PUSH_UP_POSES.extended, 0);
+      expect(detector.getState().debug?.selectedSide).toBe('left');
+
+      const rightDominant = createTestLandmarks({
+        [PoseLandmark.RIGHT_SHOULDER]: { x: 0.3, y: 0.4, z: 0, visibility: 0.95 },
+        [PoseLandmark.RIGHT_ELBOW]: { x: 0.3, y: 0.55, z: 0, visibility: 0.95 },
+        [PoseLandmark.RIGHT_WRIST]: { x: 0.3, y: 0.70, z: 0, visibility: 0.95 },
+        [PoseLandmark.RIGHT_HIP]: { x: 0.5, y: 0.4, z: 0, visibility: 0.95 },
+        [PoseLandmark.RIGHT_ANKLE]: { x: 0.7, y: 0.4, z: 0, visibility: 0.95 },
+        [PoseLandmark.LEFT_SHOULDER]: { x: 0.3, y: 0.4, z: -0.1, visibility: 0.25 },
+        [PoseLandmark.LEFT_ELBOW]: { x: 0.3, y: 0.55, z: -0.1, visibility: 0.25 },
+        [PoseLandmark.LEFT_WRIST]: { x: 0.3, y: 0.70, z: -0.1, visibility: 0.25 },
+        [PoseLandmark.LEFT_HIP]: { x: 0.5, y: 0.4, z: -0.1, visibility: 0.25 },
+        [PoseLandmark.LEFT_ANKLE]: { x: 0.7, y: 0.4, z: -0.1, visibility: 0.25 },
+      });
+
+      detector.update(rightDominant, 33);
+      expect(detector.getState().debug?.selectedSide).toBe('right');
+    });
+
+    it('prefers optional 3D worldLandmarks for angle computation when supplied', () => {
+      // Visibility stays on 2D landmarks (extended pose), while 3D worldLandmarks encode bottom pose (~79 deg)
+      const worldBottom = PUSH_UP_POSES.bottom.map((lm) => ({
+        x: lm.x,
+        y: lm.y,
+        z: lm.z ?? 0,
+        visibility: lm.visibility ?? 1,
+      }));
+      const state = detector.update(PUSH_UP_POSES.extended, 0, worldBottom);
+      expect(state.debug?.elbowAngle).toBeLessThan(95);
     });
   });
 });

@@ -103,6 +103,19 @@ export interface Level {
   };
 }
 
+export interface WorkoutStats {
+  totalReps: number;
+  totalHoldSeconds: number;
+  monstersDefeated: number;
+}
+
+export interface ExerciseCalibrationSettings {
+  squatBottomAngle: number;
+  pushupBottomAngle: number;
+  plankMinBodyAngle: number;
+  jumpingJackPeakArmAngle: number;
+}
+
 /**
  * Persistent game state (saved/loaded via Zustand).
  */
@@ -112,9 +125,13 @@ export interface GameState {
   currentLevel: string | null;
   unlockedLevels: string[];
   completedLevels: string[];
+  unlockedAchievements: string[];
 
   /** Combat state (null when not in battle) */
   currentEnemy: MonsterStats | null;
+
+  /** Aggregate workout statistics */
+  workoutStats: WorkoutStats;
 
   /** Settings and calibration */
   settings: {
@@ -122,6 +139,7 @@ export interface GameState {
     voiceEnabled: boolean;
     cameraFacingMode: 'user' | 'environment';
     exerciseConfigs: Record<string, unknown>; // exerciseId -> ExerciseConfig
+    exerciseCalibration: ExerciseCalibrationSettings;
     language: 'ru' | 'en'; // UI language
   };
 }

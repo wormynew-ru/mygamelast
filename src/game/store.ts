@@ -1,17 +1,30 @@
 /**
  * Zustand store for game state with persistence.
- * Handles player stats, inventory, combat state, settings.
+ * Handles player stats, inventory, achievements, calibration, workout stats, settings.
  */
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { GameState, PlayerStats, MonsterStats, Inventory } from './types';
-import { createPlayer } from './CombatEngine';
+import type {
+  GameState,
+  PlayerStats,
+  MonsterStats,
+  Inventory,
+  WorkoutStats,
+  ExerciseCalibrationSettings,
+} from './types';
+import { createPlayer, getEffectivePlayerStats, useConsumableItem } from './CombatEngine';
+import { ITEMS } from './data/items';
+import { evaluateNewAchievements } from './data/achievements';
 import { setCurrentLanguage, type Language } from '../i18n';
 
-/**
- * Initial inventory state.
- */
+export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
+  squatBottomAngle: 90,
+  pushupBottomAngle: 90,
+  plankMinBodyAngle: 160,
+  jumpingJackPeakArmAngle: 135,
+};
+
 function createInitialInventory(): Inventory {
   return {
     items: new Map(),
@@ -19,131 +32,170 @@ function createInitialInventory(): Inventory {
   };
 }
 
-/**
- * Initial game state.
- */
+function createInitialWorkoutStats(): WorkoutStats {
+  return {
+    totalReps: 0,
+    totalHoldSeconds: 0,
+    monstersDefeated: 0,
+  };
+}
+
 function createInitialState(): GameState {
   return {
     player: createPlayer(),
     inventory: createInitialInventory(),
     currentLevel: null,
-    unlockedLevels: ['LEVEL_1'], // First level unlocked by default
+    unlockedLevels: ['LEVEL_1'],
     completedLevels: [],
+    unlockedAchievements: [],
     currentEnemy: null,
+    workoutStats: createInitialWorkoutStats(),
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
       cameraFacingMode: 'user',
       exerciseConfigs: {},
-      language: 'ru', // Default: Russian
+      exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
+      language: 'ru',
     },
   };
 }
 
-/**
- * Game store interface with actions.
- */
 interface GameStore extends GameState {
-  // Player actions
   updatePlayer: (player: Partial<PlayerStats>) => void;
+  revivePlayer: () => void;
   resetPlayer: () => void;
 
-  // Combat actions
   startCombat: (enemy: MonsterStats) => void;
   updateEnemy: (enemy: MonsterStats) => void;
   endCombat: () => void;
 
-  // Inventory actions
   addItem: (itemId: string, quantity?: number) => void;
   removeItem: (itemId: string, quantity?: number) => void;
   equipItem: (itemId: string) => void;
   unequipItem: (itemId: string) => void;
+  useConsumable: (itemId: string) => boolean;
 
-  // Level progression actions
   unlockLevel: (levelId: string) => void;
   completeLevel: (levelId: string) => void;
   setCurrentLevel: (levelId: string | null) => void;
 
-  // Settings actions
+  recordWorkoutProgress: (delta: {
+    reps?: number;
+    holdSeconds?: number;
+    monstersDefeated?: number;
+  }) => void;
+  syncAchievements: () => string[];
+
   updateSettings: (settings: Partial<GameState['settings']>) => void;
+  updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
+  resetExerciseCalibration: () => void;
   setLanguage: (language: Language) => void;
 
-  // Reset everything
   resetGame: () => void;
 }
 
-/**
- * Migration function for save format upgrades.
- * Called when persisted version doesn't match current version.
- */
-function migrateGameState(persistedState: unknown, version: number): GameState {
-  // Version 1: initial version, no migration needed
-  if (version === 0 || version === 1) {
-    // Ensure all required fields exist
-    const state = persistedState as Partial<GameState>;
+interface SerializedMap {
+  __type: 'Map';
+  entries: [string, number][];
+}
 
-    // Convert items from object/array to Map if needed
+function isSerializedMap(value: unknown): value is SerializedMap {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Partial<SerializedMap>).__type === 'Map' &&
+    Array.isArray((value as Partial<SerializedMap>).entries)
+  );
+}
+
+function migrateGameState(persistedState: unknown, version: number): GameState {
+  if (version === 0 || version === 1 || version === 2 || version === 3) {
+    const state = (persistedState ?? {}) as Partial<GameState>;
+
     let itemsMap = new Map<string, number>();
     if (state.inventory?.items) {
       const items = state.inventory.items as unknown;
       if (items instanceof Map) {
         itemsMap = items;
+      } else if (isSerializedMap(items)) {
+        itemsMap = new Map(items.entries);
       } else if (typeof items === 'object' && items !== null) {
-        itemsMap = new Map(Object.entries(items as Record<string, number>));
+        itemsMap = new Map(
+          Object.entries(items as Record<string, number>).filter(
+            ([, qty]) => typeof qty === 'number'
+          )
+        );
       }
     }
 
+    const base = createInitialState();
+
     return {
-      ...createInitialState(),
+      ...base,
       ...state,
+      player: {
+        ...base.player,
+        ...(state.player ?? {}),
+      },
       inventory: {
         items: itemsMap,
         equippedItems: state.inventory?.equippedItems || [],
       },
+      unlockedAchievements: state.unlockedAchievements || [],
+      workoutStats: {
+        ...base.workoutStats,
+        ...(state.workoutStats ?? {}),
+      },
+      settings: {
+        ...base.settings,
+        ...(state.settings ?? {}),
+        exerciseCalibration: {
+          ...base.settings.exerciseCalibration,
+          ...(state.settings?.exerciseCalibration ?? {}),
+        },
+      },
     };
   }
 
-  // Future versions: add migration logic here
-  // Example:
-  // if (version === 2) {
-  //   return migrateV2toV3(persistedState);
-  // }
-
-  // Fallback: reset to default if version is unknown
   console.warn(`Unknown save version ${version}, resetting game state`);
   return createInitialState();
 }
 
-/**
- * Custom storage to handle Map serialization.
- */
-const customStorage = {
-  getItem: (name: string): string | null => {
-    const str = localStorage.getItem(name);
-    if (!str) return null;
-    return str;
+const customStorage = createJSONStorage(() => localStorage, {
+  replacer: (_key, value) => {
+    if (value instanceof Map) {
+      return {
+        __type: 'Map',
+        entries: Array.from(value.entries()),
+      } satisfies SerializedMap;
+    }
+    return value;
   },
-  setItem: (name: string, value: string): void => {
-    localStorage.setItem(name, value);
+  reviver: (_key, value) => {
+    if (isSerializedMap(value)) {
+      return new Map(value.entries);
+    }
+    return value;
   },
-  removeItem: (name: string): void => {
-    localStorage.removeItem(name);
-  },
-};
+});
 
-/**
- * Zustand store with persistence middleware.
- */
 export const useGameStore = create<GameStore>()(
   persist(
-    (set) => ({
-      // Initial state
+    (set, get) => ({
       ...createInitialState(),
 
-      // Player actions
       updatePlayer: (playerUpdate) =>
         set((state) => ({
           player: { ...state.player, ...playerUpdate },
+        })),
+
+      revivePlayer: () =>
+        set((state) => ({
+          player: {
+            ...state.player,
+            hp: Math.max(state.player.hp, Math.ceil(state.player.maxHp * 0.5)),
+          },
         })),
 
       resetPlayer: () =>
@@ -152,7 +204,6 @@ export const useGameStore = create<GameStore>()(
           inventory: createInitialInventory(),
         })),
 
-      // Combat actions
       startCombat: (enemy) =>
         set({
           currentEnemy: enemy,
@@ -168,7 +219,6 @@ export const useGameStore = create<GameStore>()(
           currentEnemy: null,
         }),
 
-      // Inventory actions
       addItem: (itemId, quantity = 1) =>
         set((state) => {
           const newItems = new Map(state.inventory.items);
@@ -202,8 +252,9 @@ export const useGameStore = create<GameStore>()(
 
       equipItem: (itemId) =>
         set((state) => {
-          if (state.inventory.equippedItems.includes(itemId)) {
-            return state; // Already equipped
+          const qty = state.inventory.items.get(itemId) ?? 0;
+          if (qty <= 0 || state.inventory.equippedItems.includes(itemId)) {
+            return state;
           }
           return {
             inventory: {
@@ -221,11 +272,39 @@ export const useGameStore = create<GameStore>()(
           },
         })),
 
-      // Level progression actions
+      useConsumable: (itemId) => {
+        const state = get();
+        const item = ITEMS[itemId];
+        const qty = state.inventory.items.get(itemId) ?? 0;
+        if (!item || item.type !== 'CONSUMABLE' || qty <= 0) {
+          return false;
+        }
+        if (state.player.hp >= state.player.maxHp) {
+          return false;
+        }
+
+        const updatedPlayer = useConsumableItem(state.player, item);
+        const newItems = new Map(state.inventory.items);
+        if (qty - 1 <= 0) {
+          newItems.delete(itemId);
+        } else {
+          newItems.set(itemId, qty - 1);
+        }
+
+        set({
+          player: updatedPlayer,
+          inventory: {
+            ...state.inventory,
+            items: newItems,
+          },
+        });
+        return true;
+      },
+
       unlockLevel: (levelId) =>
         set((state) => {
           if (state.unlockedLevels.includes(levelId)) {
-            return state; // Already unlocked
+            return state;
           }
           return {
             unlockedLevels: [...state.unlockedLevels, levelId],
@@ -235,7 +314,7 @@ export const useGameStore = create<GameStore>()(
       completeLevel: (levelId) =>
         set((state) => {
           if (state.completedLevels.includes(levelId)) {
-            return state; // Already completed
+            return state;
           }
           return {
             completedLevels: [...state.completedLevels, levelId],
@@ -247,30 +326,78 @@ export const useGameStore = create<GameStore>()(
           currentLevel: levelId,
         }),
 
-      // Settings actions
+      recordWorkoutProgress: (delta) =>
+        set((state) => ({
+          workoutStats: {
+            totalReps: state.workoutStats.totalReps + (delta.reps ?? 0),
+            totalHoldSeconds: state.workoutStats.totalHoldSeconds + (delta.holdSeconds ?? 0),
+            monstersDefeated: state.workoutStats.monstersDefeated + (delta.monstersDefeated ?? 0),
+          },
+        })),
+
+      syncAchievements: () => {
+        const current = get();
+        const newlyUnlocked = evaluateNewAchievements(current);
+        if (newlyUnlocked.length > 0) {
+          set({
+            unlockedAchievements: [...current.unlockedAchievements, ...newlyUnlocked],
+          });
+        }
+        return newlyUnlocked;
+      },
+
       updateSettings: (settingsUpdate) =>
         set((state) => ({
           settings: { ...state.settings, ...settingsUpdate },
         })),
 
+      updateExerciseCalibration: (calibrationUpdate) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            exerciseCalibration: {
+              ...state.settings.exerciseCalibration,
+              ...calibrationUpdate,
+            },
+          },
+        })),
+
+      resetExerciseCalibration: () =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
+          },
+        })),
+
       setLanguage: (language) =>
         set((state) => {
-          // Update i18n system immediately
           setCurrentLanguage(language);
           return {
             settings: { ...state.settings, language },
           };
         }),
 
-      // Reset everything
-      resetGame: () =>
-        set(createInitialState()),
+      resetGame: () => {
+        const fresh = createInitialState();
+        setCurrentLanguage(fresh.settings.language);
+        set(fresh);
+      },
     }),
     {
-      name: 'junk-slayer-game-state', // localStorage key
-      version: 1, // Current save version
+      name: 'junk-slayer-game-state',
+      version: 3,
       migrate: migrateGameState,
-      storage: createJSONStorage(() => customStorage),
+      storage: customStorage,
+      onRehydrateStorage: () => (state) => {
+        if (state?.settings?.language) {
+          setCurrentLanguage(state.settings.language);
+        }
+      },
     }
   )
 );
+
+export function selectEffectivePlayerStats(state: GameState): PlayerStats {
+  return getEffectivePlayerStats(state.player, state.inventory.equippedItems, ITEMS);
+}

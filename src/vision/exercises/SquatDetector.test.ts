@@ -713,6 +713,43 @@ describe('SquatDetector', () => {
         expect(detector.getState().repCount).toBe(1);
       });
     });
+
+    describe('Scenario 8: Right-Leg Fallback When Left Leg Is Occluded', () => {
+      it('should track squats using the right leg when left leg has low visibility', () => {
+        const createRightLegPose = (kneeAngleDeg: number): NormalizedLandmark[] => {
+          const base = createPoseWithKneeAngle(kneeAngleDeg);
+          const lHip = base[PoseLandmark.LEFT_HIP];
+          const lKnee = base[PoseLandmark.LEFT_KNEE];
+          const lAnkle = base[PoseLandmark.LEFT_ANKLE];
+
+          // Copy valid leg geometry to right side, occlude left side
+          base[PoseLandmark.RIGHT_HIP] = { ...lHip, visibility: 0.95 };
+          base[PoseLandmark.RIGHT_KNEE] = { ...lKnee, visibility: 0.95 };
+          base[PoseLandmark.RIGHT_ANKLE] = { ...lAnkle, visibility: 0.95 };
+
+          base[PoseLandmark.LEFT_HIP] = { ...lHip, visibility: 0.1 };
+          base[PoseLandmark.LEFT_KNEE] = { ...lKnee, visibility: 0.1 };
+          base[PoseLandmark.LEFT_ANKLE] = { ...lAnkle, visibility: 0.1 };
+          return base;
+        };
+
+        let t = 0;
+        detector.update(createRightLegPose(160), t);
+        t += 50;
+        detector.update(createRightLegPose(135), t);
+        t += 50;
+        detector.update(createRightLegPose(90), t);
+        t += 60;
+        detector.update(createRightLegPose(90), t);
+        t += 50;
+        detector.update(createRightLegPose(135), t);
+        t += 50;
+        detector.update(createRightLegPose(160), t);
+
+        expect(detector.getState().visibility).toBe('VISIBLE');
+        expect(detector.getState().repCount).toBe(1);
+      });
+    });
   });
 });
 

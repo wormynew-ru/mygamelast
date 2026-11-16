@@ -12,8 +12,8 @@
  * - Emits isHolding boolean + holdDurationMs for combat integration
  */
 
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import type { ExerciseDetector, ExerciseState, ExerciseConfig, VisibilityStatus, Point3D } from '../types';
+import type { Landmark, NormalizedLandmark } from '@mediapipe/tasks-vision';
+import type { ExerciseDetector, ExerciseState, ExerciseConfig, VisibilityStatus } from '../types';
 import { PoseLandmark } from '../types';
 import {
   angle3D,
@@ -63,6 +63,7 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
   private lastValidHoldTime: number | null = null;
   private smoothedBodyAngle = 0;
   private smoothedElbowAngle = 0;
+  private hasInitializedAngles = false;
   private selectedSide: BodySide | null = null;
   private lastBodyAngle = 0;
   private lastElbowAngle = 0;
@@ -79,17 +80,20 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
     this.lastValidHoldTime = null;
     this.smoothedBodyAngle = 0;
     this.smoothedElbowAngle = 0;
+    this.hasInitializedAngles = false;
     this.selectedSide = null;
     this.lastBodyAngle = 0;
     this.lastElbowAngle = 0;
     this.lastVisibility = 'NOT_VISIBLE';
   }
 
-  update(landmarks: NormalizedLandmark[], timestamp: number): ExerciseState {
-    // Auto-select body side on first frame
-    if (!this.selectedSide) {
-      this.selectedSide = this.selectBodySide(landmarks);
-    }
+  update(
+    landmarks: NormalizedLandmark[],
+    timestamp: number,
+    worldLandmarks?: Landmark[]
+  ): ExerciseState {
+    // Auto-select visible body side with hysteresis
+    this.selectedSide = this.selectBodySide(landmarks);
 
     const visibilityStatus = this.checkVisibility(landmarks);
     this.lastVisibility = visibilityStatus;
@@ -100,21 +104,29 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
       return this.getState();
     }
 
-    // Get 3D world landmarks for selected side
-    const shoulder = this.getWorldLandmark(landmarks, this.selectedSide === 'left' ? PoseLandmark.LEFT_SHOULDER : PoseLandmark.RIGHT_SHOULDER);
-    const elbow = this.getWorldLandmark(landmarks, this.selectedSide === 'left' ? PoseLandmark.LEFT_ELBOW : PoseLandmark.RIGHT_ELBOW);
-    const wrist = this.getWorldLandmark(landmarks, this.selectedSide === 'left' ? PoseLandmark.LEFT_WRIST : PoseLandmark.RIGHT_WRIST);
-    const hip = this.getWorldLandmark(landmarks, this.selectedSide === 'left' ? PoseLandmark.LEFT_HIP : PoseLandmark.RIGHT_HIP);
-    const ankle = this.getWorldLandmark(landmarks, this.selectedSide === 'left' ? PoseLandmark.LEFT_ANKLE : PoseLandmark.RIGHT_ANKLE);
+    const angleSource =
+      worldLandmarks && worldLandmarks.length >= 33 ? worldLandmarks : landmarks;
+    const isLeft = this.selectedSide === 'left';
 
-    // Calculate body alignment (shoulder-hip-ankle)
+    const shoulder = angleSource[isLeft ? PoseLandmark.LEFT_SHOULDER : PoseLandmark.RIGHT_SHOULDER];
+    const elbow = angleSource[isLeft ? PoseLandmark.LEFT_ELBOW : PoseLandmark.RIGHT_ELBOW];
+    const wrist = angleSource[isLeft ? PoseLandmark.LEFT_WRIST : PoseLandmark.RIGHT_WRIST];
+    const hip = angleSource[isLeft ? PoseLandmark.LEFT_HIP : PoseLandmark.RIGHT_HIP];
+    const ankle = angleSource[isLeft ? PoseLandmark.LEFT_ANKLE : PoseLandmark.RIGHT_ANKLE];
+
     const bodyAngle = angle3D(shoulder, hip, ankle);
-    this.smoothedBodyAngle = ema(bodyAngle, this.smoothedBodyAngle, this.config.smoothingFactor);
-    this.lastBodyAngle = this.smoothedBodyAngle;
-
-    // Calculate elbow angle (shoulder-elbow-wrist)
     const elbowAngle = angle3D(shoulder, elbow, wrist);
-    this.smoothedElbowAngle = ema(elbowAngle, this.smoothedElbowAngle, this.config.smoothingFactor);
+
+    if (!this.hasInitializedAngles) {
+      this.smoothedBodyAngle = bodyAngle;
+      this.smoothedElbowAngle = elbowAngle;
+      this.hasInitializedAngles = true;
+    } else {
+      this.smoothedBodyAngle = ema(bodyAngle, this.smoothedBodyAngle, this.config.smoothingFactor);
+      this.smoothedElbowAngle = ema(elbowAngle, this.smoothedElbowAngle, this.config.smoothingFactor);
+    }
+
+    this.lastBodyAngle = this.smoothedBodyAngle;
     this.lastElbowAngle = this.smoothedElbowAngle;
 
     // Check if pose is correct (body straight, elbows bent ~90°)
@@ -188,23 +200,28 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
   }
 
   private selectBodySide(landmarks: NormalizedLandmark[]): BodySide {
-    const getVis = (idx: number) => landmarks[idx].visibility ?? 0;
-
     const leftVisibility =
-      getVis(PoseLandmark.LEFT_SHOULDER) +
-      getVis(PoseLandmark.LEFT_ELBOW) +
-      getVis(PoseLandmark.LEFT_WRIST) +
-      getVis(PoseLandmark.LEFT_HIP) +
-      getVis(PoseLandmark.LEFT_ANKLE);
+      (landmarks[PoseLandmark.LEFT_SHOULDER].visibility ?? 0) +
+      (landmarks[PoseLandmark.LEFT_ELBOW].visibility ?? 0) +
+      (landmarks[PoseLandmark.LEFT_WRIST].visibility ?? 0) +
+      (landmarks[PoseLandmark.LEFT_HIP].visibility ?? 0) +
+      (landmarks[PoseLandmark.LEFT_ANKLE].visibility ?? 0);
 
     const rightVisibility =
-      getVis(PoseLandmark.RIGHT_SHOULDER) +
-      getVis(PoseLandmark.RIGHT_ELBOW) +
-      getVis(PoseLandmark.RIGHT_WRIST) +
-      getVis(PoseLandmark.RIGHT_HIP) +
-      getVis(PoseLandmark.RIGHT_ANKLE);
+      (landmarks[PoseLandmark.RIGHT_SHOULDER].visibility ?? 0) +
+      (landmarks[PoseLandmark.RIGHT_ELBOW].visibility ?? 0) +
+      (landmarks[PoseLandmark.RIGHT_WRIST].visibility ?? 0) +
+      (landmarks[PoseLandmark.RIGHT_HIP].visibility ?? 0) +
+      (landmarks[PoseLandmark.RIGHT_ANKLE].visibility ?? 0);
 
-    return leftVisibility >= rightVisibility ? 'left' : 'right';
+    if (!this.selectedSide) {
+      return leftVisibility >= rightVisibility ? 'left' : 'right';
+    }
+
+    if (this.selectedSide === 'left') {
+      return rightVisibility > leftVisibility + 0.25 ? 'right' : 'left';
+    }
+    return leftVisibility > rightVisibility + 0.25 ? 'left' : 'right';
   }
 
   private checkVisibility(landmarks: NormalizedLandmark[]): VisibilityStatus {
@@ -212,14 +229,14 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
       return 'NOT_VISIBLE';
     }
 
-    const shoulderIdx = this.selectedSide === 'left' ? PoseLandmark.LEFT_SHOULDER : PoseLandmark.RIGHT_SHOULDER;
-    const elbowIdx = this.selectedSide === 'left' ? PoseLandmark.LEFT_ELBOW : PoseLandmark.RIGHT_ELBOW;
-    const wristIdx = this.selectedSide === 'left' ? PoseLandmark.LEFT_WRIST : PoseLandmark.RIGHT_WRIST;
-    const hipIdx = this.selectedSide === 'left' ? PoseLandmark.LEFT_HIP : PoseLandmark.RIGHT_HIP;
-    const ankleIdx = this.selectedSide === 'left' ? PoseLandmark.LEFT_ANKLE : PoseLandmark.RIGHT_ANKLE;
-
-    const requiredLandmarks = [shoulderIdx, elbowIdx, wristIdx, hipIdx, ankleIdx];
-    const allVisible = requiredLandmarks.every(idx => isVisible(landmarks[idx], this.config.minVisibility));
+    const minVis = this.config.minVisibility;
+    const isLeft = this.selectedSide === 'left';
+    const allVisible =
+      isVisible(landmarks[isLeft ? PoseLandmark.LEFT_SHOULDER : PoseLandmark.RIGHT_SHOULDER], minVis) &&
+      isVisible(landmarks[isLeft ? PoseLandmark.LEFT_ELBOW : PoseLandmark.RIGHT_ELBOW], minVis) &&
+      isVisible(landmarks[isLeft ? PoseLandmark.LEFT_WRIST : PoseLandmark.RIGHT_WRIST], minVis) &&
+      isVisible(landmarks[isLeft ? PoseLandmark.LEFT_HIP : PoseLandmark.RIGHT_HIP], minVis) &&
+      isVisible(landmarks[isLeft ? PoseLandmark.LEFT_ANKLE : PoseLandmark.RIGHT_ANKLE], minVis);
 
     if (allVisible) {
       return 'VISIBLE';
@@ -229,21 +246,11 @@ export class PlankDetector implements ExerciseDetector<PlankConfig> {
     const leftShoulder = landmarks[PoseLandmark.LEFT_SHOULDER].visibility ?? 0;
     const rightShoulder = landmarks[PoseLandmark.RIGHT_SHOULDER].visibility ?? 0;
 
-    if (leftShoulder < this.config.minVisibility && rightShoulder < this.config.minVisibility) {
+    if (leftShoulder < minVis && rightShoulder < minVis) {
       return 'NOT_VISIBLE';
     }
 
     return 'LOW_VISIBILITY';
-  }
-
-  private getWorldLandmark(landmarks: NormalizedLandmark[], index: number): Point3D {
-    const lm = landmarks[index];
-    return {
-      x: lm.x,
-      y: lm.y,
-      z: lm.z || 0,
-      visibility: lm.visibility,
-    };
   }
 
   private pauseHold(timestamp: number): void {

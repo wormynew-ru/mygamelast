@@ -58,28 +58,20 @@ export function angle2D(a: Point2D, b: Point2D, c: Point2D): number {
  * @returns Angle in degrees (0-180)
  */
 export function angle3D(a: Point3D, b: Point3D, c: Point3D): number {
-  // Vectors from b to a and b to c
-  const ba = {
-    x: a.x - b.x,
-    y: a.y - b.y,
-    z: a.z - b.z,
-  };
+  const bax = a.x - b.x;
+  const bay = a.y - b.y;
+  const baz = a.z - b.z;
 
-  const bc = {
-    x: c.x - b.x,
-    y: c.y - b.y,
-    z: c.z - b.z,
-  };
+  const bcx = c.x - b.x;
+  const bcy = c.y - b.y;
+  const bcz = c.z - b.z;
 
-  // Dot product and magnitudes
-  const dot = ba.x * bc.x + ba.y * bc.y + ba.z * bc.z;
-  const magBA = Math.sqrt(ba.x ** 2 + ba.y ** 2 + ba.z ** 2);
-  const magBC = Math.sqrt(bc.x ** 2 + bc.y ** 2 + bc.z ** 2);
+  const dot = bax * bcx + bay * bcy + baz * bcz;
+  const magBA = Math.sqrt(bax * bax + bay * bay + baz * baz);
+  const magBC = Math.sqrt(bcx * bcx + bcy * bcy + bcz * bcz);
 
-  // Handle degenerate case
   if (magBA === 0 || magBC === 0) return 0;
 
-  // Clamp to avoid NaN from floating point errors
   const cosAngle = Math.max(-1, Math.min(1, dot / (magBA * magBC)));
 
   return (Math.acos(cosAngle) * 180.0) / Math.PI;

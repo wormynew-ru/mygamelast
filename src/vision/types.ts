@@ -3,7 +3,7 @@
  * Pure data structures with ZERO dependencies on React, Zustand, or game logic.
  */
 
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
+import type { Landmark, NormalizedLandmark } from '@mediapipe/tasks-vision';
 
 /**
  * Exercise detection state machine phases.
@@ -73,9 +73,14 @@ export interface ExerciseDetector<TConfig extends ExerciseConfig = ExerciseConfi
    *
    * @param landmarks - MediaPipe pose landmarks (33 points)
    * @param timestamp - Frame timestamp in ms (for smoothing/velocity)
+   * @param worldLandmarks - Optional MediaPipe 3D metric world landmarks
    * @returns Current exercise state
    */
-  update(landmarks: NormalizedLandmark[], timestamp: number): ExerciseState;
+  update(
+    landmarks: NormalizedLandmark[],
+    timestamp: number,
+    worldLandmarks?: Landmark[]
+  ): ExerciseState;
 
   /**
    * Update detector configuration (thresholds, smoothing params).

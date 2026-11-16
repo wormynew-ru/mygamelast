@@ -1,68 +1,65 @@
 /**
  * App - Root component with screen navigation.
+ * Connects MainMenu, LevelSelectScreen, InventoryScreen, BattleScreen,
+ * CalibrationSandbox, SettingsScreen, and OfflineIndicator.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { MainMenu } from './ui/MainMenu';
+import { LevelSelectScreen } from './ui/LevelSelectScreen';
+import { InventoryScreen } from './ui/InventoryScreen';
 import { BattleScreen } from './ui/BattleScreen';
 import { CalibrationSandbox } from './ui/CalibrationSandbox';
-import { WorkoutSession } from './session/WorkoutSession';
-import { SquatDetector } from './vision/exercises/SquatDetector';
+import { SettingsScreen } from './ui/SettingsScreen';
+import { OfflineIndicator } from './ui/PWAInstallButton';
 import { useGameStore } from './game/store';
 import { createMonster, MONSTERS } from './game/data/monsters';
+import { getLevelById } from './game/data/levels';
+import type { ExerciseId } from './game/data/exercises';
+import { setCurrentLanguage } from './i18n';
 
-type Screen = 'MENU' | 'BATTLE' | 'CALIBRATION' | 'SETTINGS';
+type Screen = 'MENU' | 'CAMPAIGN' | 'INVENTORY' | 'BATTLE' | 'CALIBRATION' | 'SETTINGS';
+
+interface ActiveEncounter {
+  levelId: string;
+  exerciseId: ExerciseId;
+}
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('MENU');
-  const [workoutSession, setWorkoutSession] = useState<WorkoutSession | null>(null);
+  const [activeEncounter, setActiveEncounter] = useState<ActiveEncounter>({
+    levelId: 'LEVEL_1',
+    exerciseId: 'JUMPING_JACK',
+  });
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
+  const language = useGameStore((state) => state.settings.language);
   const startCombat = useGameStore((state) => state.startCombat);
   const endCombat = useGameStore((state) => state.endCombat);
+  const setCurrentLevel = useGameStore((state) => state.setCurrentLevel);
 
-  // Initialize workout session when entering battle
+  // Sync i18n language with persisted store on mount and updates
   useEffect(() => {
-    if (currentScreen === 'BATTLE' && videoRef.current && canvasRef.current) {
-      // Create exercise detector (for now, only squats)
-      const detector = new SquatDetector();
+    setCurrentLanguage(language);
+  }, [language]);
 
-      // Create workout session
-      const session = new WorkoutSession({
-        videoElement: videoRef.current,
-        canvasElement: canvasRef.current,
-        exerciseDetector: detector,
-        exerciseDamageMultiplier: 1.0, // Base damage multiplier for squats
-        enableSound: true,
-      });
+  const handleStartEncounter = (levelId: string, exerciseId: ExerciseId) => {
+    const level = getLevelById(levelId);
+    const monsterTemplate = level ? MONSTERS[level.monsterId] : MONSTERS.BURGER;
+    const monster = createMonster(monsterTemplate);
 
-      setWorkoutSession(session);
-
-      // Start session
-      session.start().catch((error) => {
-        console.error('Failed to start workout session:', error);
-        alert(`Failed to start camera: ${error.message}`);
-        setCurrentScreen('MENU');
-      });
-
-      // Cleanup on unmount
-      return () => {
-        session.stop();
-        setWorkoutSession(null);
-      };
-    }
-
-    return undefined;
-  }, [currentScreen]);
-
-  const handleStartBattle = () => {
-    // Load first monster (BURGER)
-    const monster = createMonster(MONSTERS.BURGER);
+    setCurrentLevel(levelId);
     startCombat(monster);
-
+    setActiveEncounter({ levelId, exerciseId });
     setCurrentScreen('BATTLE');
+  };
+
+  const handleQuickBattle = () => {
+    const unlocked = useGameStore.getState().unlockedLevels;
+    const completed = useGameStore.getState().completedLevels;
+    const targetLevelId =
+      unlocked.find((id) => !completed.includes(id)) ?? unlocked[unlocked.length - 1] ?? 'LEVEL_1';
+    const level = getLevelById(targetLevelId);
+    handleStartEncounter(targetLevelId, level?.recommendedExercise ?? 'SQUAT');
   };
 
   const handleExitBattle = () => {
@@ -70,58 +67,50 @@ function App() {
     setCurrentScreen('MENU');
   };
 
-  const handleCalibration = () => {
-    setCurrentScreen('CALIBRATION');
-  };
-
-  const handleSettings = () => {
-    setCurrentScreen('SETTINGS');
-    // TODO: Implement settings screen
-    alert('Settings screen not implemented yet!');
-    setCurrentScreen('MENU');
-  };
-
-  const handleExitCalibration = () => {
-    setCurrentScreen('MENU');
-  };
-
   return (
     <>
-      {/* Hidden video/canvas elements for battle screen */}
-      {currentScreen === 'BATTLE' && (
-        <>
-          <video ref={videoRef} style={{ display: 'none' }} />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-        </>
-      )}
-
-      {/* Screen routing */}
       {currentScreen === 'MENU' && (
         <MainMenu
-          onStartBattle={handleStartBattle}
-          onCalibration={handleCalibration}
-          onSettings={handleSettings}
+          onOpenCampaign={() => setCurrentScreen('CAMPAIGN')}
+          onQuickBattle={handleQuickBattle}
+          onInventory={() => setCurrentScreen('INVENTORY')}
+          onCalibration={() => setCurrentScreen('CALIBRATION')}
+          onSettings={() => setCurrentScreen('SETTINGS')}
         />
       )}
 
-      {currentScreen === 'BATTLE' && workoutSession && (
+      {currentScreen === 'CAMPAIGN' && (
+        <LevelSelectScreen
+          onBack={() => setCurrentScreen('MENU')}
+          onStartEncounter={handleStartEncounter}
+        />
+      )}
+
+      {currentScreen === 'INVENTORY' && (
+        <InventoryScreen onBack={() => setCurrentScreen('MENU')} />
+      )}
+
+      {currentScreen === 'BATTLE' && (
         <BattleScreen
-          session={workoutSession}
+          levelId={activeEncounter.levelId}
+          exerciseId={activeEncounter.exerciseId}
           onExit={handleExitBattle}
+          onStartNextLevel={handleStartEncounter}
         />
       )}
 
       {currentScreen === 'CALIBRATION' && (
-        <div className="relative">
-          <button
-            onClick={handleExitCalibration}
-            className="absolute top-4 left-4 z-50 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition"
-          >
-            ← Back to Menu
-          </button>
-          <CalibrationSandbox />
-        </div>
+        <CalibrationSandbox onBack={() => setCurrentScreen('MENU')} />
       )}
+
+      {currentScreen === 'SETTINGS' && (
+        <SettingsScreen
+          onBack={() => setCurrentScreen('MENU')}
+          onOpenCalibration={() => setCurrentScreen('CALIBRATION')}
+        />
+      )}
+
+      <OfflineIndicator />
     </>
   );
 }

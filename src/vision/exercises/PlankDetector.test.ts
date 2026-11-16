@@ -312,4 +312,25 @@ describe('PlankDetector', () => {
       expect(brokenState.progress).toBe(0.0);
     });
   });
+
+  describe('First-frame EMA & 3D World Landmarks', () => {
+    it('detects correct plank immediately on frame 0 even with default smoothingFactor (0.3)', () => {
+      const defaultDetector = new PlankDetector();
+      const state = defaultDetector.update(PLANK_POSES.correct, 0);
+      expect(state.isHolding).toBe(true);
+      expect(state.visibility).toBe('VISIBLE');
+    });
+
+    it('uses optional 3D worldLandmarks when provided', () => {
+      const defaultDetector = new PlankDetector({ smoothingFactor: 1.0 });
+      const worldSagging = PLANK_POSES.sagging.map((lm) => ({
+        x: lm.x,
+        y: lm.y,
+        z: lm.z ?? 0,
+        visibility: lm.visibility ?? 1,
+      }));
+      const state = defaultDetector.update(PLANK_POSES.correct, 0, worldSagging);
+      expect(state.isHolding).toBe(false);
+    });
+  });
 });

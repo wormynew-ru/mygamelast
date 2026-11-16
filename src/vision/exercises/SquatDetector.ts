@@ -13,8 +13,9 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import {
   angle2D,
+  distance2D,
   ema,
-  allVisible,
+  isVisible,
   mapRange,
 } from '../angleMath';
 import {
@@ -74,6 +75,7 @@ export class SquatDetector implements ExerciseDetector<SquatConfig> {
   private phase: SquatPhase = 'IDLE';
   private repCount = 0;
   private smoothedKneeAngle = 180; // Start at standing
+  private hasInitializedAngle = false;
   private visibility: VisibilityStatus = 'NOT_VISIBLE';
 
   // FSM timing and validation
@@ -88,21 +90,36 @@ export class SquatDetector implements ExerciseDetector<SquatConfig> {
     this.phase = 'IDLE';
     this.repCount = 0;
     this.smoothedKneeAngle = 180;
+    this.hasInitializedAngle = false;
     this.visibility = 'NOT_VISIBLE';
     this.bottomEntryTime = null;
     this.reachedBottom = false;
   }
 
   update(landmarks: NormalizedLandmark[], timestamp: number): ExerciseState {
+    const minVis = this.config.minVisibility;
 
-    // Check visibility of required landmarks (use left leg, can mirror for right)
-    const hip = landmarks[PoseLandmark.LEFT_HIP];
-    const knee = landmarks[PoseLandmark.LEFT_KNEE];
-    const ankle = landmarks[PoseLandmark.LEFT_ANKLE];
+    const lHip = landmarks[PoseLandmark.LEFT_HIP];
+    const lKnee = landmarks[PoseLandmark.LEFT_KNEE];
+    const lAnkle = landmarks[PoseLandmark.LEFT_ANKLE];
+    const leftVisible =
+      isVisible(lHip, minVis) &&
+      isVisible(lKnee, minVis) &&
+      isVisible(lAnkle, minVis) &&
+      distance2D(lHip, lKnee) > 0.01 &&
+      distance2D(lKnee, lAnkle) > 0.01;
 
-    const requiredLandmarks = [hip, knee, ankle];
+    const rHip = landmarks[PoseLandmark.RIGHT_HIP];
+    const rKnee = landmarks[PoseLandmark.RIGHT_KNEE];
+    const rAnkle = landmarks[PoseLandmark.RIGHT_ANKLE];
+    const rightVisible =
+      isVisible(rHip, minVis) &&
+      isVisible(rKnee, minVis) &&
+      isVisible(rAnkle, minVis) &&
+      distance2D(rHip, rKnee) > 0.01 &&
+      distance2D(rKnee, rAnkle) > 0.01;
 
-    if (!allVisible(requiredLandmarks, this.config.minVisibility)) {
+    if (!leftVisible && !rightVisible) {
       this.visibility = 'LOW_VISIBILITY';
       // Don't update FSM when body not visible, but keep current state
       return this.getState();
@@ -110,19 +127,27 @@ export class SquatDetector implements ExerciseDetector<SquatConfig> {
 
     this.visibility = 'VISIBLE';
 
-    // Calculate knee angle (hip-knee-ankle)
-    const rawKneeAngle = angle2D(
-      { x: hip.x, y: hip.y },
-      { x: knee.x, y: knee.y },
-      { x: ankle.x, y: ankle.y }
-    );
+    // Use bilateral average when both legs are clearly tracked, else whichever leg is visible
+    let rawKneeAngle: number;
+    if (leftVisible && rightVisible) {
+      rawKneeAngle = (angle2D(lHip, lKnee, lAnkle) + angle2D(rHip, rKnee, rAnkle)) * 0.5;
+    } else if (leftVisible) {
+      rawKneeAngle = angle2D(lHip, lKnee, lAnkle);
+    } else {
+      rawKneeAngle = angle2D(rHip, rKnee, rAnkle);
+    }
 
-    // Smooth angle to reduce jitter
-    this.smoothedKneeAngle = ema(
-      rawKneeAngle,
-      this.smoothedKneeAngle,
-      this.config.smoothingFactor
-    );
+    // Initialize immediately on first valid frame to prevent warmup lag
+    if (!this.hasInitializedAngle) {
+      this.smoothedKneeAngle = rawKneeAngle;
+      this.hasInitializedAngle = true;
+    } else {
+      this.smoothedKneeAngle = ema(
+        rawKneeAngle,
+        this.smoothedKneeAngle,
+        this.config.smoothingFactor
+      );
+    }
 
     // FSM update with hysteresis
     this.updateFSM(this.smoothedKneeAngle, timestamp);

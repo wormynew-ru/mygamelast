@@ -14,9 +14,50 @@
 import {
   PoseLandmarker,
   FilesetResolver,
+  type Landmark,
   type NormalizedLandmark,
 } from '@mediapipe/tasks-vision';
 import { PoseLandmark } from './types';
+
+const POSE_CONNECTIONS: ReadonlyArray<readonly [PoseLandmark, PoseLandmark]> = [
+  // Face
+  [PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE],
+  [PoseLandmark.LEFT_EYE, PoseLandmark.NOSE],
+  [PoseLandmark.RIGHT_EYE, PoseLandmark.NOSE],
+  [PoseLandmark.LEFT_EYE, PoseLandmark.LEFT_EAR],
+  [PoseLandmark.RIGHT_EYE, PoseLandmark.RIGHT_EAR],
+  [PoseLandmark.MOUTH_LEFT, PoseLandmark.MOUTH_RIGHT],
+  // Torso
+  [PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER],
+  [PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_HIP],
+  [PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_HIP],
+  [PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP],
+  // Left arm
+  [PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW],
+  [PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST],
+  [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_THUMB],
+  [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_INDEX],
+  [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_PINKY],
+  // Right arm
+  [PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW],
+  [PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST],
+  [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_THUMB],
+  [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_INDEX],
+  [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_PINKY],
+  // Left leg
+  [PoseLandmark.LEFT_HIP, PoseLandmark.LEFT_KNEE],
+  [PoseLandmark.LEFT_KNEE, PoseLandmark.LEFT_ANKLE],
+  [PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_HEEL],
+  [PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_FOOT_INDEX],
+  // Right leg
+  [PoseLandmark.RIGHT_HIP, PoseLandmark.RIGHT_KNEE],
+  [PoseLandmark.RIGHT_KNEE, PoseLandmark.RIGHT_ANKLE],
+  [PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_HEEL],
+  [PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_FOOT_INDEX],
+];
+
+const LANDMARK_RADIUS = 4;
+const TWO_PI = Math.PI * 2;
 
 /**
  * Camera configuration options.
@@ -85,7 +126,11 @@ export type TrackerError =
 /**
  * Callback for pose detection results.
  */
-export type PoseCallback = (landmarks: NormalizedLandmark[], timestamp: number) => void;
+export type PoseCallback = (
+  landmarks: NormalizedLandmark[],
+  timestamp: number,
+  worldLandmarks?: Landmark[]
+) => void;
 
 /**
  * Callback for status changes.
@@ -95,9 +140,13 @@ export type StatusCallback = (status: TrackerStatus, error?: TrackerError) => vo
 /**
  * Default MediaPipe configuration.
  */
+const CDN_WASM_PATH = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm';
+const CDN_MODEL_ASSET_PATH =
+  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+
 const DEFAULT_MODEL_CONFIG: Required<ModelConfig> = {
-  wasmPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm',
-  modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+  wasmPath: '/mediapipe/wasm',
+  modelAssetPath: '/mediapipe/pose_landmarker_lite.task',
   delegate: 'GPU',
   numPoses: 1,
   minDetectionConfidence: 0.5,
@@ -134,8 +183,10 @@ export class PoseTracker {
 
   // FPS throttling for inference
   private lastInferenceTime = 0;
-  private inferenceInterval = 0; // Will be calculated from targetInferenceFPS
+  private inferenceInterval = 0; // Base interval from targetInferenceFPS
+  private adaptiveInferenceInterval = 0; // Expands automatically if device inference is slow
   private lastLandmarks: NormalizedLandmark[] | null = null;
+  private lastWorldLandmarks: Landmark[] | undefined = undefined;
 
   private cameraConfig: Required<CameraConfig>;
   private modelConfig: Required<ModelConfig>;
@@ -152,6 +203,7 @@ export class PoseTracker {
 
     // Calculate inference interval from target FPS (e.g., 30 FPS = 33.33ms)
     this.inferenceInterval = 1000 / this.modelConfig.targetInferenceFPS;
+    this.adaptiveInferenceInterval = this.inferenceInterval;
   }
 
   /**
@@ -165,27 +217,69 @@ export class PoseTracker {
     this.setStatus('LOADING_MODEL');
 
     try {
-      // Load MediaPipe Vision WASM
-      const vision = await FilesetResolver.forVisionTasks(this.modelConfig.wasmPath);
-
-      // Create PoseLandmarker
-      this.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: this.modelConfig.modelAssetPath,
-          delegate: this.modelConfig.delegate,
-        },
-        runningMode: 'VIDEO',
-        numPoses: this.modelConfig.numPoses,
-        minPoseDetectionConfidence: this.modelConfig.minDetectionConfidence,
-        minTrackingConfidence: this.modelConfig.minTrackingConfidence,
-      });
-
+      this.poseLandmarker = await this.createLandmarkerWithDelegateFallback(
+        this.modelConfig.wasmPath,
+        this.modelConfig.modelAssetPath
+      );
       this.setStatus('READY');
-    } catch (err) {
-      console.error('Failed to load MediaPipe model:', err);
+    } catch (localErr) {
+      // Fallback to CDN if local assets or custom path fail
+      if (
+        this.modelConfig.wasmPath !== CDN_WASM_PATH ||
+        this.modelConfig.modelAssetPath !== CDN_MODEL_ASSET_PATH
+      ) {
+        try {
+          console.warn('Local MediaPipe load failed, falling back to CDN:', localErr);
+          this.poseLandmarker = await this.createLandmarkerWithDelegateFallback(
+            CDN_WASM_PATH,
+            CDN_MODEL_ASSET_PATH
+          );
+          this.setStatus('READY');
+          return;
+        } catch (cdnErr) {
+          console.error('Failed to load MediaPipe model from CDN fallback:', cdnErr);
+          this.setError('MODEL_LOAD_FAILED');
+          throw cdnErr;
+        }
+      }
+
+      console.error('Failed to load MediaPipe model:', localErr);
       this.setError('MODEL_LOAD_FAILED');
+      throw localErr;
+    }
+  }
+
+  private async createLandmarkerWithDelegateFallback(
+    wasmPath: string,
+    modelAssetPath: string
+  ): Promise<PoseLandmarker> {
+    try {
+      return await this.createLandmarker(wasmPath, modelAssetPath, this.modelConfig.delegate);
+    } catch (err) {
+      if (this.modelConfig.delegate === 'GPU') {
+        console.warn('GPU delegate initialization failed, falling back to CPU delegate:', err);
+        return this.createLandmarker(wasmPath, modelAssetPath, 'CPU');
+      }
       throw err;
     }
+  }
+
+  private async createLandmarker(
+    wasmPath: string,
+    modelAssetPath: string,
+    delegate: 'GPU' | 'CPU'
+  ): Promise<PoseLandmarker> {
+    const vision = await FilesetResolver.forVisionTasks(wasmPath);
+    return PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath,
+        delegate,
+      },
+      runningMode: 'VIDEO',
+      numPoses: this.modelConfig.numPoses,
+      minPoseDetectionConfidence: this.modelConfig.minDetectionConfidence,
+      minTrackingConfidence: this.modelConfig.minTrackingConfidence,
+    });
   }
 
   /**
@@ -222,21 +316,35 @@ export class PoseTracker {
       this.videoElement.muted = true;
       this.videoElement.autoplay = true;
 
-      // Wait for video to be ready
+      // Wait for video to be ready (clean up timeout on resolution/error)
       await new Promise<void>((resolve, reject) => {
-        if (!this.videoElement) {
+        const video = this.videoElement;
+        if (!video) {
           reject(new Error('Video element is null'));
           return;
         }
 
-        this.videoElement.onloadedmetadata = () => {
-          this.videoElement!.play()
-            .then(() => resolve())
-            .catch(reject);
+        const timeoutId = window.setTimeout(() => {
+          reject(new Error('Video load timeout'));
+        }, 10000);
+
+        const startPlayback = () => {
+          video.play()
+            .then(() => {
+              window.clearTimeout(timeoutId);
+              resolve();
+            })
+            .catch((playErr) => {
+              window.clearTimeout(timeoutId);
+              reject(playErr);
+            });
         };
 
-        // Timeout fallback
-        setTimeout(() => reject(new Error('Video load timeout')), 10000);
+        if (video.readyState >= 1) {
+          startPlayback();
+        } else {
+          video.onloadedmetadata = startPlayback;
+        }
       });
 
       this.setStatus('READY');
@@ -277,7 +385,7 @@ export class PoseTracker {
     // Setup canvas for skeleton rendering if provided
     if (canvasElement) {
       this.canvasElement = canvasElement;
-      this.canvasCtx = canvasElement.getContext('2d');
+      this.canvasCtx = canvasElement.getContext('2d', { alpha: false });
 
       if (this.canvasCtx) {
         // Match canvas size to video
@@ -392,71 +500,87 @@ export class PoseTracker {
       return;
     }
 
+    const video = this.videoElement;
+    const isVideoReady = video.readyState >= 2 && video.videoWidth > 0 && !video.paused;
+
+    if (!isVideoReady) {
+      this.animationFrameId = requestAnimationFrame(this.detectLoop);
+      return;
+    }
+
+    // Keep canvas resolution synced if mobile orientation changes
+    if (
+      this.canvasElement &&
+      (this.canvasElement.width !== video.videoWidth ||
+        this.canvasElement.height !== video.videoHeight)
+    ) {
+      this.canvasElement.width = video.videoWidth;
+      this.canvasElement.height = video.videoHeight;
+    }
+
     const now = performance.now();
 
-    // Adaptive FPS throttling: skip inference if not enough time passed
+    // Adaptive FPS throttling: skip inference if within budget or previous inference ran hot
     const timeSinceLastInference = now - this.lastInferenceTime;
-    const shouldRunInference = timeSinceLastInference >= this.inferenceInterval;
+    const shouldRunInference = timeSinceLastInference >= this.adaptiveInferenceInterval;
 
     let landmarks: NormalizedLandmark[] | null = this.lastLandmarks;
+    let worldLandmarks: Landmark[] | undefined = this.lastWorldLandmarks;
 
     if (shouldRunInference) {
-      // Run MediaPipe inference (expensive operation)
-      const result = this.poseLandmarker.detectForVideo(this.videoElement, now);
+      const inferStart = performance.now();
+      const result = this.poseLandmarker.detectForVideo(video, now);
+      const inferDuration = performance.now() - inferStart;
+
+      // Adaptively widen interval when device CPU/GPU inference exceeds ~85% of budget
+      if (inferDuration > this.inferenceInterval * 0.85) {
+        this.adaptiveInferenceInterval = Math.min(100, Math.max(this.inferenceInterval, inferDuration * 1.25));
+      } else {
+        this.adaptiveInferenceInterval = this.inferenceInterval;
+      }
 
       if (result.landmarks && result.landmarks.length > 0) {
-        landmarks = result.landmarks[0]; // First pose only
-        this.lastLandmarks = landmarks; // Cache for skipped frames
+        landmarks = result.landmarks[0];
+        this.lastLandmarks = landmarks;
+        worldLandmarks = result.worldLandmarks?.[0];
+        this.lastWorldLandmarks = worldLandmarks;
       }
 
       this.lastInferenceTime = now;
     }
 
-    // Clear canvas before drawing (runs every frame at 60 FPS)
-    if (this.canvasCtx && this.canvasElement && this.videoElement) {
-      this.canvasCtx.save();
-      this.canvasCtx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+    // Render video frame + batched skeleton overlay (runs at display refresh rate)
+    if (this.canvasCtx && this.canvasElement) {
+      const ctx = this.canvasCtx;
+      const cw = this.canvasElement.width;
+      const ch = this.canvasElement.height;
 
-      // Mirror canvas for front-facing camera (user-facing mode)
+      ctx.save();
+
       if (this.cameraConfig.facingMode === 'user') {
-        this.canvasCtx.scale(-1, 1);
-        this.canvasCtx.translate(-this.canvasElement.width, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-cw, 0);
       }
 
-      // Draw video frame first (background)
-      this.canvasCtx.drawImage(
-        this.videoElement,
-        0,
-        0,
-        this.canvasElement.width,
-        this.canvasElement.height
-      );
-    }
+      ctx.drawImage(video, 0, 0, cw, ch);
 
-    // Draw skeleton and notify callback (use cached landmarks if inference was skipped)
-    if (landmarks) {
-      // Draw skeleton on canvas
-      if (this.canvasCtx) {
+      if (landmarks) {
         this.drawSkeleton(landmarks);
       }
 
-      // Notify callback only on new inference (not on cached frames)
-      if (shouldRunInference && this.poseCallback) {
-        this.poseCallback(landmarks, now);
-      }
+      ctx.restore();
     }
 
-    // Restore canvas state
-    if (this.canvasCtx) {
-      this.canvasCtx.restore();
+    // Notify callback only on fresh inference
+    if (landmarks && shouldRunInference && this.poseCallback) {
+      this.poseCallback(landmarks, now, worldLandmarks);
     }
 
-    // Schedule next frame (60 FPS rendering loop)
     this.animationFrameId = requestAnimationFrame(this.detectLoop);
   };
 
   /**
-   * Draw pose skeleton on canvas.
+   * Draw pose skeleton on canvas using batched paths (single stroke + single fill per frame).
    */
   private drawSkeleton(landmarks: NormalizedLandmark[]): void {
     if (!this.canvasCtx || !this.canvasElement) {
@@ -467,75 +591,37 @@ export class PoseTracker {
     const width = this.canvasElement.width;
     const height = this.canvasElement.height;
 
-    // Define skeleton connections (pairs of landmark indices)
-    const connections: [PoseLandmark, PoseLandmark][] = [
-      // Face
-      [PoseLandmark.LEFT_EYE, PoseLandmark.RIGHT_EYE],
-      [PoseLandmark.LEFT_EYE, PoseLandmark.NOSE],
-      [PoseLandmark.RIGHT_EYE, PoseLandmark.NOSE],
-      [PoseLandmark.LEFT_EYE, PoseLandmark.LEFT_EAR],
-      [PoseLandmark.RIGHT_EYE, PoseLandmark.RIGHT_EAR],
-      [PoseLandmark.MOUTH_LEFT, PoseLandmark.MOUTH_RIGHT],
-
-      // Torso
-      [PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER],
-      [PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_HIP],
-      [PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_HIP],
-      [PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP],
-
-      // Left arm
-      [PoseLandmark.LEFT_SHOULDER, PoseLandmark.LEFT_ELBOW],
-      [PoseLandmark.LEFT_ELBOW, PoseLandmark.LEFT_WRIST],
-      [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_THUMB],
-      [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_INDEX],
-      [PoseLandmark.LEFT_WRIST, PoseLandmark.LEFT_PINKY],
-
-      // Right arm
-      [PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW],
-      [PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST],
-      [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_THUMB],
-      [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_INDEX],
-      [PoseLandmark.RIGHT_WRIST, PoseLandmark.RIGHT_PINKY],
-
-      // Left leg
-      [PoseLandmark.LEFT_HIP, PoseLandmark.LEFT_KNEE],
-      [PoseLandmark.LEFT_KNEE, PoseLandmark.LEFT_ANKLE],
-      [PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_HEEL],
-      [PoseLandmark.LEFT_ANKLE, PoseLandmark.LEFT_FOOT_INDEX],
-
-      // Right leg
-      [PoseLandmark.RIGHT_HIP, PoseLandmark.RIGHT_KNEE],
-      [PoseLandmark.RIGHT_KNEE, PoseLandmark.RIGHT_ANKLE],
-      [PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_HEEL],
-      [PoseLandmark.RIGHT_ANKLE, PoseLandmark.RIGHT_FOOT_INDEX],
-    ];
-
-    // Draw connections (lines)
+    // Batch all skeleton connections in one path flush
     ctx.strokeStyle = '#00FF00';
     ctx.lineWidth = 2;
+    ctx.beginPath();
 
-    connections.forEach(([startIdx, endIdx]) => {
+    for (let i = 0; i < POSE_CONNECTIONS.length; i++) {
+      const [startIdx, endIdx] = POSE_CONNECTIONS[i];
       const start = landmarks[startIdx];
       const end = landmarks[endIdx];
 
-      // Only draw if both points are visible
-      if ((start.visibility ?? 0) > 0.5 && (end.visibility ?? 0) > 0.5) {
-        ctx.beginPath();
+      if (start && end && (start.visibility ?? 0) > 0.5 && (end.visibility ?? 0) > 0.5) {
         ctx.moveTo(start.x * width, start.y * height);
         ctx.lineTo(end.x * width, end.y * height);
-        ctx.stroke();
       }
-    });
+    }
+    ctx.stroke();
 
-    // Draw landmark points
+    // Batch all landmark joint dots in one path flush
     ctx.fillStyle = '#FF0000';
-    landmarks.forEach((landmark) => {
-      if ((landmark.visibility ?? 0) > 0.5) {
-        ctx.beginPath();
-        ctx.arc(landmark.x * width, landmark.y * height, 4, 0, 2 * Math.PI);
-        ctx.fill();
+    ctx.beginPath();
+
+    for (let i = 0; i < landmarks.length; i++) {
+      const lm = landmarks[i];
+      if ((lm.visibility ?? 0) > 0.5) {
+        const cx = lm.x * width;
+        const cy = lm.y * height;
+        ctx.moveTo(cx + LANDMARK_RADIUS, cy);
+        ctx.arc(cx, cy, LANDMARK_RADIUS, 0, TWO_PI);
       }
-    });
+    }
+    ctx.fill();
   }
 
   /**
