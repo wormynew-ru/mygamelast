@@ -110,6 +110,7 @@ function createInitialState(): GameState {
       soundEnabled: true,
       voiceEnabled: false,
       cameraFacingMode: 'user',
+      targetPoseFps: 60,
       exerciseConfigs: {},
       exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
       language: 'ru',
@@ -206,7 +207,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 4) {
+  if (version >= 0 && version <= 5) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -267,6 +268,7 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
+        targetPoseFps: state.settings?.targetPoseFps === 30 ? 30 : 60,
         exerciseCalibration: {
           ...base.settings.exerciseCalibration,
           ...(state.settings?.exerciseCalibration ?? {}),
@@ -679,7 +681,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 4,
+      version: 5,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

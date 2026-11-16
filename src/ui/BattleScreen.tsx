@@ -168,6 +168,8 @@ export function BattleScreen({
       return undefined;
     }
 
+    let disposed = false;
+
     const session = createWorkoutSessionForBattle({
       videoElement: videoEl,
       canvasElement: canvasEl,
@@ -179,6 +181,7 @@ export function BattleScreen({
     sessionRef.current = session;
 
     const unsubscribe = session.onStateChange((status) => {
+      if (disposed) return;
       setSessionStatus(status);
 
       if (status.lastCombatEvent && status.lastCombatEvent.id !== lastCombatEventIdRef.current) {
@@ -212,6 +215,7 @@ export function BattleScreen({
     void session.start();
 
     return () => {
+      disposed = true;
       if (damageTimerRef.current !== null) {
         window.clearTimeout(damageTimerRef.current);
         damageTimerRef.current = null;

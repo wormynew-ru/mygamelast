@@ -587,6 +587,7 @@ describe('CombatEngine', () => {
           soundEnabled: true,
           voiceEnabled: false,
           cameraFacingMode: 'user',
+          targetPoseFps: 60,
           exerciseConfigs: {},
           exerciseCalibration: {
             squatBottomAngle: 90,

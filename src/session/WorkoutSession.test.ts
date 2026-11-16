@@ -587,4 +587,37 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('aborts pending async start cleanly when stopped mid-initialization (StrictMode safety)', async () => {
+    let resolveLoad!: () => void;
+    const tracker = createMockTracker();
+    tracker.loadModel = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        })
+    );
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: createStubDetector([]),
+      exerciseDamageMultiplier: 1.0,
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    const startPromise = session.start();
+    await vi.waitFor(() => {
+      expect(tracker.loadModel).toHaveBeenCalledTimes(1);
+    });
+    session.stop();
+    resolveLoad();
+    await startPromise;
+
+    expect(tracker.startCamera).not.toHaveBeenCalled();
+    expect(tracker.start).not.toHaveBeenCalled();
+    expect(session.getStatus().state).toBe('IDLE');
+  });
 });

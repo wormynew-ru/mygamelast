@@ -129,6 +129,33 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
             </div>
           </div>
 
+          {/* Pose Detection Target FPS */}
+          <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <span className="text-sm font-semibold text-white">{t('settings.poseFps')}</span>
+            <div className="inline-flex p-1 bg-slate-950 rounded-lg border border-slate-800">
+              <button
+                onClick={() => updateSettings({ targetPoseFps: 30 })}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  settings.targetPoseFps === 30
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('settings.poseFps30')}
+              </button>
+              <button
+                onClick={() => updateSettings({ targetPoseFps: 60 })}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  settings.targetPoseFps === 60
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('settings.poseFps60')}
+              </button>
+            </div>
+          </div>
+
           {/* Calibration Shortcut */}
           <div className="p-5 flex items-center justify-between gap-4">
             <span className="text-sm font-semibold text-white">{t('menu.calibration')}</span>

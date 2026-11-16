@@ -72,6 +72,9 @@ export interface CameraConfig {
   /** Preferred video resolution height */
   height?: number;
 
+  /** Preferred camera frame rate (FPS, default: 60) */
+  frameRate?: number;
+
   /** Optional specific device ID (for multi-camera devices) */
   deviceId?: string;
 }
@@ -151,7 +154,7 @@ const DEFAULT_MODEL_CONFIG: Required<ModelConfig> = {
   numPoses: 1,
   minDetectionConfidence: 0.5,
   minTrackingConfidence: 0.5,
-  targetInferenceFPS: 30, // Throttle inference to 30 FPS (canvas still 60 FPS)
+  targetInferenceFPS: 60, // Up to 60 FPS on desktop GPU; adaptive + new-frame guard prevents waste
 };
 
 /**
@@ -161,6 +164,7 @@ const DEFAULT_CAMERA_CONFIG: Required<CameraConfig> = {
   facingMode: 'user',
   width: 640,
   height: 480,
+  frameRate: 60,
   deviceId: '',
 };
 
@@ -180,9 +184,12 @@ export class PoseTracker {
 
   private animationFrameId: number | null = null;
   private isRunning = false;
+  private lifecycleToken = 0;
+  private abortPendingCameraWait: (() => void) | null = null;
 
   // FPS throttling for inference
   private lastInferenceTime = 0;
+  private lastVideoTime = -1;
   private inferenceInterval = 0; // Base interval from targetInferenceFPS
   private adaptiveInferenceInterval = 0; // Expands automatically if device inference is slow
   private lastLandmarks: NormalizedLandmark[] | null = null;
@@ -214,15 +221,24 @@ export class PoseTracker {
       return; // Already loaded
     }
 
+    const token = this.lifecycleToken;
     this.setStatus('LOADING_MODEL');
 
     try {
-      this.poseLandmarker = await this.createLandmarkerWithDelegateFallback(
+      const landmarker = await this.createLandmarkerWithDelegateFallback(
         this.modelConfig.wasmPath,
         this.modelConfig.modelAssetPath
       );
+      if (token !== this.lifecycleToken) {
+        landmarker.close();
+        return;
+      }
+      this.poseLandmarker = landmarker;
       this.setStatus('READY');
     } catch (localErr) {
+      if (token !== this.lifecycleToken) {
+        return;
+      }
       // Fallback to CDN if local assets or custom path fail
       if (
         this.modelConfig.wasmPath !== CDN_WASM_PATH ||
@@ -230,13 +246,21 @@ export class PoseTracker {
       ) {
         try {
           console.warn('Local MediaPipe load failed, falling back to CDN:', localErr);
-          this.poseLandmarker = await this.createLandmarkerWithDelegateFallback(
+          const landmarker = await this.createLandmarkerWithDelegateFallback(
             CDN_WASM_PATH,
             CDN_MODEL_ASSET_PATH
           );
+          if (token !== this.lifecycleToken) {
+            landmarker.close();
+            return;
+          }
+          this.poseLandmarker = landmarker;
           this.setStatus('READY');
           return;
         } catch (cdnErr) {
+          if (token !== this.lifecycleToken) {
+            return;
+          }
           console.error('Failed to load MediaPipe model from CDN fallback:', cdnErr);
           this.setError('MODEL_LOAD_FAILED');
           throw cdnErr;
@@ -286,16 +310,24 @@ export class PoseTracker {
    * Request camera access and initialize video stream.
    */
   async startCamera(videoElement: HTMLVideoElement): Promise<void> {
+    const token = this.lifecycleToken;
     this.videoElement = videoElement;
     this.setStatus('REQUESTING_CAMERA');
 
     try {
+      // Release any prior stream owned by this tracker before re-acquiring
+      if (this.mediaStream) {
+        this.mediaStream.getTracks().forEach((track) => track.stop());
+        this.mediaStream = null;
+      }
+
       // Build constraints for getUserMedia
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: this.cameraConfig.facingMode,
           width: { ideal: this.cameraConfig.width },
           height: { ideal: this.cameraConfig.height },
+          frameRate: { ideal: this.cameraConfig.frameRate },
         },
         audio: false,
       };
@@ -308,47 +340,107 @@ export class PoseTracker {
       }
 
       // Request camera access
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (token !== this.lifecycleToken) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      this.mediaStream = stream;
 
-      // Configure video element for mobile compatibility
-      this.videoElement.srcObject = this.mediaStream;
-      this.videoElement.playsInline = true; // Critical for iOS
-      this.videoElement.muted = true;
-      this.videoElement.autoplay = true;
+      // Configure video element for mobile & desktop compatibility
+      videoElement.playsInline = true; // Critical for iOS
+      videoElement.muted = true;
+      videoElement.autoplay = true;
+      videoElement.srcObject = stream;
 
-      // Wait for video to be ready (clean up timeout on resolution/error)
+      // Wait for video metadata/playback readiness without clobbering or leaking handlers
       await new Promise<void>((resolve, reject) => {
-        const video = this.videoElement;
-        if (!video) {
-          reject(new Error('Video element is null'));
-          return;
-        }
+        let settled = false;
+        let timeoutId: number | null = null;
 
-        const timeoutId = window.setTimeout(() => {
-          reject(new Error('Video load timeout'));
-        }, 10000);
+        const cleanup = () => {
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          videoElement.removeEventListener('loadedmetadata', startPlayback);
+          videoElement.removeEventListener('loadeddata', startPlayback);
+          videoElement.removeEventListener('canplay', startPlayback);
+          videoElement.removeEventListener('error', onVideoError);
+          if (this.abortPendingCameraWait === abortWait) {
+            this.abortPendingCameraWait = null;
+          }
+        };
+
+        const finishResolve = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+
+        const finishReject = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        };
+
+        const abortWait = () => {
+          // Silently settle on dispose so unmount cleanup doesn't emit unhandled rejections
+          finishResolve();
+        };
+
+        const onVideoError = () => {
+          finishReject(new Error('Video stream error'));
+        };
 
         const startPlayback = () => {
-          video.play()
+          if (settled || token !== this.lifecycleToken) {
+            finishResolve();
+            return;
+          }
+
+          videoElement
+            .play()
             .then(() => {
-              window.clearTimeout(timeoutId);
-              resolve();
+              finishResolve();
             })
-            .catch((playErr) => {
-              window.clearTimeout(timeoutId);
-              reject(playErr);
+            .catch((playErr: unknown) => {
+              // AbortError happens when srcObject changes concurrently; treat stale token as benign
+              if (token !== this.lifecycleToken) {
+                finishResolve();
+                return;
+              }
+              finishReject(playErr);
             });
         };
 
-        if (video.readyState >= 1) {
+        this.abortPendingCameraWait = abortWait;
+
+        timeoutId = window.setTimeout(() => {
+          finishReject(new Error('Video load timeout'));
+        }, 15000);
+
+        videoElement.addEventListener('loadedmetadata', startPlayback);
+        videoElement.addEventListener('loadeddata', startPlayback);
+        videoElement.addEventListener('canplay', startPlayback);
+        videoElement.addEventListener('error', onVideoError);
+
+        if (videoElement.readyState >= 1) {
           startPlayback();
-        } else {
-          video.onloadedmetadata = startPlayback;
         }
       });
 
+      if (token !== this.lifecycleToken) {
+        return;
+      }
+
       this.setStatus('READY');
     } catch (err) {
+      if (token !== this.lifecycleToken) {
+        return;
+      }
       console.error('Failed to start camera:', err);
 
       // Map error to specific type
@@ -406,6 +498,7 @@ export class PoseTracker {
    */
   stop(): void {
     this.isRunning = false;
+    this.lastVideoTime = -1;
 
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -422,18 +515,25 @@ export class PoseTracker {
    * Release all resources (camera, MediaPipe, canvas).
    */
   dispose(): void {
+    this.lifecycleToken++;
+    this.abortPendingCameraWait?.();
+    this.abortPendingCameraWait = null;
     this.stop();
 
-    // Stop camera stream
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
+    const ownedStream = this.mediaStream;
+
+    // Only clear srcObject if this tracker actively owns it (prevents wiping a remounted instance)
+    if (this.videoElement) {
+      if (ownedStream && this.videoElement.srcObject === ownedStream) {
+        this.videoElement.srcObject = null;
+      }
+      this.videoElement = null;
     }
 
-    // Clear video element
-    if (this.videoElement) {
-      this.videoElement.srcObject = null;
-      this.videoElement = null;
+    // Stop camera stream
+    if (ownedStream) {
+      ownedStream.getTracks().forEach((track) => track.stop());
+      this.mediaStream = null;
     }
 
     // Dispose MediaPipe resources
@@ -520,14 +620,21 @@ export class PoseTracker {
 
     const now = performance.now();
 
-    // Adaptive FPS throttling: skip inference if within budget or previous inference ran hot
+    // Adaptive FPS throttling + duplicate frame guard:
+    // - 2ms jitter tolerance avoids dropping 60Hz vsync to 30Hz
+    // - video.currentTime guard avoids re-running inference twice on the same 30Hz webcam frame
     const timeSinceLastInference = now - this.lastInferenceTime;
-    const shouldRunInference = timeSinceLastInference >= this.adaptiveInferenceInterval;
+    const budgetWithJitterMs = Math.max(0, this.adaptiveInferenceInterval - 2);
+    const hasNewVideoFrame =
+      this.lastVideoTime === -1 || video.currentTime !== this.lastVideoTime;
+    const shouldRunInference =
+      hasNewVideoFrame && timeSinceLastInference >= budgetWithJitterMs;
 
     let landmarks: NormalizedLandmark[] | null = this.lastLandmarks;
     let worldLandmarks: Landmark[] | undefined = this.lastWorldLandmarks;
 
     if (shouldRunInference) {
+      this.lastVideoTime = video.currentTime;
       const inferStart = performance.now();
       const result = this.poseLandmarker.detectForVideo(video, now);
       const inferDuration = performance.now() - inferStart;

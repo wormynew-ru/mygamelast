@@ -164,6 +164,7 @@ export interface WorkoutSessionConfig {
   enableSound?: boolean;
   enableVoice?: boolean;
   cameraFacingMode?: 'user' | 'environment';
+  targetPoseFps?: 30 | 60;
   /** Optional dependency injection for testing */
   poseTracker?: PoseTrackerLike;
   soundFX?: SoundFXLike;
@@ -248,6 +249,7 @@ export class WorkoutSession {
 
   private wakeLock: WakeLockSentinel | null = null;
   private boundVisibilityHandler: (() => void) | null = null;
+  private startToken = 0;
 
   constructor(config: WorkoutSessionConfig) {
     this.exerciseDetector = config.exerciseDetector;
@@ -261,11 +263,18 @@ export class WorkoutSession {
     this.videoElement = config.videoElement;
     this.canvasElement = config.canvasElement;
 
+    const targetPoseFps = config.targetPoseFps ?? 60;
     this.poseTracker =
       config.poseTracker ??
-      new PoseTracker({
-        facingMode: config.cameraFacingMode ?? 'user',
-      });
+      new PoseTracker(
+        {
+          facingMode: config.cameraFacingMode ?? 'user',
+          frameRate: targetPoseFps,
+        },
+        {
+          targetInferenceFPS: targetPoseFps,
+        }
+      );
 
     this.poseTracker.onPose(this.handlePoseDetected.bind(this));
 
@@ -282,15 +291,20 @@ export class WorkoutSession {
       return;
     }
 
+    const token = ++this.startToken;
     this.setState('STARTING');
 
     try {
       if (this.enableSound) {
         await this.soundFX.init();
+        if (token !== this.startToken) return;
       }
 
       await this.poseTracker.loadModel();
+      if (token !== this.startToken) return;
+
       await this.poseTracker.startCamera(this.videoElement);
+      if (token !== this.startToken) return;
 
       this.resetTrackingCounters();
 
@@ -308,6 +322,10 @@ export class WorkoutSession {
 
       this.attachLifecycleListeners();
       await this.requestWakeLock();
+      if (token !== this.startToken) {
+        void this.releaseWakeLock();
+        return;
+      }
 
       this.setState('ACTIVE');
 
@@ -315,6 +333,9 @@ export class WorkoutSession {
         this.soundFX.play('REP_COMPLETE');
       }
     } catch (error) {
+      if (token !== this.startToken) {
+        return;
+      }
       const trackerErr = this.poseTracker.getError?.();
       const errName = error instanceof Error ? error.name : '';
       let message: string;
@@ -372,6 +393,7 @@ export class WorkoutSession {
   }
 
   stop(): void {
+    this.startToken++;
     this.detachLifecycleListeners();
     void this.releaseWakeLock();
     this.poseTracker.dispose();
@@ -1157,5 +1179,6 @@ export function createWorkoutSessionForBattle(params: {
     enableSound: store.settings.soundEnabled,
     enableVoice: store.settings.voiceEnabled,
     cameraFacingMode: store.settings.cameraFacingMode,
+    targetPoseFps: store.settings.targetPoseFps,
   });
 }

@@ -82,6 +82,7 @@ const PHASE_KEYS: Record<string, TranslationKey> = {
 export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const { t } = useTranslation();
   const cameraFacingMode = useGameStore((state) => state.settings.cameraFacingMode);
+  const targetPoseFps = useGameStore((state) => state.settings.targetPoseFps);
   const exerciseCalibration = useGameStore((state) => state.settings.exerciseCalibration);
   const updateExerciseCalibration = useGameStore((state) => state.updateExerciseCalibration);
   const resetExerciseCalibration = useGameStore((state) => state.resetExerciseCalibration);
@@ -128,8 +129,8 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
     const initSystem = async () => {
       try {
         const tracker = new PoseTracker(
-          { facingMode: cameraFacingMode, width: 640, height: 480 },
-          { delegate: 'GPU' }
+          { facingMode: cameraFacingMode, width: 640, height: 480, frameRate: targetPoseFps },
+          { delegate: 'GPU', targetInferenceFPS: targetPoseFps }
         );
         const soundFX = new SoundFX({ volume: 0.7, enabled: true });
 
@@ -220,7 +221,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
       trackerRef.current?.dispose();
       soundFXRef.current?.dispose();
     };
-  }, [cameraFacingMode]);
+  }, [cameraFacingMode, targetPoseFps]);
 
   const handleReset = () => {
     detectorRef.current?.reset();

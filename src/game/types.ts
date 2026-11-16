@@ -211,6 +211,7 @@ export interface GameState {
     soundEnabled: boolean;
     voiceEnabled: boolean;
     cameraFacingMode: 'user' | 'environment';
+    targetPoseFps: 30 | 60;
     exerciseConfigs: Record<string, unknown>; // exerciseId -> ExerciseConfig
     exerciseCalibration: ExerciseCalibrationSettings;
     language: 'ru' | 'en'; // UI language
