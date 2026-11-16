@@ -18,7 +18,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { isPlotReadyToHarvest } from '../game/data/garden';
-import { getTotalMixCount } from '../game/data/sanctuary';
+import { getActiveSanctuarySynergies, getTotalMixCount } from '../game/data/sanctuary';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { ACHIEVEMENTS } from '../game/data/achievements';
 import {
@@ -84,6 +84,7 @@ export function MainMenu({
     .slice(0, garden.unlockedPlots)
     .filter((p) => p.weedId !== null).length;
   const totalMixes = getTotalMixCount(sanctuary.mixInventory);
+  const activeSynergies = getActiveSanctuarySynergies(sanctuary.activeBuffs);
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const attackBonus = effectivePlayer.attack - basePlayer.attack;
@@ -343,7 +344,13 @@ export function MainMenu({
                 <div className="text-xs text-slate-400 mt-0.5 font-numeric">
                   {sanctuary.activeBuffs.length > 0 ? (
                     <span className="text-emerald-400 font-semibold">
-                      {t('sanctuary.alreadyArmed')}: {sanctuary.activeBuffs.length} ·{' '}
+                      {t('sanctuary.alreadyArmed')}: {sanctuary.activeBuffs.length}
+                      {activeSynergies.length > 0 ? (
+                        <span className="text-amber-300 ml-1">
+                          ({activeSynergies.length} {t('sanctuary.synergyActive').toLowerCase()})
+                        </span>
+                      ) : null}{' '}
+                      ·{' '}
                     </span>
                   ) : null}
                   {totalMixes > 0

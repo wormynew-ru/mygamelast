@@ -1,11 +1,12 @@
 /**
- * SanctuaryScreen - Hero's Hideout & Botanical Mix Lab.
- * Craft harvested Garden crops into combat mixes, upgrade lab capacity,
- * recover HP, and arm pre-battle buffs for upcoming fights.
+ * SanctuaryScreen - Hero's Hideout & Mix Lab.
+ * Craft harvested Garden crops and Monster Trophies into 12 combat mixes & risky mutagens,
+ * combine 2-3 Lab slots for Combo Synergies, recover HP, and arm/swap pre-battle buffs.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUpCircle,
   Check,
@@ -13,32 +14,44 @@ import {
   FlaskConical,
   Heart,
   Shield,
+  Sparkles,
   Sprout,
   Sword,
   Swords,
+  Trophy,
+  X,
   Zap,
 } from 'lucide-react';
 import { SEEDS, SEED_ORDER } from '../game/data/garden';
 import {
+  MONSTER_TROPHIES,
+  MONSTER_TROPHY_ORDER,
   SANCTUARY_LAB_TIERS,
   SANCTUARY_MIX_BLUEPRINTS,
   SANCTUARY_MIX_MAP,
+  SANCTUARY_SYNERGIES,
+  SANCTUARY_SYNERGY_MAP,
   getAggregatedSanctuaryBuffs,
   getMixEffectiveHeal,
   getNextSanctuaryLabTier,
   getTotalCropCount,
   getTotalMixCount,
+  getTotalTrophyCount,
   isMixReadyToCraft,
   type SanctuaryMixBlueprint,
 } from '../game/data/sanctuary';
-import type { SanctuaryLabTier, SanctuaryMixId } from '../game/types';
+import type { SanctuaryLabTier, SanctuaryMixCategory, SanctuaryMixId } from '../game/types';
 import { selectEffectivePlayerStats, useGameStore } from '../game/store';
-import { useTranslation } from '../i18n/useTranslation';
+import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import {
+  EXERCISE_DISCIPLINE_KEYS,
+  MONSTER_TROPHY_KEYS,
   RARITY_KEYS,
   RARITY_TEXT_CLASS,
+  SANCTUARY_CATEGORY_KEYS,
   SANCTUARY_LAB_KEYS,
   SANCTUARY_MIX_KEYS,
+  SANCTUARY_SYNERGY_KEYS,
   SEED_KEYS,
 } from './gameKeys';
 import { useVoiceCommandHandler } from './VoiceControl';
@@ -49,6 +62,16 @@ interface SanctuaryScreenProps {
   onOpenBattle: () => void;
 }
 
+type RecipeFilter = 'ALL' | SanctuaryMixCategory | 'READY';
+
+const FILTER_OPTIONS: { id: RecipeFilter; labelKey: TranslationKey }[] = [
+  { id: 'ALL', labelKey: 'sanctuary.filter.ALL' },
+  { id: 'BASE', labelKey: 'sanctuary.filter.BASE' },
+  { id: 'DISCIPLINE', labelKey: 'sanctuary.filter.DISCIPLINE' },
+  { id: 'MUTAGEN', labelKey: 'sanctuary.filter.MUTAGEN' },
+  { id: 'READY', labelKey: 'sanctuary.filter.READY' },
+];
+
 export function SanctuaryScreen({
   onBack,
   onOpenGarden,
@@ -56,6 +79,7 @@ export function SanctuaryScreen({
 }: SanctuaryScreenProps) {
   const { t } = useTranslation();
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [recipeFilter, setRecipeFilter] = useState<RecipeFilter>('ALL');
 
   const coins = useGameStore((state) => state.coins);
   const basePlayer = useGameStore((state) => state.player);
@@ -63,7 +87,15 @@ export function SanctuaryScreen({
   const sanctuary = useGameStore((state) => state.sanctuary);
   const craftMix = useGameStore((state) => state.craftMix);
   const activateMixBuff = useGameStore((state) => state.activateMixBuff);
+  const deactivateMixBuff = useGameStore((state) => state.deactivateMixBuff);
   const upgradeSanctuaryLab = useGameStore((state) => state.upgradeSanctuaryLab);
+
+  const trophyInventory = sanctuary.trophyInventory ?? {
+    TROPHY_FIZZ_CORE: 0,
+    TROPHY_GLAZE_SHELL: 0,
+    TROPHY_CAPSAICIN_DROP: 0,
+    TROPHY_CROWN_SPICE: 0,
+  };
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const currentLab = SANCTUARY_LAB_TIERS[sanctuary.labTier];
@@ -72,6 +104,7 @@ export function SanctuaryScreen({
   const aggregatedBuffs = getAggregatedSanctuaryBuffs(sanctuary.activeBuffs, sanctuary.labTier);
 
   const totalCrops = getTotalCropCount(cropInventory);
+  const totalTrophies = getTotalTrophyCount(trophyInventory);
   const totalMixes = getTotalMixCount(sanctuary.mixInventory);
   const hpPercent =
     effectivePlayer.maxHp > 0
@@ -98,6 +131,11 @@ export function SanctuaryScreen({
     }
   };
 
+  const handleDeactivate = (mixId: SanctuaryMixId) => {
+    if (!deactivateMixBuff(mixId)) return;
+    showToast(`${t('sanctuary.disarmedToast')}: ${t(SANCTUARY_MIX_KEYS[mixId].name)}`);
+  };
+
   useVoiceCommandHandler((cmd) => {
     switch (cmd.type) {
       case 'NAV_GARDEN':
@@ -115,39 +153,157 @@ export function SanctuaryScreen({
     }
   });
 
+  const filteredBlueprints = useMemo(() => {
+    return SANCTUARY_MIX_BLUEPRINTS.filter((bp) => {
+      if (recipeFilter === 'ALL') return true;
+      if (recipeFilter === 'READY') {
+        return isMixReadyToCraft(cropInventory, bp, trophyInventory);
+      }
+      return bp.category === recipeFilter;
+    });
+  }, [recipeFilter, cropInventory, trophyInventory]);
+
+  const filterCounts = useMemo(() => {
+    const readyCount = SANCTUARY_MIX_BLUEPRINTS.filter((bp) =>
+      isMixReadyToCraft(cropInventory, bp, trophyInventory)
+    ).length;
+    return {
+      ALL: SANCTUARY_MIX_BLUEPRINTS.length,
+      BASE: SANCTUARY_MIX_BLUEPRINTS.filter((b) => b.category === 'BASE').length,
+      DISCIPLINE: SANCTUARY_MIX_BLUEPRINTS.filter((b) => b.category === 'DISCIPLINE').length,
+      MUTAGEN: SANCTUARY_MIX_BLUEPRINTS.filter((b) => b.category === 'MUTAGEN').length,
+      READY: readyCount,
+    };
+  }, [cropInventory, trophyInventory]);
+
+  const getSynergyHintForMix = (mixId: SanctuaryMixId): string[] => {
+    const hints: string[] = [];
+    for (const syn of SANCTUARY_SYNERGIES) {
+      if (syn.requiredMixes?.includes(mixId)) {
+        const partnerNames = syn.requiredMixes
+          .filter((id) => id !== mixId)
+          .map((id) => t(SANCTUARY_MIX_KEYS[id].name));
+        const synName = t(SANCTUARY_SYNERGY_KEYS[syn.id].name);
+        if (partnerNames.length > 0) {
+          hints.push(`${synName} (+ ${partnerNames.join(', ')})`);
+        } else {
+          hints.push(synName);
+        }
+      }
+    }
+    return hints;
+  };
+
   const renderMixStatLines = (bp: SanctuaryMixBlueprint) => {
+    const eff = bp.effect;
     const healHp = getMixEffectiveHeal(bp, sanctuary.labTier);
-    const parts: string[] = [];
-    if (healHp > 0) parts.push(`${t('sanctuary.statInstantHeal')}: +${healHp} HP`);
-    if (bp.effect.attackBonus > 0) {
-      parts.push(`${t('sanctuary.statAttack')} +${bp.effect.attackBonus}`);
-    }
-    if (bp.effect.defenseBonus > 0) {
-      parts.push(`${t('sanctuary.statDefense')} +${bp.effect.defenseBonus}`);
-    }
-    if (bp.effect.critChanceBonus > 0) {
-      parts.push(`${t('sanctuary.statCrit')} +${Math.round(bp.effect.critChanceBonus * 100)}%`);
-    }
-    if (bp.effect.comboWindowBonusMs > 0) {
-      parts.push(`${t('sanctuary.statComboWindow')} +${(bp.effect.comboWindowBonusMs / 1000).toFixed(1)}s`);
-    }
-    if (bp.effect.incomingDamageMultiplier < 1) {
-      parts.push(
-        `${t('sanctuary.statDamageReduce')} -${Math.round((1 - bp.effect.incomingDamageMultiplier) * 100)}%`
+    const positives: string[] = [];
+    const drawbacks: string[] = [];
+
+    if (healHp > 0) positives.push(`${t('sanctuary.statInstantHeal')}: +${healHp} HP`);
+    if (eff.attackBonus > 0) positives.push(`${t('sanctuary.statAttack')} +${eff.attackBonus}`);
+    if (eff.defenseBonus > 0) positives.push(`${t('sanctuary.statDefense')} +${eff.defenseBonus}`);
+    if (eff.defenseBonus < 0) drawbacks.push(`${t('sanctuary.statDefense')} ${eff.defenseBonus}`);
+
+    if (eff.globalDamageMultiplier && eff.globalDamageMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statGlobalDmg')} +${Math.round((eff.globalDamageMultiplier - 1) * 100)}%`
       );
     }
-    if (bp.effect.startingUltimateCharge > 0) {
-      parts.push(`${t('sanctuary.statStartUlt')} +${bp.effect.startingUltimateCharge}%`);
-    }
-    if (bp.effect.ultimateChargeMultiplier > 1) {
-      parts.push(
-        `${t('sanctuary.statUltCharge')} +${Math.round((bp.effect.ultimateChargeMultiplier - 1) * 100)}%`
+    if (eff.strengthDamageMultiplier && eff.strengthDamageMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statStrengthDmg')} +${Math.round((eff.strengthDamageMultiplier - 1) * 100)}%`
       );
     }
-    if (bp.effect.xpMultiplier > 1) {
-      parts.push(`${t('sanctuary.statXpBoost')} +${Math.round((bp.effect.xpMultiplier - 1) * 100)}%`);
+    if (eff.staticDamageMultiplier && eff.staticDamageMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statStaticDmg')} +${Math.round((eff.staticDamageMultiplier - 1) * 100)}%`
+      );
     }
-    return parts;
+    if (eff.cardioDamageMultiplier && eff.cardioDamageMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statCardioDmg')} +${Math.round((eff.cardioDamageMultiplier - 1) * 100)}%`
+      );
+    }
+    if (eff.dumbbellDamageBonus && eff.dumbbellDamageBonus > 0) {
+      positives.push(
+        `${t('sanctuary.statDumbbellDmg')} +${Math.round(eff.dumbbellDamageBonus * 100)}%`
+      );
+    }
+    if (eff.armorPierceRatio && eff.armorPierceRatio > 0) {
+      positives.push(
+        `${t('sanctuary.statArmorPierce')} ${Math.round(eff.armorPierceRatio * 100)}%`
+      );
+    }
+    if (eff.shieldBreakBonus && eff.shieldBreakBonus > 0) {
+      positives.push(`${t('sanctuary.statShieldBreak')} +${eff.shieldBreakBonus}`);
+    }
+    if (eff.blockMitigationOverride) {
+      positives.push(
+        `${t('sanctuary.statStaticBlock')} ${Math.round(eff.blockMitigationOverride * 100)}%`
+      );
+    }
+    if (eff.toxicCleanseHoldTicksOverride) {
+      positives.push(`${t('sanctuary.statCleanseFast')} ${eff.toxicCleanseHoldTicksOverride}s`);
+    }
+    if (eff.toxicImmunity) {
+      positives.push(t('sanctuary.statToxicImmunity'));
+    }
+    if (eff.critChanceBonus > 0) {
+      positives.push(`${t('sanctuary.statCrit')} +${Math.round(eff.critChanceBonus * 100)}%`);
+    }
+    if (eff.critMultiplierBonus && eff.critMultiplierBonus > 0) {
+      positives.push(
+        `${t('sanctuary.statCritMult')} +${Math.round(eff.critMultiplierBonus * 100)}%`
+      );
+    }
+    if (eff.comboWindowBonusMs > 0) {
+      positives.push(
+        `${t('sanctuary.statComboWindow')} +${(eff.comboWindowBonusMs / 1000).toFixed(1)}s`
+      );
+    } else if (eff.comboWindowBonusMs < 0) {
+      drawbacks.push(
+        `${t('sanctuary.statComboWindow')} ${(eff.comboWindowBonusMs / 1000).toFixed(1)}s`
+      );
+    }
+    if (eff.incomingDamageMultiplier < 1) {
+      positives.push(
+        `${t('sanctuary.statDamageReduce')} -${Math.round((1 - eff.incomingDamageMultiplier) * 100)}%`
+      );
+    } else if (eff.incomingDamageMultiplier > 1) {
+      drawbacks.push(
+        `${t('sanctuary.statDamageReduce')} +${Math.round((eff.incomingDamageMultiplier - 1) * 100)}%`
+      );
+    }
+    if (eff.maxHpMultiplier && eff.maxHpMultiplier < 1) {
+      drawbacks.push(
+        `${t('sanctuary.statMaxHp')} -${Math.round((1 - eff.maxHpMultiplier) * 100)}%`
+      );
+    }
+    if (eff.startingUltimateCharge > 0) {
+      positives.push(`${t('sanctuary.statStartUlt')} +${eff.startingUltimateCharge}%`);
+    }
+    if (eff.ultimateChargeMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statUltCharge')} +${Math.round((eff.ultimateChargeMultiplier - 1) * 100)}%`
+      );
+    }
+    if (eff.healOnUlt && eff.healOnUlt > 0) {
+      positives.push(`${t('sanctuary.statUltHeal')} +${eff.healOnUlt} HP`);
+    }
+    if (eff.selfDamageOnUlt && eff.selfDamageOnUlt > 0) {
+      drawbacks.push(`${t('sanctuary.statUltSelfDmg')} -${eff.selfDamageOnUlt} HP`);
+    }
+    if (eff.xpMultiplier > 1) {
+      positives.push(`${t('sanctuary.statXpBoost')} +${Math.round((eff.xpMultiplier - 1) * 100)}%`);
+    }
+    if (eff.coinMultiplier && eff.coinMultiplier > 1) {
+      positives.push(
+        `${t('sanctuary.statCoinBoost')} +${Math.round((eff.coinMultiplier - 1) * 100)}%`
+      );
+    }
+
+    return { positives, drawbacks };
   };
 
   const slotIndices = Array.from({ length: currentLab.maxBuffSlots }, (_, i) => i);
@@ -195,6 +351,10 @@ export function SanctuaryScreen({
             </span>
             <span aria-hidden="true">·</span>
             <span>
+              {t('sanctuary.trophiesTitle')}: <strong className="text-amber-400">{totalTrophies}</strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
               {t('sanctuary.craftedTotal')}: <strong className="text-white">{sanctuary.totalCrafted}</strong>
             </span>
           </div>
@@ -214,7 +374,7 @@ export function SanctuaryScreen({
 
         {/* Active Battle Buff Slots & Lab Tier / Hero Status Split */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          {/* Active Pre-Battle Buffs */}
+          {/* Active Pre-Battle Buffs + Synergies */}
           <section className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-5">
             <div className="space-y-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -238,7 +398,7 @@ export function SanctuaryScreen({
                     return (
                       <div
                         key={slotIdx}
-                        className="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-3.5 py-4 flex flex-col items-center justify-center text-center gap-1 min-h-[88px]"
+                        className="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-3.5 py-4 flex flex-col items-center justify-center text-center gap-1 min-h-[96px]"
                       >
                         <span className="text-xs font-medium text-slate-500">
                           {t('sanctuary.emptySlot')} #{slotIdx + 1}
@@ -250,26 +410,84 @@ export function SanctuaryScreen({
                   return (
                     <div
                       key={slotIdx}
-                      className="rounded-lg border border-emerald-500/50 bg-slate-950 px-3.5 py-3 flex flex-col justify-between gap-1.5 min-h-[88px]"
+                      className={`rounded-lg border bg-slate-950 px-3.5 py-3 flex flex-col justify-between gap-2 min-h-[96px] ${
+                        blueprint.isRisky ? 'border-rose-500/60' : 'border-emerald-500/50'
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-2xl leading-none" aria-hidden="true">
                           {blueprint.icon}
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{t('sanctuary.alreadyArmed')}</span>
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeactivate(mixId)}
+                          title={t('sanctuary.deactivate')}
+                          aria-label={`${t('sanctuary.deactivate')} ${t(SANCTUARY_MIX_KEYS[mixId].name)}`}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-rose-300 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>{t('sanctuary.deactivate')}</span>
+                        </button>
                       </div>
-                      <div className="text-xs font-bold text-white truncate">
-                        {t(SANCTUARY_MIX_KEYS[mixId].name)}
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">
+                          {t(SANCTUARY_MIX_KEYS[mixId].name)}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                          {blueprint.isRisky ? (
+                            <span className="text-rose-400 inline-flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                              <span>{t('sanctuary.riskyBadge')}</span>
+                            </span>
+                          ) : blueprint.disciplineFocus ? (
+                            t(EXERCISE_DISCIPLINE_KEYS[blueprint.disciplineFocus])
+                          ) : (
+                            t(SANCTUARY_CATEGORY_KEYS[blueprint.category])
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <p className="text-xs text-slate-400 leading-relaxed">{t('sanctuary.activeBuffsHint')}</p>
+              {/* Active Slot Synergies Panel */}
+              {aggregatedBuffs.activeSynergies.length > 0 ? (
+                <div className="rounded-lg border border-amber-500/50 bg-amber-950/20 px-3.5 py-3 space-y-2">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t('sanctuary.synergyActive')}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {aggregatedBuffs.activeSynergies.map((synId) => {
+                      const synDef = SANCTUARY_SYNERGY_MAP[synId];
+                      const synKeys = SANCTUARY_SYNERGY_KEYS[synId];
+                      return (
+                        <div key={synId} className="text-xs text-slate-200 leading-snug">
+                          <span className="mr-1.5" aria-hidden="true">
+                            {synDef.icon}
+                          </span>
+                          <strong className="text-amber-300">{t(synKeys.name)}:</strong>{' '}
+                          <span className="text-slate-300">{t(synKeys.effect)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  {currentLab.maxBuffSlots >= 2
+                    ? t('sanctuary.synergyHint')
+                    : t('sanctuary.activeBuffsHint')}
+                </p>
+              )}
+
+              {aggregatedBuffs.hasRiskyMutagen && (
+                <div className="flex items-center gap-2 text-xs text-rose-300 font-medium">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{t('sanctuary.riskyWarning')}</span>
+                </div>
+              )}
             </div>
 
             {/* Live Hero Readiness Strip */}
@@ -279,6 +497,11 @@ export function SanctuaryScreen({
                   <Heart className="w-4 h-4 text-emerald-400" />
                   <span>
                     {effectivePlayer.hp} / {effectivePlayer.maxHp} HP
+                    {aggregatedBuffs.maxHpMultiplier < 1 && (
+                      <strong className="text-rose-400 ml-1">
+                        (-{Math.round((1 - aggregatedBuffs.maxHpMultiplier) * 100)}%)
+                      </strong>
+                    )}
                   </span>
                 </span>
                 <div className="flex flex-wrap items-center gap-4 text-slate-300">
@@ -302,6 +525,11 @@ export function SanctuaryScreen({
                           (+{aggregatedBuffs.defenseBonus})
                         </strong>
                       )}
+                      {aggregatedBuffs.defenseBonus < 0 && (
+                        <strong className="text-rose-400 ml-1">
+                          ({aggregatedBuffs.defenseBonus})
+                        </strong>
+                      )}
                     </span>
                   </span>
                   {aggregatedBuffs.startingUltimateCharge > 0 && (
@@ -319,12 +547,33 @@ export function SanctuaryScreen({
                   style={{ width: `${hpPercent}%` }}
                 />
               </div>
-              {effectivePlayer.attack > basePlayer.attack && (
-                <div className="text-[11px] text-slate-500 font-numeric">
-                  {t('stats.level')} {basePlayer.level} · {t('stats.crit')}{' '}
-                  {Math.round(effectivePlayer.critChance * 100)}%
-                </div>
-              )}
+
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 font-numeric">
+                <span>
+                  {t('stats.level')} {basePlayer.level}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {t('stats.crit')} {Math.round(effectivePlayer.critChance * 100)}% (×
+                  {effectivePlayer.critMultiplier.toFixed(1)})
+                </span>
+                {aggregatedBuffs.xpMultiplier > 1 && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-emerald-400">
+                      XP +{Math.round((aggregatedBuffs.xpMultiplier - 1) * 100)}%
+                    </span>
+                  </>
+                )}
+                {aggregatedBuffs.coinMultiplier > 1 && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-amber-400">
+                      {t('sanctuary.statCoinBoost')} +{Math.round((aggregatedBuffs.coinMultiplier - 1) * 100)}%
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </section>
 
@@ -408,21 +657,42 @@ export function SanctuaryScreen({
           </section>
         </div>
 
-        {/* Botanical Mix Recipes & Crafting Workbench */}
+        {/* Mix & Mutagen Recipes Workbench */}
         <section className="space-y-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <h2 className="text-lg font-bold text-white">{t('sanctuary.recipesTitle')}</h2>
+
+            {/* Category Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg max-w-full">
+              {FILTER_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setRecipeFilter(opt.id)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                    recipeFilter === opt.id
+                      ? opt.id === 'MUTAGEN'
+                        ? 'bg-rose-500 text-white'
+                        : 'bg-emerald-500 text-slate-950'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {t(opt.labelKey)} ({filterCounts[opt.id]})
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {SANCTUARY_MIX_BLUEPRINTS.map((mix) => {
-              const canCraft = isMixReadyToCraft(cropInventory, mix);
+            {filteredBlueprints.map((mix) => {
+              const canCraft = isMixReadyToCraft(cropInventory, mix, trophyInventory);
               const stock = sanctuary.mixInventory[mix.id] ?? 0;
               const isArmed = sanctuary.activeBuffs.includes(mix.id);
               const slotsFull = sanctuary.activeBuffs.length >= currentLab.maxBuffSlots;
               const canArm = stock > 0 && !isArmed && !slotsFull;
               const keys = SANCTUARY_MIX_KEYS[mix.id];
-              const statLines = renderMixStatLines(mix);
+              const { positives, drawbacks } = renderMixStatLines(mix);
+              const synergyHints = getSynergyHintForMix(mix.id);
 
               return (
                 <div
@@ -430,9 +700,11 @@ export function SanctuaryScreen({
                   className={`rounded-xl border p-5 flex flex-col justify-between gap-4 ${
                     isArmed
                       ? 'bg-slate-900 border-emerald-500/70'
-                      : canCraft
-                        ? 'bg-slate-900 border-amber-500/40'
-                        : 'bg-slate-900 border-slate-800'
+                      : mix.isRisky
+                        ? 'bg-slate-900 border-rose-500/35'
+                        : canCraft
+                          ? 'bg-slate-900 border-amber-500/40'
+                          : 'bg-slate-900 border-slate-800'
                   }`}
                 >
                   <div className="space-y-3">
@@ -444,9 +716,19 @@ export function SanctuaryScreen({
                         </span>
                         <div className="min-w-0">
                           <h3 className="text-base font-bold text-white truncate">{t(keys.name)}</h3>
-                          <div className="flex items-center gap-2 text-xs mt-0.5">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs mt-0.5">
                             <span className={`font-medium ${RARITY_TEXT_CLASS[mix.rarity]}`}>
                               {t(RARITY_KEYS[mix.rarity])}
+                            </span>
+                            <span aria-hidden="true" className="text-slate-600">
+                              ·
+                            </span>
+                            <span className={mix.isRisky ? 'text-rose-400 font-medium' : 'text-slate-400'}>
+                              {mix.isRisky
+                                ? t('sanctuary.riskyBadge')
+                                : mix.disciplineFocus
+                                  ? `${t(SANCTUARY_CATEGORY_KEYS[mix.category])} (${t(EXERCISE_DISCIPLINE_KEYS[mix.disciplineFocus])})`
+                                  : t(SANCTUARY_CATEGORY_KEYS[mix.category])}
                             </span>
                             <span aria-hidden="true" className="text-slate-600">
                               ·
@@ -468,13 +750,30 @@ export function SanctuaryScreen({
 
                     <p className="text-xs text-slate-300 leading-relaxed">{t(keys.effect)}</p>
 
-                    {/* Stat Bonuses */}
-                    <div className="text-[11px] font-numeric text-emerald-300/95 leading-relaxed">
-                      {statLines.join(' · ')}
+                    {/* Stat Bonuses & Drawbacks */}
+                    <div className="space-y-1">
+                      {positives.length > 0 && (
+                        <div className="text-[11px] font-numeric text-emerald-300/95 leading-relaxed">
+                          {positives.join(' · ')}
+                        </div>
+                      )}
+                      {drawbacks.length > 0 && (
+                        <div className="inline-flex flex-wrap items-center gap-1.5 text-[11px] font-numeric text-rose-300/95 leading-relaxed">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <span>{drawbacks.join(' · ')}</span>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Required Ingredients */}
-                    <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-800 text-xs font-numeric">
+                    {synergyHints.length > 0 && (
+                      <div className="text-[11px] text-amber-300/90 leading-snug">
+                        <span className="font-semibold">{t('sanctuary.synergyPartners')}:</span>{' '}
+                        {synergyHints.join(' · ')}
+                      </div>
+                    )}
+
+                    {/* Required Ingredients (Crops + Monster Trophies) */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-2 pt-2 border-t border-slate-800 text-xs font-numeric">
                       {mix.ingredients.map((req) => {
                         const have = cropInventory[req.seedId] ?? 0;
                         const enough = have >= req.qty;
@@ -487,6 +786,25 @@ export function SanctuaryScreen({
                           >
                             <span>{SEEDS[req.seedId].icon}</span>
                             <span>{t(SEED_KEYS[req.seedId].name)}</span>
+                            <span>
+                              {Math.min(have, req.qty)}/{req.qty}
+                            </span>
+                          </span>
+                        );
+                      })}
+
+                      {mix.trophyIngredients?.map((req) => {
+                        const have = trophyInventory[req.trophyId] ?? 0;
+                        const enough = have >= req.qty;
+                        return (
+                          <span
+                            key={req.trophyId}
+                            className={`inline-flex items-center gap-1.5 ${
+                              enough ? 'text-amber-300 font-semibold' : 'text-slate-400'
+                            }`}
+                          >
+                            <span>{MONSTER_TROPHIES[req.trophyId].icon}</span>
+                            <span>{t(MONSTER_TROPHY_KEYS[req.trophyId].name)}</span>
                             <span>
                               {Math.min(have, req.qty)}/{req.qty}
                             </span>
@@ -506,23 +824,28 @@ export function SanctuaryScreen({
                       {canCraft ? t('sanctuary.craft') : t('sanctuary.needIngredients')}
                     </button>
 
-                    <button
-                      onClick={() => handleActivate(mix)}
-                      disabled={!canArm}
-                      className={`flex-1 py-2.5 px-4 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
-                        isArmed
-                          ? 'bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 cursor-default'
-                          : canArm
+                    {isArmed ? (
+                      <button
+                        onClick={() => handleDeactivate(mix.id)}
+                        className="flex-1 py-2.5 px-4 bg-emerald-950/60 hover:bg-rose-950/50 border border-emerald-600/50 hover:border-rose-500/60 text-emerald-300 hover:text-rose-200 text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        {t('sanctuary.deactivate')}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleActivate(mix)}
+                        disabled={!canArm}
+                        className={`flex-1 py-2.5 px-4 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
+                          canArm
                             ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                             : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      {isArmed
-                        ? t('sanctuary.alreadyArmed')
-                        : slotsFull && stock > 0
+                        }`}
+                      >
+                        {slotsFull && stock > 0
                           ? t('sanctuary.slotsFull')
                           : t('sanctuary.activate')}
-                    </button>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -530,53 +853,108 @@ export function SanctuaryScreen({
           </div>
         </section>
 
-        {/* Botanical Stash Summary & Link to Garden */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Sprout className="w-4 h-4 text-emerald-400 shrink-0" />
-              <h2 className="text-base font-semibold text-white">{t('garden.stashTitle')}</h2>
+        {/* Monster Trophies & Botanical Stash */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Monster Trophies */}
+          <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
+                <h2 className="text-base font-semibold text-white">
+                  {t('sanctuary.trophiesTitle')}
+                </h2>
+              </div>
+              <span className="font-numeric text-xs font-semibold text-amber-400">
+                {totalTrophies}
+              </span>
             </div>
-            <button
-              onClick={onOpenGarden}
-              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors whitespace-nowrap"
-            >
-              {t('sanctuary.openGarden')} →
-            </button>
-          </div>
 
-          {totalCrops === 0 ? (
-            <p className="text-xs text-slate-400">{t('garden.stashEmpty')}</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {SEED_ORDER.map((seedId) => {
-                const qty = cropInventory[seedId] ?? 0;
+            <p className="text-xs text-slate-400">
+              {totalTrophies === 0 ? t('sanctuary.trophiesEmpty') : t('sanctuary.trophiesHint')}
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {MONSTER_TROPHY_ORDER.map((trophyId) => {
+                const qty = trophyInventory[trophyId] ?? 0;
+                const def = MONSTER_TROPHIES[trophyId];
+                const keys = MONSTER_TROPHY_KEYS[trophyId];
                 return (
                   <div
-                    key={seedId}
+                    key={trophyId}
                     className={`rounded-lg border px-3.5 py-2.5 flex items-center justify-between gap-2 ${
                       qty > 0
-                        ? 'bg-slate-950 border-emerald-500/40'
+                        ? 'bg-slate-950 border-amber-500/40'
                         : 'bg-slate-950/60 border-slate-800 opacity-65'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <span className="text-xl shrink-0" aria-hidden="true">
-                        {SEEDS[seedId].icon}
+                        {def.icon}
                       </span>
-                      <span className="text-xs font-semibold text-slate-200 truncate">
-                        {t(SEED_KEYS[seedId].name)}
-                      </span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-200 truncate">
+                          {t(keys.name)}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">{t(keys.source)}</div>
+                      </div>
                     </div>
-                    <span className="font-numeric text-sm font-bold text-emerald-400 shrink-0">
+                    <span className="font-numeric text-sm font-bold text-amber-400 shrink-0">
                       ×{qty}
                     </span>
                   </div>
                 );
               })}
             </div>
-          )}
-        </section>
+          </section>
+
+          {/* Botanical Stash Summary & Link to Garden */}
+          <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Sprout className="w-4 h-4 text-emerald-400 shrink-0" />
+                <h2 className="text-base font-semibold text-white">{t('garden.stashTitle')}</h2>
+              </div>
+              <button
+                onClick={onOpenGarden}
+                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors whitespace-nowrap"
+              >
+                {t('sanctuary.openGarden')} →
+              </button>
+            </div>
+
+            {totalCrops === 0 ? (
+              <p className="text-xs text-slate-400">{t('garden.stashEmpty')}</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {SEED_ORDER.map((seedId) => {
+                  const qty = cropInventory[seedId] ?? 0;
+                  return (
+                    <div
+                      key={seedId}
+                      className={`rounded-lg border px-3.5 py-2.5 flex items-center justify-between gap-2 ${
+                        qty > 0
+                          ? 'bg-slate-950 border-emerald-500/40'
+                          : 'bg-slate-950/60 border-slate-800 opacity-65'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xl shrink-0" aria-hidden="true">
+                          {SEEDS[seedId].icon}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-200 truncate">
+                          {t(SEED_KEYS[seedId].name)}
+                        </span>
+                      </div>
+                      <span className="font-numeric text-sm font-bold text-emerald-400 shrink-0">
+                        ×{qty}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
       </main>
     </div>
   );

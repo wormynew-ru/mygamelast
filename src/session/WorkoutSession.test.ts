@@ -903,4 +903,214 @@ describe('WorkoutSession', () => {
       randomSpy.mockRestore();
     }
   });
+
+  it('applies discipline damage multiplier (TITAN_BREW), ISOTONIC_RHYTHM starting combo, IRON_BASTION thorns & 1s cleanse, and TOXIC_CATALYST surge', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      useGameStore.setState((state) => ({
+        coins: 500,
+        garden: {
+          ...state.garden,
+          cropInventory: {
+            PROTEIN_MINT: 10,
+            IRON_BAMBOO: 10,
+            CHILI_PEPPER: 10,
+            GOLDEN_LOTUS: 5,
+          },
+        },
+      }));
+
+      const store = useGameStore.getState();
+      expect(store.upgradeSanctuaryLab()).toBe(true);
+      expect(store.upgradeSanctuaryLab()).toBe(true);
+      store.addMonsterTrophy('TROPHY_GLAZE_SHELL', 2);
+      store.addMonsterTrophy('TROPHY_FIZZ_CORE', 2);
+      store.addMonsterTrophy('TROPHY_CAPSAICIN_DROP', 2);
+
+      // 1) ISOTONIC_RHYTHM + TITAN_BREW -> startingCombo 3, Strength x1.35 on SQUAT
+      expect(store.craftMix('MINT_ISOTONIC')).toBe(true);
+      expect(store.craftMix('PULSE_FIZZ')).toBe(true);
+      expect(store.craftMix('TITAN_BREW')).toBe(true);
+      expect(store.activateMixBuff('MINT_ISOTONIC')).not.toBeNull();
+      expect(store.activateMixBuff('PULSE_FIZZ')).not.toBeNull();
+      expect(store.activateMixBuff('TITAN_BREW')).not.toBeNull();
+
+      useGameStore.getState().startCombat({ ...createMonster(MONSTERS.BURGER), hp: 100 });
+      const squatDetector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      ]);
+      const tracker1 = createMockTracker();
+      const session1 = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: squatDetector,
+        exerciseDamageMultiplier: 1.0,
+        exerciseId: 'SQUAT',
+        poseTracker: tracker1,
+        soundFX: createMockSoundFX(),
+      });
+      await session1.start();
+      expect(session1.getStatus().comboCount).toBe(3);
+      expect(session1.getStatus().activeSynergies).toEqual(['ISOTONIC_RHYTHM']);
+
+      tracker1.triggerPose(1000);
+      tracker1.triggerPose(1500);
+      // Attack: 10 + 2 (Mint) + 2 (Pulse) + 3 (Titan) = 17 - 2 (DEF) = 15 * 1.25 (combo 4) * 0.75 (SQUAT resistant vs BURGER) * 1.35 (Strength) = 18.98 -> 18
+      expect(session1.getStatus().lastCombatEvent?.damage).toBe(18);
+      session1.stop();
+      useGameStore.getState().consumeActiveSanctuaryBuffs();
+
+      // 2) IRON_BASTION -> 90% block, 8 thorns damage on 0-dmg block, +10 Ult charge, 1s static cleanse
+      expect(store.craftMix('BAMBOO_FORTIFIER')).toBe(true);
+      expect(store.craftMix('MONOLITH_ELIXIR')).toBe(true);
+      expect(store.activateMixBuff('BAMBOO_FORTIFIER')).not.toBeNull();
+      expect(store.activateMixBuff('MONOLITH_ELIXIR')).not.toBeNull();
+
+      useGameStore.getState().startCombat({ ...createMonster(MONSTERS.HOT_SAUCE), hp: 80, attack: 12 });
+      const plankDetector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE', isHolding: false, holdDurationMs: 0 },
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 500 },
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 1200 },
+      ]);
+      const tracker2 = createMockTracker();
+      const session2 = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: plankDetector,
+        exerciseDamageMultiplier: 0.85,
+        exerciseId: 'PLANK',
+        poseTracker: tracker2,
+        soundFX: createMockSoundFX(),
+      });
+      await session2.start();
+      tracker2.triggerPose(1000); // Baseline monster attack timer
+      tracker2.triggerPose(8100); // Blocked strike -> 0 dmg taken, 8 thorns damage, +10 Ult
+      const afterThorns = session2.getStatus();
+      expect(afterThorns.activeSynergies).toEqual(['IRON_BASTION']);
+      expect(afterThorns.lastMonsterAttackEvent?.wasBlocked).toBe(true);
+      expect(afterThorns.lastMonsterAttackEvent?.damageTaken).toBe(0);
+      expect(afterThorns.lastMonsterAttackEvent?.thornsDamage).toBe(8);
+      expect(afterThorns.currentEnemy?.hp).toBe(72);
+      expect(afterThorns.ultimateCharge).toBe(25); // 15 (Tier 3 start) + 10 (Iron Bastion)
+      session2.stop();
+      useGameStore.getState().consumeActiveSanctuaryBuffs();
+
+      // 3) TOXIC_CATALYST -> converts TOXIC counter-attack into Surge stack + Ult charge & selfDamageOnUlt
+      expect(store.craftMix('TOXIC_CATALYST')).toBe(true);
+      expect(store.activateMixBuff('TOXIC_CATALYST')).not.toBeNull();
+      useGameStore.getState().updatePlayer({ hp: 2 });
+      useGameStore.getState().startCombat({ ...createMonster(MONSTERS.BURGER), hp: 200, attack: 5 });
+
+      const toxicDetector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 3, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 4, progress: 0, visibility: 'VISIBLE' },
+      ]);
+      const tracker3 = createMockTracker();
+      const session3 = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: toxicDetector,
+        exerciseDamageMultiplier: 1.0,
+        exerciseId: 'SQUAT',
+        poseTracker: tracker3,
+        soundFX: createMockSoundFX(),
+      });
+      await session3.start();
+      tracker3.triggerPose(1000);
+      tracker3.triggerPose(8100); // Unblocked TOXIC strike -> immune + 1 Toxic Surge stack
+      expect(session3.getStatus().isPlayerDebuffed).toBe(false);
+      expect(session3.getStatus().toxicSurgeStacks).toBe(1);
+      expect(session3.getStatus().hasRiskyMutagen).toBe(true);
+
+      // Push Ult to trigger (selfDamageOnUlt = 3, floors HP safely at 1)
+      tracker3.triggerPose(8500);
+      tracker3.triggerPose(9000);
+      tracker3.triggerPose(9500);
+      tracker3.triggerPose(10000);
+      expect(session3.getStatus().ultimateTriggeredCount).toBe(1);
+      expect(useGameStore.getState().player.hp).toBe(1);
+      session3.stop();
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('persists Sanctuary buffs and ENDLESS_ENDURANCE healing across Endless Arena waves, drops trophies, and consumes buffs on defeat', async () => {
+    useGameStore.setState((state) => ({
+      coins: 500,
+      player: { ...state.player, hp: 50, maxHp: 100 },
+      garden: {
+        ...state.garden,
+        cropInventory: {
+          PROTEIN_MINT: 5,
+          IRON_BAMBOO: 0,
+          CHILI_PEPPER: 2,
+          GOLDEN_LOTUS: 3,
+        },
+      },
+    }));
+
+    const store = useGameStore.getState();
+    expect(store.upgradeSanctuaryLab()).toBe(true);
+    store.addMonsterTrophy('TROPHY_FIZZ_CORE', 2);
+    expect(store.craftMix('ARENA_TONIC')).toBe(true);
+    expect(store.craftMix('LOTUS_NECTAR')).toBe(true);
+    expect(store.activateMixBuff('ARENA_TONIC')).not.toBeNull();
+    expect(store.activateMixBuff('LOTUS_NECTAR')).not.toBeNull();
+
+    // Set HP to 60 before Endless wave 1 victory
+    useGameStore.getState().updatePlayer({ hp: 60 });
+    useGameStore.getState().startCombat({ ...createMonster(MONSTERS.SODA), hp: 5 });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'JUMPING_JACK',
+      mode: 'ENDLESS',
+      endlessWave: 1,
+      poseTracker: tracker,
+      soundFX: createMockSoundFX(),
+    });
+
+    await session.start();
+    tracker.triggerPose(500);
+    tracker.triggerPose(1000);
+
+    const victoryStatus = session.getStatus();
+    expect(victoryStatus.state).toBe('VICTORY');
+    expect(victoryStatus.victorySummary?.droppedTrophy).toEqual({
+      id: 'TROPHY_FIZZ_CORE',
+      qty: 1,
+    });
+    // Endless wave victory heals +10 HP from ENDLESS_ENDURANCE and does NOT consume activeBuffs
+    expect(useGameStore.getState().player.hp).toBe(70);
+    expect(useGameStore.getState().sanctuary.activeBuffs).toEqual([
+      'ARENA_TONIC',
+      'LOTUS_NECTAR',
+    ]);
+    expect(useGameStore.getState().sanctuary.trophyInventory.TROPHY_FIZZ_CORE).toBe(1);
+
+    // Advance to wave 2 with lethal incoming attack -> defeat consumes Endless buffs
+    useGameStore.getState().updatePlayer({ hp: 1 });
+    session.reset({ ...createMonster(MONSTERS.SODA), hp: 200, attack: 50 }, 2);
+    tracker.triggerPose(2000);
+    tracker.triggerPose(10000);
+    expect(session.getStatus().state).toBe('DEFEAT');
+    expect(useGameStore.getState().sanctuary.activeBuffs).toEqual([]);
+
+    session.stop();
+  });
 });

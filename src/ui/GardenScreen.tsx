@@ -33,6 +33,7 @@ import {
   isPlotReadyToHarvest,
 } from '../game/data/garden';
 import {
+  MONSTER_TROPHIES,
   SANCTUARY_MIX_BLUEPRINTS,
   getTotalCropCount,
   isMixReadyToCraft,
@@ -48,6 +49,7 @@ import {
   ITEM_NAME_KEYS,
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
+  MONSTER_TROPHY_KEYS,
   RARITY_KEYS,
   RARITY_TEXT_CLASS,
   SANCTUARY_MIX_KEYS,
@@ -75,6 +77,7 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
 
   const coins = useGameStore((state) => state.coins);
   const garden = useGameStore((state) => state.garden);
+  const trophyInventory = useGameStore((state) => state.sanctuary.trophyInventory);
   const buySeed = useGameStore((state) => state.buySeed);
   const plantSeed = useGameStore((state) => state.plantSeed);
   const waterPlot = useGameStore((state) => state.waterPlot);
@@ -883,7 +886,7 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {SANCTUARY_MIX_BLUEPRINTS.map((mix) => {
-                  const readyToMix = isMixReadyToCraft(cropInventory, mix);
+                  const readyToMix = isMixReadyToCraft(cropInventory, mix, trophyInventory);
                   const keys = SANCTUARY_MIX_KEYS[mix.id];
 
                   return (
@@ -915,28 +918,44 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
                             readyToMix ? 'text-emerald-400' : 'text-slate-500'
                           }`}
                         >
-                          {readyToMix ? t('garden.ingredientsReady') : t('garden.comingSoonBadge')}
+                          {readyToMix ? t('garden.ingredientsReady') : t('sanctuary.needIngredients')}
                         </span>
                       </div>
 
                       <p className="text-xs text-slate-300 leading-snug">{t(keys.effect)}</p>
 
-                      <div className="flex flex-wrap gap-2 pt-1">
+                      <div className="flex flex-wrap gap-3 pt-1 text-xs font-numeric">
                         {mix.ingredients.map((req) => {
                           const have = cropInventory[req.seedId] ?? 0;
                           const enough = have >= req.qty;
                           return (
                             <span
                               key={req.seedId}
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-numeric ${
-                                enough
-                                  ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
-                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              className={`inline-flex items-center gap-1.5 ${
+                                enough ? 'text-emerald-300 font-semibold' : 'text-slate-400'
                               }`}
                             >
                               <span>{SEEDS[req.seedId].icon}</span>
                               <span>{t(SEED_KEYS[req.seedId].name)}</span>
-                              <span className="font-bold">
+                              <span>
+                                {Math.min(have, req.qty)}/{req.qty}
+                              </span>
+                            </span>
+                          );
+                        })}
+                        {mix.trophyIngredients?.map((req) => {
+                          const have = trophyInventory?.[req.trophyId] ?? 0;
+                          const enough = have >= req.qty;
+                          return (
+                            <span
+                              key={req.trophyId}
+                              className={`inline-flex items-center gap-1.5 ${
+                                enough ? 'text-amber-300 font-semibold' : 'text-slate-400'
+                              }`}
+                            >
+                              <span>{MONSTER_TROPHIES[req.trophyId].icon}</span>
+                              <span>{t(MONSTER_TROPHY_KEYS[req.trophyId].name)}</span>
+                              <span>
                                 {Math.min(have, req.qty)}/{req.qty}
                               </span>
                             </span>

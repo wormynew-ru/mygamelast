@@ -33,7 +33,12 @@ import { getCircuitById, type CircuitId } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { getLevelById } from '../game/data/levels';
 import { ITEMS } from '../game/data/items';
-import { SANCTUARY_MIX_MAP } from '../game/data/sanctuary';
+import {
+  MONSTER_TROPHIES,
+  SANCTUARY_MIX_MAP,
+  SANCTUARY_SYNERGY_MAP,
+  getAggregatedSanctuaryBuffs,
+} from '../game/data/sanctuary';
 import { type AchievementId } from '../game/data/achievements';
 import type { BattleRank, WeedId } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
@@ -44,7 +49,9 @@ import {
   EXERCISE_NAME_KEYS,
   ITEM_NAME_KEYS,
   MONSTER_NAME_KEYS,
+  MONSTER_TROPHY_KEYS,
   SANCTUARY_MIX_KEYS,
+  SANCTUARY_SYNERGY_KEYS,
 } from './gameKeys';
 import { VoiceToggleButton, useVoiceCommandHandler } from './VoiceControl';
 
@@ -145,31 +152,41 @@ export function BattleScreen({
   const [circuitRestSec, setCircuitRestSec] = useState<number | null>(null);
   const [justCleansed, setJustCleansed] = useState<boolean>(false);
 
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
-    state: 'STARTING',
-    exerciseState: null,
-    currentEnemy: useGameStore.getState().currentEnemy,
-    autoPauseReason: null,
-    isAudioUnlocked: true,
-    bossPhase: 0,
-    nextAttackProgress: 0,
-    monsterAttackIntervalMs: 7000,
-    isAttackWarning: false,
-    comboCount: 0,
-    comboMultiplier: 1,
-    comboRemainingRatio: 0,
-    ultimateCharge: 0,
-    ultimateTriggeredCount: 0,
-    matchup: 'NEUTRAL',
-    isPlayerDebuffed: false,
-    debuffRemainingSec: 0,
-    debuffCleansedId: 0,
-    lastCombatEvent: null,
-    lastMonsterAttackEvent: null,
-    victorySummary: null,
-    poseDelegate: useGameStore.getState().settings.poseDelegate,
-    poseDelegateFallback: false,
-    activeSanctuaryBuffs: [...useGameStore.getState().sanctuary.activeBuffs],
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>(() => {
+    const initialSanctuary = useGameStore.getState().sanctuary;
+    const initialBuffs = getAggregatedSanctuaryBuffs(
+      initialSanctuary.activeBuffs,
+      initialSanctuary.labTier
+    );
+    return {
+      state: 'STARTING',
+      exerciseState: null,
+      currentEnemy: useGameStore.getState().currentEnemy,
+      autoPauseReason: null,
+      isAudioUnlocked: true,
+      bossPhase: 0,
+      nextAttackProgress: 0,
+      monsterAttackIntervalMs: 7000,
+      isAttackWarning: false,
+      comboCount: initialBuffs.startingCombo,
+      comboMultiplier: initialBuffs.startingCombo >= 3 ? 1.25 : 1,
+      comboRemainingRatio: initialBuffs.startingCombo > 0 ? 1 : 0,
+      ultimateCharge: initialBuffs.startingUltimateCharge,
+      ultimateTriggeredCount: 0,
+      matchup: 'NEUTRAL',
+      isPlayerDebuffed: false,
+      debuffRemainingSec: 0,
+      debuffCleansedId: 0,
+      lastCombatEvent: null,
+      lastMonsterAttackEvent: null,
+      victorySummary: null,
+      poseDelegate: useGameStore.getState().settings.poseDelegate,
+      poseDelegateFallback: false,
+      activeSanctuaryBuffs: [...initialSanctuary.activeBuffs],
+      activeSynergies: initialBuffs.activeSynergies,
+      hasRiskyMutagen: initialBuffs.hasRiskyMutagen,
+      toxicSurgeStacks: 0,
+    };
   });
   const [isDamaged, setIsDamaged] = useState(false);
   const [isHeroHit, setIsHeroHit] = useState(false);
@@ -610,6 +627,33 @@ export function BattleScreen({
                 </span>
               </>
             )}
+            {sessionStatus.activeSynergies.length > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-amber-300 font-semibold">
+                  {sessionStatus.activeSynergies
+                    .map((synId) => `${SANCTUARY_SYNERGY_MAP[synId].icon} ${t(SANCTUARY_SYNERGY_KEYS[synId].name)}`)
+                    .join(' · ')}
+                </span>
+              </>
+            )}
+            {sessionStatus.hasRiskyMutagen && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 text-rose-400 font-semibold">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  <span>{t('sanctuary.riskyBadge')}</span>
+                </span>
+              </>
+            )}
+            {sessionStatus.toxicSurgeStacks > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-numeric text-lime-300 font-semibold">
+                  ☣️ {t('battle.toxicSurge')} +{sessionStatus.toxicSurgeStacks * 20}%
+                </span>
+              </>
+            )}
           </div>
 
           {/* Audio Unlock Banner */}
@@ -855,6 +899,9 @@ export function BattleScreen({
                       {sessionStatus.lastMonsterAttackEvent.wasBlocked
                         ? `${t('battle.blocked')} (-${sessionStatus.lastMonsterAttackEvent.damageTaken} HP)`
                         : `${t('battle.incomingDamage')}: -${sessionStatus.lastMonsterAttackEvent.damageTaken} HP`}
+                      {sessionStatus.lastMonsterAttackEvent.thornsDamage
+                        ? ` · ${t('battle.thornsReflected')} -${sessionStatus.lastMonsterAttackEvent.thornsDamage}`
+                        : ''}
                     </span>
                   </motion.div>
                 )}
@@ -1117,6 +1164,17 @@ export function BattleScreen({
                           {ITEM_NAME_KEYS[sessionStatus.victorySummary.droppedItemId]
                             ? t(ITEM_NAME_KEYS[sessionStatus.victorySummary.droppedItemId])
                             : ITEMS[sessionStatus.victorySummary.droppedItemId]?.name}
+                        </span>
+                      </div>
+                    )}
+
+                    {sessionStatus.victorySummary.droppedTrophy && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">{t('battle.trophyDropped')}</span>
+                        <span className="font-semibold text-amber-300">
+                          {MONSTER_TROPHIES[sessionStatus.victorySummary.droppedTrophy.id].icon}{' '}
+                          {t(MONSTER_TROPHY_KEYS[sessionStatus.victorySummary.droppedTrophy.id].name)} ×
+                          {sessionStatus.victorySummary.droppedTrophy.qty}
                         </span>
                       </div>
                     )}

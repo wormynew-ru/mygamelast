@@ -14,7 +14,9 @@ import type {
   ExerciseCalibrationSettings,
   ExerciseMatchup,
   MonsterStats,
+  MonsterTrophyId,
   SanctuaryMixId,
+  SanctuarySynergyId,
 } from '../game/types';
 import { PoseTracker, type PoseDelegate, type TrackerError } from '../vision/PoseTracker';
 import {
@@ -30,6 +32,7 @@ import {
   COMBO_WINDOW_BASE_MS,
   TOXIC_DEBUFF_DURATION_MS,
   ULTIMATE_CHARGE_MAX,
+  ULTIMATE_DAMAGE_MULTIPLIER,
   applyBossPhaseTransition,
   applyDamageToMonster,
   calculateBattleRank,
@@ -41,6 +44,7 @@ import {
   getComboMultiplier,
   getEffectivePlayerStats,
   getExerciseMatchup,
+  getLoadoutXpMultiplier,
   getMonsterAttackIntervalMs,
   isMonsterAttackWarningActive,
   isMonsterDead,
@@ -52,7 +56,11 @@ import { getCircuitById } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { ITEMS } from '../game/data/items';
 import { getLevelById } from '../game/data/levels';
-import { getAggregatedSanctuaryBuffs } from '../game/data/sanctuary';
+import {
+  getAggregatedSanctuaryBuffs,
+  getSanctuaryDamageMultiplierForExercise,
+  getTrophyForArchetype,
+} from '../game/data/sanctuary';
 import { SoundFX } from '../audio/SoundFX';
 import { DEFAULT_EXERCISE_CALIBRATION, useGameStore } from '../game/store';
 import { t } from '../i18n';
@@ -89,6 +97,7 @@ export interface MonsterAttackEvent {
   damageTaken: number;
   wasBlocked: boolean;
   appliedToxicDebuff: boolean;
+  thornsDamage?: number;
   timestamp: number;
 }
 
@@ -103,6 +112,7 @@ export interface VictorySummary {
   ultimateCount: number;
   leveledUp: boolean;
   droppedItemId: string | null;
+  droppedTrophy?: { id: MonsterTrophyId; qty: number } | null;
   unlockedLevelId: string | null;
   newlyUnlockedAchievements: string[];
   mode: BattleMode;
@@ -143,6 +153,9 @@ export interface SessionStatus {
   poseDelegate: PoseDelegate;
   poseDelegateFallback: boolean;
   activeSanctuaryBuffs: SanctuaryMixId[];
+  activeSynergies: SanctuarySynergyId[];
+  hasRiskyMutagen: boolean;
+  toxicSurgeStacks: number;
 }
 
 export type SessionStateChangeCallback = (status: SessionStatus) => void;
@@ -258,6 +271,7 @@ export class WorkoutSession {
   private debuffExpiresAt: number | null = null;
   private debuffRemainingSec = 0;
   private debuffCleansedId = 0;
+  private toxicSurgeStacks = 0;
   private battleActiveStartTs: number | null = null;
   private battleAccumulatedMs = 0;
   private totalDamageTakenInBattle = 0;
@@ -538,6 +552,11 @@ export class WorkoutSession {
     const matchup: ExerciseMatchup = enemy
       ? getExerciseMatchup(enemy, this.exerciseId)
       : 'NEUTRAL';
+    const activeSanctuaryBuffs = [...(store.sanctuary?.activeBuffs ?? [])];
+    const sanctuaryBuffs = getAggregatedSanctuaryBuffs(
+      activeSanctuaryBuffs,
+      store.sanctuary?.labTier ?? 1
+    );
 
     return {
       state: this.state,
@@ -564,7 +583,10 @@ export class WorkoutSession {
       fps: this.currentFps,
       poseDelegate: this.poseTracker.getActiveDelegate?.() ?? this.requestedPoseDelegate,
       poseDelegateFallback: this.poseTracker.didFallbackToCpu?.() ?? false,
-      activeSanctuaryBuffs: [...(store.sanctuary?.activeBuffs ?? [])],
+      activeSanctuaryBuffs,
+      activeSynergies: sanctuaryBuffs.activeSynergies,
+      hasRiskyMutagen: sanctuaryBuffs.hasRiskyMutagen,
+      toxicSurgeStacks: this.toxicSurgeStacks,
     };
   }
 
@@ -607,15 +629,16 @@ export class WorkoutSession {
       store.sanctuary?.labTier ?? 1
     );
 
-    this.comboCount = 0;
-    this.maxComboInBattle = 0;
+    this.comboCount = sanctuaryBuffs.startingCombo;
+    this.maxComboInBattle = sanctuaryBuffs.startingCombo;
     this.lastComboTimestamp = null;
-    this.comboRemainingRatio = 0;
+    this.comboRemainingRatio = sanctuaryBuffs.startingCombo > 0 ? 1 : 0;
     this.ultimateCharge = sanctuaryBuffs.startingUltimateCharge;
     this.ultimateTriggeredCount = 0;
     this.debuffExpiresAt = null;
     this.debuffRemainingSec = 0;
     this.debuffCleansedId = 0;
+    this.toxicSurgeStacks = 0;
     this.battleActiveStartTs = null;
     this.battleAccumulatedMs = 0;
     this.totalDamageTakenInBattle = 0;
@@ -727,8 +750,16 @@ export class WorkoutSession {
         this.battleHoldSeconds += newHoldTicks;
         this.consecutiveHoldTicks += newHoldTicks;
 
-        // 3 consecutive static hold seconds cleanse active Toxic debuff
-        if (this.debuffExpiresAt !== null && this.consecutiveHoldTicks >= TOXIC_CLEANSE_HOLD_TICKS) {
+        const store = useGameStore.getState();
+        const holdSanctuaryBuffs = getAggregatedSanctuaryBuffs(
+          store.sanctuary?.activeBuffs ?? [],
+          store.sanctuary?.labTier ?? 1
+        );
+        const cleanseThreshold =
+          holdSanctuaryBuffs.toxicCleanseHoldTicksOverride ?? TOXIC_CLEANSE_HOLD_TICKS;
+
+        // Static hold seconds cleanse active Toxic debuff (3s default, 1s with Monolith Elixir)
+        if (this.debuffExpiresAt !== null && this.consecutiveHoldTicks >= cleanseThreshold) {
           this.debuffExpiresAt = null;
           this.debuffRemainingSec = 0;
           this.debuffCleansedId++;
@@ -736,8 +767,6 @@ export class WorkoutSession {
             this.soundFX.play('POWER_UP');
           }
         }
-
-        const store = useGameStore.getState();
         const holdKcal = this.exerciseId
           ? estimateWorkoutKcal(
               { [this.exerciseId]: { holdSeconds: newHoldTicks } },
@@ -812,7 +841,7 @@ export class WorkoutSession {
       store.sanctuary?.activeBuffs ?? [],
       store.sanctuary?.labTier ?? 1
     );
-    const windowMs = COMBO_WINDOW_BASE_MS + (effective.comboWindowBonusMs ?? 0);
+    const windowMs = Math.max(1200, COMBO_WINDOW_BASE_MS + (effective.comboWindowBonusMs ?? 0));
 
     if (this.comboCount > 0 && this.lastComboTimestamp !== null) {
       const elapsedSinceHit = Math.max(0, timestamp - this.lastComboTimestamp);
@@ -823,6 +852,8 @@ export class WorkoutSession {
       } else {
         this.comboRemainingRatio = Math.max(0, 1 - elapsedSinceHit / windowMs);
       }
+    } else if (this.comboCount > 0) {
+      this.comboRemainingRatio = 1;
     } else {
       this.comboRemainingRatio = 0;
     }
@@ -899,13 +930,32 @@ export class WorkoutSession {
       effectivePlayer,
       enemy.attack,
       isBlocking,
-      sanctuaryBuffs.incomingDamageMultiplier
+      sanctuaryBuffs.incomingDamageMultiplier,
+      sanctuaryBuffs.blockMitigationOverride ?? 0.7
     );
 
     let appliedToxicDebuff = false;
+    let thornsDamage = 0;
+    let reflectedEnemy = enemy;
+
     if (wasBlocked) {
       this.debuffExpiresAt = null;
       this.debuffRemainingSec = 0;
+
+      if (damageTaken === 0 && sanctuaryBuffs.thornsReflectDamage > 0) {
+        thornsDamage = sanctuaryBuffs.thornsReflectDamage;
+        reflectedEnemy = {
+          ...enemy,
+          hp: Math.max(0, enemy.hp - thornsDamage),
+        };
+        store.updateEnemy(reflectedEnemy);
+        if (sanctuaryBuffs.thornsUltChargeGain > 0) {
+          this.ultimateCharge = Math.min(
+            ULTIMATE_CHARGE_MAX,
+            this.ultimateCharge + sanctuaryBuffs.thornsUltChargeGain
+          );
+        }
+      }
     } else {
       // Unblocked counter-attack breaks hero combo streak
       this.comboCount = 0;
@@ -913,9 +963,19 @@ export class WorkoutSession {
       this.comboRemainingRatio = 0;
 
       if (enemy.archetype === 'TOXIC') {
-        this.debuffExpiresAt = timestamp + TOXIC_DEBUFF_DURATION_MS;
-        this.debuffRemainingSec = Math.ceil(TOXIC_DEBUFF_DURATION_MS / 1000);
-        appliedToxicDebuff = true;
+        if (sanctuaryBuffs.toxicImmunity) {
+          this.toxicSurgeStacks = Math.min(3, this.toxicSurgeStacks + 1);
+          if (sanctuaryBuffs.toxicCatalystProcUltCharge > 0) {
+            this.ultimateCharge = Math.min(
+              ULTIMATE_CHARGE_MAX,
+              this.ultimateCharge + sanctuaryBuffs.toxicCatalystProcUltCharge
+            );
+          }
+        } else {
+          this.debuffExpiresAt = timestamp + TOXIC_DEBUFF_DURATION_MS;
+          this.debuffRemainingSec = Math.ceil(TOXIC_DEBUFF_DURATION_MS / 1000);
+          appliedToxicDebuff = true;
+        }
       }
     }
 
@@ -930,6 +990,7 @@ export class WorkoutSession {
       damageTaken,
       wasBlocked,
       appliedToxicDebuff,
+      thornsDamage: thornsDamage > 0 ? thornsDamage : undefined,
       timestamp: Date.now(),
     };
 
@@ -945,6 +1006,23 @@ export class WorkoutSession {
 
     if (isPlayerDead({ ...basePlayer, hp: updatedBaseHp })) {
       this.onDefeat();
+      return;
+    }
+
+    if (thornsDamage > 0 && isMonsterDead(reflectedEnemy)) {
+      const latest = useGameStore.getState();
+      const xpMult =
+        getLoadoutXpMultiplier(this.getActiveLoadout(), this.exerciseId) *
+        sanctuaryBuffs.xpMultiplier;
+      const xpGained = Math.round(reflectedEnemy.xpReward * xpMult);
+      let nextPlayer = { ...latest.player, xp: latest.player.xp + xpGained };
+      let leveledUp = false;
+      while (nextPlayer.xp >= nextPlayer.xpToNextLevel) {
+        nextPlayer = levelUp(nextPlayer);
+        leveledUp = true;
+      }
+      latest.updatePlayer(nextPlayer);
+      this.onVictory(reflectedEnemy, xpGained, leveledUp, timestamp);
     }
   }
 
@@ -991,7 +1069,21 @@ export class WorkoutSession {
         this.attackWarningTriggered = false;
       }
 
-      const basePlayer = latestStore.player;
+      let basePlayer = latestStore.player;
+      if (isUltimate) {
+        let nextUltHp = basePlayer.hp;
+        if (sanctuaryBuffs.healOnUlt > 0) {
+          nextUltHp = Math.min(basePlayer.maxHp, nextUltHp + sanctuaryBuffs.healOnUlt);
+        }
+        if (sanctuaryBuffs.selfDamageOnUlt > 0) {
+          nextUltHp = Math.max(1, nextUltHp - sanctuaryBuffs.selfDamageOnUlt);
+        }
+        if (nextUltHp !== basePlayer.hp) {
+          basePlayer = { ...basePlayer, hp: nextUltHp };
+          latestStore.updatePlayer({ hp: nextUltHp });
+        }
+      }
+
       const effectivePlayer = getEffectivePlayerStats(
         basePlayer,
         latestStore.inventory.equippedItems,
@@ -1001,6 +1093,12 @@ export class WorkoutSession {
       );
 
       const isDebuffed = this.debuffExpiresAt !== null && timestamp < this.debuffExpiresAt;
+      const sanctuaryDamageMultiplier = getSanctuaryDamageMultiplierForExercise(
+        sanctuaryBuffs,
+        this.exerciseId,
+        this.toxicSurgeStacks * sanctuaryBuffs.toxicCatalystProcDamageBonus
+      );
+      const extraCritChance = this.comboCount >= 6 ? sanctuaryBuffs.highComboCritBonus : 0;
 
       const { monster: hitMonster, player: updatedEffective, result } = applyDamageToMonster(
         effectivePlayer,
@@ -1013,6 +1111,14 @@ export class WorkoutSession {
           loadout: activeLoadout,
           isUltimate,
           xpMultiplier: sanctuaryBuffs.xpMultiplier,
+          sanctuaryDamageMultiplier,
+          armorPierceRatio: sanctuaryBuffs.armorPierceRatio,
+          shieldBreakBonus: sanctuaryBuffs.shieldBreakBonus,
+          breakAllShieldsOnUlt: sanctuaryBuffs.breakAllShieldsOnUlt,
+          ultimateDamageMultiplier:
+            sanctuaryBuffs.ultimateDamageMultiplierOverride ?? ULTIMATE_DAMAGE_MULTIPLIER,
+          extraCritChance,
+          dumbbellDamageBonus: sanctuaryBuffs.dumbbellDamageBonus,
         }
       );
 
@@ -1095,12 +1201,16 @@ export class WorkoutSession {
       (this.battleActiveStartTs !== null ? Math.max(0, timestamp - this.battleActiveStartTs) : 0);
     const durationSec = Math.max(1, Math.round(activeElapsedMs / 1000));
 
+    const activeBuffs = store.sanctuary?.activeBuffs ?? [];
+    const labTier = store.sanctuary?.labTier ?? 1;
+    const sanctuaryBuffs = getAggregatedSanctuaryBuffs(activeBuffs, labTier);
+
     const effectivePlayer = getEffectivePlayerStats(
       store.player,
       store.inventory.equippedItems,
       ITEMS,
-      store.sanctuary?.activeBuffs ?? [],
-      store.sanctuary?.labTier ?? 1
+      activeBuffs,
+      labTier
     );
 
     const { rank, rewardMultiplier } = calculateBattleRank({
@@ -1111,7 +1221,7 @@ export class WorkoutSession {
     });
 
     const baseCoins = defeatedEnemy.coinReward ?? 20;
-    let coinsEarned = Math.round(baseCoins * rewardMultiplier);
+    let coinsEarned = Math.round(baseCoins * rewardMultiplier * sanctuaryBuffs.coinMultiplier);
     let totalXpGained = xpGained;
     let finalLeveledUp = leveledUp;
 
@@ -1196,6 +1306,28 @@ export class WorkoutSession {
       }
     }
 
+    const droppedTrophyId = getTrophyForArchetype(defeatedEnemy.archetype);
+    const droppedTrophyQty = defeatedEnemy.isBoss ? 2 : 1;
+    store.addMonsterTrophy(droppedTrophyId, droppedTrophyQty);
+    const droppedTrophy: { id: MonsterTrophyId; qty: number } = {
+      id: droppedTrophyId,
+      qty: droppedTrophyQty,
+    };
+
+    if (
+      sanctuaryBuffs.healOnWaveClear > 0 &&
+      (this.mode === 'ENDLESS' || (this.mode === 'CIRCUIT' && !circuitCompleted))
+    ) {
+      const latestPlayer = useGameStore.getState().player;
+      const healedWaveHp = Math.min(
+        latestPlayer.maxHp,
+        latestPlayer.hp + sanctuaryBuffs.healOnWaveClear
+      );
+      if (healedWaveHp > latestPlayer.hp) {
+        store.updatePlayer({ hp: healedWaveHp });
+      }
+    }
+
     store.recordMonsterBestiary({
       monsterId: defeatedEnemy.id,
       defeated: true,
@@ -1230,6 +1362,7 @@ export class WorkoutSession {
       ultimateCount: this.ultimateTriggeredCount,
       leveledUp: finalLeveledUp,
       droppedItemId,
+      droppedTrophy,
       unlockedLevelId,
       newlyUnlockedAchievements: uniqueAchievements,
       mode: this.mode,

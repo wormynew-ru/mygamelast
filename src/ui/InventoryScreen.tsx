@@ -7,12 +7,18 @@ import { useState } from 'react';
 import { ArrowLeft, Shield, Sword, Heart, Coins, ShoppingBag, Backpack, Sprout } from 'lucide-react';
 import { ITEMS, SHOP_ITEM_IDS } from '../game/data/items';
 import { SEEDS, SEED_ORDER } from '../game/data/garden';
-import { getTotalCropCount } from '../game/data/sanctuary';
+import {
+  MONSTER_TROPHIES,
+  MONSTER_TROPHY_ORDER,
+  getTotalCropCount,
+  getTotalTrophyCount,
+} from '../game/data/sanctuary';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
   ITEM_DESC_KEYS,
   ITEM_NAME_KEYS,
+  MONSTER_TROPHY_KEYS,
   RARITY_KEYS,
   RARITY_TEXT_CLASS,
   SEED_KEYS,
@@ -31,6 +37,7 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
   const itemsMap = useGameStore((state) => state.inventory.items);
   const equippedItems = useGameStore((state) => state.inventory.equippedItems);
   const cropInventory = useGameStore((state) => state.garden.cropInventory);
+  const trophyInventory = useGameStore((state) => state.sanctuary.trophyInventory);
   const equipItem = useGameStore((state) => state.equipItem);
   const unequipItem = useGameStore((state) => state.unequipItem);
   const useConsumable = useGameStore((state) => state.useConsumable);
@@ -38,6 +45,7 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const totalCrops = getTotalCropCount(cropInventory);
+  const totalTrophies = getTotalTrophyCount(trophyInventory);
 
   const ownedEntries = Array.from(itemsMap.entries()).filter(
     ([id, qty]) => qty > 0 && Boolean(ITEMS[id])
@@ -132,7 +140,7 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
 
         {activeTab === 'BAG' ? (
           <div className="space-y-8">
-            {ownedEntries.length === 0 && totalCrops === 0 ? (
+            {ownedEntries.length === 0 && totalCrops === 0 && totalTrophies === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-10 text-center text-slate-400 text-sm">
                 {t('inventory.empty')}
               </div>
@@ -290,6 +298,48 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
                           </span>
                         </div>
                       ))}
+                    </div>
+                  </section>
+                )}
+                {totalTrophies > 0 && (
+                  <section className="space-y-3 pt-2 border-t border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <ShoppingBag className="w-4 h-4 text-amber-400" />
+                      <h2 className="text-base font-semibold text-white">
+                        {t('sanctuary.trophiesTitle')}
+                      </h2>
+                    </div>
+                    <p className="text-xs text-slate-400">{t('sanctuary.trophiesHint')}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      {MONSTER_TROPHY_ORDER.filter((id) => (trophyInventory?.[id] ?? 0) > 0).map(
+                        (trophyId) => {
+                          const def = MONSTER_TROPHIES[trophyId];
+                          const keys = MONSTER_TROPHY_KEYS[trophyId];
+                          return (
+                            <div
+                              key={trophyId}
+                              className="p-3.5 rounded-xl border border-amber-500/40 bg-slate-900 flex items-center justify-between gap-3"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="text-2xl shrink-0" aria-hidden="true">
+                                  {def.icon}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">
+                                    {t(keys.name)}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 truncate">
+                                    {t(keys.source)}
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="font-numeric text-sm font-bold text-amber-400 shrink-0">
+                                ×{trophyInventory[trophyId]}
+                              </span>
+                            </div>
+                          );
+                        }
+                      )}
                     </div>
                   </section>
                 )}

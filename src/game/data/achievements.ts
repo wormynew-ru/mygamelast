@@ -4,6 +4,7 @@
  */
 
 import type { GameState } from '../types';
+import { getActiveSanctuarySynergies } from './sanctuary';
 
 export type AchievementId =
   | 'FIRST_REP'
@@ -22,7 +23,9 @@ export type AchievementId =
   | 'CIRCUIT_CHAMPION'
   | 'GARDENER'
   | 'WEED_SLAYER'
-  | 'BOTANICAL_ALCHEMIST';
+  | 'BOTANICAL_ALCHEMIST'
+  | 'SYNERGY_ARCHITECT'
+  | 'MASTER_ALCHEMIST';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -119,6 +122,18 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'BOTANICAL_ALCHEMIST',
     icon: '⚗️',
     check: (state) => (state.sanctuary?.totalCrafted ?? 0) >= 3,
+  },
+  {
+    id: 'SYNERGY_ARCHITECT',
+    icon: '🔮',
+    check: (state) =>
+      (state.sanctuary?.totalSynergiesActivated ?? 0) >= 1 ||
+      getActiveSanctuarySynergies(state.sanctuary?.activeBuffs ?? []).length >= 1,
+  },
+  {
+    id: 'MASTER_ALCHEMIST',
+    icon: '🧪',
+    check: (state) => (state.sanctuary?.totalCrafted ?? 0) >= 10,
   },
 ];
 

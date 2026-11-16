@@ -17,6 +17,7 @@ import type {
   GameState,
   Inventory,
   MonsterStats,
+  MonsterTrophyId,
   PlayerStats,
   SanctuaryMixId,
   SeedId,
@@ -48,6 +49,7 @@ import {
   SANCTUARY_LAB_TIERS,
   SANCTUARY_MIX_MAP,
   createInitialSanctuaryState,
+  getActiveSanctuarySynergies,
   getMixEffectiveHeal,
   getNextSanctuaryLabTier,
   isMixReadyToCraft,
@@ -255,6 +257,8 @@ interface GameStore extends GameState {
 
   craftMix: (mixId: SanctuaryMixId) => boolean;
   activateMixBuff: (mixId: SanctuaryMixId) => { healedHp: number } | null;
+  deactivateMixBuff: (mixId: SanctuaryMixId) => boolean;
+  addMonsterTrophy: (trophyId: MonsterTrophyId, qty?: number) => void;
   upgradeSanctuaryLab: () => boolean;
   consumeActiveSanctuaryBuffs: () => void;
 
@@ -281,7 +285,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 12) {
+  if (version >= 0 && version <= 13) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -1009,7 +1013,13 @@ export const useGameStore = create<GameStore>()(
         const blueprint = SANCTUARY_MIX_MAP[mixId];
         if (!blueprint) return false;
         const state = get();
-        if (!isMixReadyToCraft(state.garden.cropInventory, blueprint)) {
+        if (
+          !isMixReadyToCraft(
+            state.garden.cropInventory,
+            blueprint,
+            state.sanctuary.trophyInventory
+          )
+        ) {
           return false;
         }
 
@@ -1021,6 +1031,16 @@ export const useGameStore = create<GameStore>()(
           );
         }
 
+        const nextTrophyInventory = { ...state.sanctuary.trophyInventory };
+        if (blueprint.trophyIngredients) {
+          for (const req of blueprint.trophyIngredients) {
+            nextTrophyInventory[req.trophyId] = Math.max(
+              0,
+              (nextTrophyInventory[req.trophyId] ?? 0) - req.qty
+            );
+          }
+        }
+
         set({
           garden: {
             ...state.garden,
@@ -1028,6 +1048,7 @@ export const useGameStore = create<GameStore>()(
           },
           sanctuary: {
             ...state.sanctuary,
+            trophyInventory: nextTrophyInventory,
             mixInventory: {
               ...state.sanctuary.mixInventory,
               [mixId]: (state.sanctuary.mixInventory[mixId] ?? 0) + 1,
@@ -1054,10 +1075,11 @@ export const useGameStore = create<GameStore>()(
         }
 
         const healPotential = getMixEffectiveHeal(blueprint, state.sanctuary.labTier);
+        const alreadyHealed = state.sanctuary.healedBuffIds?.includes(mixId) ?? false;
         let nextBasePlayer = state.player;
         let healedHp = 0;
 
-        if (healPotential > 0) {
+        if (healPotential > 0 && !alreadyHealed) {
           const effBefore = getEffectivePlayerStats(
             state.player,
             state.inventory.equippedItems,
@@ -1075,6 +1097,15 @@ export const useGameStore = create<GameStore>()(
           }
         }
 
+        const prevSynergies = getActiveSanctuarySynergies(state.sanctuary.activeBuffs);
+        const nextActiveBuffs = [...state.sanctuary.activeBuffs, mixId];
+        const nextSynergies = getActiveSanctuarySynergies(nextActiveBuffs);
+        const newSynergiesCount = nextSynergies.filter((id) => !prevSynergies.includes(id)).length;
+        const nextHealedBuffIds =
+          healPotential > 0 && !alreadyHealed
+            ? [...(state.sanctuary.healedBuffIds ?? []), mixId]
+            : [...(state.sanctuary.healedBuffIds ?? [])];
+
         set({
           player: nextBasePlayer,
           sanctuary: {
@@ -1083,11 +1114,48 @@ export const useGameStore = create<GameStore>()(
               ...state.sanctuary.mixInventory,
               [mixId]: qty - 1,
             },
-            activeBuffs: [...state.sanctuary.activeBuffs, mixId],
+            activeBuffs: nextActiveBuffs,
+            healedBuffIds: nextHealedBuffIds,
+            totalSynergiesActivated:
+              (state.sanctuary.totalSynergiesActivated ?? 0) + newSynergiesCount,
           },
         });
 
+        get().syncAchievements();
         return { healedHp };
+      },
+
+      deactivateMixBuff: (mixId) => {
+        const state = get();
+        if (!state.sanctuary.activeBuffs.includes(mixId)) {
+          return false;
+        }
+
+        set({
+          sanctuary: {
+            ...state.sanctuary,
+            mixInventory: {
+              ...state.sanctuary.mixInventory,
+              [mixId]: (state.sanctuary.mixInventory[mixId] ?? 0) + 1,
+            },
+            activeBuffs: state.sanctuary.activeBuffs.filter((id) => id !== mixId),
+          },
+        });
+
+        return true;
+      },
+
+      addMonsterTrophy: (trophyId, qty = 1) => {
+        if (qty <= 0) return;
+        set((state) => ({
+          sanctuary: {
+            ...state.sanctuary,
+            trophyInventory: {
+              ...state.sanctuary.trophyInventory,
+              [trophyId]: (state.sanctuary.trophyInventory?.[trophyId] ?? 0) + Math.floor(qty),
+            },
+          },
+        }));
       },
 
       upgradeSanctuaryLab: () => {
@@ -1109,13 +1177,17 @@ export const useGameStore = create<GameStore>()(
 
       consumeActiveSanctuaryBuffs: () =>
         set((state) => {
-          if (state.sanctuary.activeBuffs.length === 0) {
+          if (
+            state.sanctuary.activeBuffs.length === 0 &&
+            (state.sanctuary.healedBuffIds?.length ?? 0) === 0
+          ) {
             return state;
           }
           return {
             sanctuary: {
               ...state.sanctuary,
               activeBuffs: [],
+              healedBuffIds: [],
             },
           };
         }),
@@ -1160,7 +1232,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 12,
+      version: 13,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

@@ -20,6 +20,7 @@ import { CIRCUITS } from '../game/data/circuits';
 import { LEVELS } from '../game/data/levels';
 import { MONSTERS, type MonsterTemplate } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
+import { MONSTER_TROPHIES, getTrophyForArchetype } from '../game/data/sanctuary';
 import {
   buildPeriodAnalytics,
   type AnalyticsChartMetric,
@@ -35,6 +36,7 @@ import {
   EXERCISE_NAME_KEYS,
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
+  MONSTER_TROPHY_KEYS,
 } from './gameKeys';
 import { useVoiceCommandHandler } from './VoiceControl';
 
@@ -689,15 +691,28 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
                     )}
                   </div>
 
-                  {/* Habitats */}
-                  <div className="flex items-start gap-1.5 text-[11px] text-slate-400">
-                    <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
-                    <span>
-                      <strong className="text-slate-300 font-medium">
-                        {t('bestiary.habitatsLabel')}:
-                      </strong>{' '}
-                      {habitats.join(' · ')}
-                    </span>
+                  {/* Habitats & Trophy Drop */}
+                  <div className="space-y-1 text-[11px] text-slate-400">
+                    <div className="flex items-start gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                      <span>
+                        <strong className="text-slate-300 font-medium">
+                          {t('bestiary.habitatsLabel')}:
+                        </strong>{' '}
+                        {habitats.join(' · ')}
+                      </span>
+                    </div>
+                    {(() => {
+                      const trophyId = getTrophyForArchetype(monster.archetype);
+                      const trophyDef = MONSTER_TROPHIES[trophyId];
+                      return (
+                        <div className="text-amber-300/90 font-medium">
+                          {t('bestiary.trophyDropLabel')}: {trophyDef.icon}{' '}
+                          {t(MONSTER_TROPHY_KEYS[trophyId].name)}
+                          {monster.isBoss ? ' ×2' : ' ×1'}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Personal Encounters & Matchups */}

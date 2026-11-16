@@ -5,11 +5,13 @@
 import type { AchievementId } from '../game/data/achievements';
 import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
-import type { SanctuaryMixId } from '../game/data/sanctuary';
+import type { SanctuaryMixId, SanctuarySynergyId, MonsterTrophyId } from '../game/data/sanctuary';
 import type {
+  ExerciseDiscipline,
   ItemRarity,
   MonsterArchetype,
   SanctuaryLabTier,
+  SanctuaryMixCategory,
   SeedId,
   WateringCanTier,
 } from '../game/types';
@@ -211,6 +213,14 @@ export const ACHIEVEMENT_KEYS: Record<
     name: 'achievement.BOTANICAL_ALCHEMIST.name',
     description: 'achievement.BOTANICAL_ALCHEMIST.description',
   },
+  SYNERGY_ARCHITECT: {
+    name: 'achievement.SYNERGY_ARCHITECT.name',
+    description: 'achievement.SYNERGY_ARCHITECT.description',
+  },
+  MASTER_ALCHEMIST: {
+    name: 'achievement.MASTER_ALCHEMIST.name',
+    description: 'achievement.MASTER_ALCHEMIST.description',
+  },
 };
 
 export const SEED_KEYS: Record<
@@ -265,6 +275,106 @@ export const SANCTUARY_MIX_KEYS: Record<
     name: 'garden.mix.LOTUS_NECTAR.name',
     effect: 'garden.mix.LOTUS_NECTAR.effect',
   },
+  TITAN_BREW: {
+    name: 'garden.mix.TITAN_BREW.name',
+    effect: 'garden.mix.TITAN_BREW.effect',
+  },
+  MONOLITH_ELIXIR: {
+    name: 'garden.mix.MONOLITH_ELIXIR.name',
+    effect: 'garden.mix.MONOLITH_ELIXIR.effect',
+  },
+  PULSE_FIZZ: {
+    name: 'garden.mix.PULSE_FIZZ.name',
+    effect: 'garden.mix.PULSE_FIZZ.effect',
+  },
+  ARENA_TONIC: {
+    name: 'garden.mix.ARENA_TONIC.name',
+    effect: 'garden.mix.ARENA_TONIC.effect',
+  },
+  BERSERK_CAPSAICIN: {
+    name: 'garden.mix.BERSERK_CAPSAICIN.name',
+    effect: 'garden.mix.BERSERK_CAPSAICIN.effect',
+  },
+  GLASS_OVERDRIVE: {
+    name: 'garden.mix.GLASS_OVERDRIVE.name',
+    effect: 'garden.mix.GLASS_OVERDRIVE.effect',
+  },
+  TOXIC_CATALYST: {
+    name: 'garden.mix.TOXIC_CATALYST.name',
+    effect: 'garden.mix.TOXIC_CATALYST.effect',
+  },
+  GREED_EXTRACT: {
+    name: 'garden.mix.GREED_EXTRACT.name',
+    effect: 'garden.mix.GREED_EXTRACT.effect',
+  },
+};
+
+export const MONSTER_TROPHY_KEYS: Record<
+  MonsterTrophyId,
+  { name: TranslationKey; source: TranslationKey }
+> = {
+  TROPHY_FIZZ_CORE: {
+    name: 'trophy.TROPHY_FIZZ_CORE.name',
+    source: 'trophy.TROPHY_FIZZ_CORE.source',
+  },
+  TROPHY_GLAZE_SHELL: {
+    name: 'trophy.TROPHY_GLAZE_SHELL.name',
+    source: 'trophy.TROPHY_GLAZE_SHELL.source',
+  },
+  TROPHY_CAPSAICIN_DROP: {
+    name: 'trophy.TROPHY_CAPSAICIN_DROP.name',
+    source: 'trophy.TROPHY_CAPSAICIN_DROP.source',
+  },
+  TROPHY_CROWN_SPICE: {
+    name: 'trophy.TROPHY_CROWN_SPICE.name',
+    source: 'trophy.TROPHY_CROWN_SPICE.source',
+  },
+};
+
+export const SANCTUARY_SYNERGY_KEYS: Record<
+  SanctuarySynergyId,
+  { name: TranslationKey; effect: TranslationKey }
+> = {
+  ISOTONIC_RHYTHM: {
+    name: 'sanctuary.synergy.ISOTONIC_RHYTHM.name',
+    effect: 'sanctuary.synergy.ISOTONIC_RHYTHM.effect',
+  },
+  IRON_BASTION: {
+    name: 'sanctuary.synergy.IRON_BASTION.name',
+    effect: 'sanctuary.synergy.IRON_BASTION.effect',
+  },
+  POWER_SURGE: {
+    name: 'sanctuary.synergy.POWER_SURGE.name',
+    effect: 'sanctuary.synergy.POWER_SURGE.effect',
+  },
+  ADRENALINE_GUARD: {
+    name: 'sanctuary.synergy.ADRENALINE_GUARD.name',
+    effect: 'sanctuary.synergy.ADRENALINE_GUARD.effect',
+  },
+  PURE_FURY: {
+    name: 'sanctuary.synergy.PURE_FURY.name',
+    effect: 'sanctuary.synergy.PURE_FURY.effect',
+  },
+  ENDLESS_ENDURANCE: {
+    name: 'sanctuary.synergy.ENDLESS_ENDURANCE.name',
+    effect: 'sanctuary.synergy.ENDLESS_ENDURANCE.effect',
+  },
+  ALCHEMIST_TRIUMVIRATE: {
+    name: 'sanctuary.synergy.ALCHEMIST_TRIUMVIRATE.name',
+    effect: 'sanctuary.synergy.ALCHEMIST_TRIUMVIRATE.effect',
+  },
+};
+
+export const SANCTUARY_CATEGORY_KEYS: Record<SanctuaryMixCategory, TranslationKey> = {
+  BASE: 'sanctuary.category.BASE',
+  DISCIPLINE: 'sanctuary.category.DISCIPLINE',
+  MUTAGEN: 'sanctuary.category.MUTAGEN',
+};
+
+export const EXERCISE_DISCIPLINE_KEYS: Record<ExerciseDiscipline, TranslationKey> = {
+  STRENGTH: 'sanctuary.discipline.STRENGTH',
+  STATIC: 'sanctuary.discipline.STATIC',
+  CARDIO: 'sanctuary.discipline.CARDIO',
 };
 
 export const SANCTUARY_LAB_KEYS: Record<

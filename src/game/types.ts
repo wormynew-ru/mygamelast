@@ -195,11 +195,40 @@ export interface EndlessArenaStats {
 export type SeedId = 'PROTEIN_MINT' | 'IRON_BAMBOO' | 'CHILI_PEPPER' | 'GOLDEN_LOTUS';
 export type WeedId = 'WEED_DANDELION' | 'WEED_THISTLE' | 'WEED_VINE';
 export type WateringCanTier = 1 | 2 | 3 | 4;
+
+export type MonsterTrophyId =
+  | 'TROPHY_FIZZ_CORE'
+  | 'TROPHY_GLAZE_SHELL'
+  | 'TROPHY_CAPSAICIN_DROP'
+  | 'TROPHY_CROWN_SPICE';
+
+export type ExerciseDiscipline = 'STRENGTH' | 'STATIC' | 'CARDIO';
+
+export type SanctuaryMixCategory = 'BASE' | 'DISCIPLINE' | 'MUTAGEN';
+
 export type SanctuaryMixId =
   | 'MINT_ISOTONIC'
   | 'BAMBOO_FORTIFIER'
   | 'CHILI_OVERDRIVE_SHOT'
-  | 'LOTUS_NECTAR';
+  | 'LOTUS_NECTAR'
+  | 'TITAN_BREW'
+  | 'MONOLITH_ELIXIR'
+  | 'PULSE_FIZZ'
+  | 'ARENA_TONIC'
+  | 'BERSERK_CAPSAICIN'
+  | 'GLASS_OVERDRIVE'
+  | 'TOXIC_CATALYST'
+  | 'GREED_EXTRACT';
+
+export type SanctuarySynergyId =
+  | 'ISOTONIC_RHYTHM'
+  | 'IRON_BASTION'
+  | 'POWER_SURGE'
+  | 'ADRENALINE_GUARD'
+  | 'PURE_FURY'
+  | 'ENDLESS_ENDURANCE'
+  | 'ALCHEMIST_TRIUMVIRATE';
+
 export type SanctuaryLabTier = 1 | 2 | 3;
 
 export interface GardenPlotState {
@@ -223,8 +252,11 @@ export interface GardenState {
 export interface SanctuaryState {
   labTier: SanctuaryLabTier;
   mixInventory: Record<SanctuaryMixId, number>;
+  trophyInventory: Record<MonsterTrophyId, number>;
   activeBuffs: SanctuaryMixId[];
+  healedBuffIds: SanctuaryMixId[];
   totalCrafted: number;
+  totalSynergiesActivated: number;
 }
 
 export interface ExerciseCalibrationSettings {

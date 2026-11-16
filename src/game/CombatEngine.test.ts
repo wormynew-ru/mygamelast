@@ -732,5 +732,82 @@ describe('CombatEngine', () => {
       // raw = 25 - 5 = 20 -> 20 * 0.75 = 15
       expect(mitigated.damageTaken).toBe(15);
     });
+
+    it('supports armor pierce, shield break bonuses, instant ult shield shatter, risky stat scaling, and 90% block mitigation', () => {
+      const base = createPlayer();
+      const armoredEnemy: MonsterStats = {
+        id: 'DONUT',
+        name: 'Donut',
+        hp: 100,
+        maxHp: 100,
+        attack: 30,
+        defense: 6,
+        xpReward: 40,
+        isBoss: false,
+        shieldHits: 3,
+        maxShieldHits: 3,
+      };
+
+      // Armor pierce 50% cuts 6 DEF -> 3 DEF (unshielded comparison: 10 - 3 = 7 dmg)
+      const pierced = applyDamageToMonster(
+        { ...base, critChance: 0 },
+        { ...armoredEnemy, shieldHits: 0, maxShieldHits: 0 },
+        1.0,
+        { armorPierceRatio: 0.5 }
+      );
+      expect(pierced.result.damageDealt).toBe(7);
+
+      // shieldBreakBonus +1 breaks 2 shield charges on a regular non-crit hit
+      const shieldedHit = applyDamageToMonster({ ...base, critChance: 0 }, armoredEnemy, 1.0, {
+        shieldBreakBonus: 1,
+      });
+      expect(shieldedHit.monster.shieldHits).toBe(1);
+      expect(shieldedHit.result.shieldBroken).toBe(false);
+
+      // breakAllShieldsOnUlt shatters all remaining shields & uses 2.1x ult override
+      const ultShatter = applyDamageToMonster({ ...base, critChance: 0 }, armoredEnemy, 1.0, {
+        isUltimate: true,
+        breakAllShieldsOnUlt: true,
+        ultimateDamageMultiplier: 2.1,
+      });
+      expect(ultShatter.monster.shieldHits).toBe(0);
+      expect(ultShatter.result.shieldBroken).toBe(true);
+
+      // extraCritChance + dumbbellDamageBonus
+      const weightedCrit = applyDamageToMonster(
+        { ...base, critChance: 0 },
+        { ...armoredEnemy, defense: 0, shieldHits: 0, maxShieldHits: 0 },
+        1.0,
+        {
+          exerciseId: 'OVERHEAD_PRESS',
+          loadout: { mode: 'DUMBBELLS', weightKg: 5 },
+          dumbbellDamageBonus: 0.15,
+          extraCritChance: 1.0,
+        }
+      );
+      expect(weightedCrit.result.wasCritical).toBe(true);
+      expect(weightedCrit.result.loadoutMultiplier).toBe(1.35);
+
+      // Risky mutagens: GLASS_OVERDRIVE scales maxHp by 0.8 (clamps hp) & +0.5 critMultiplier; BERSERK_CAPSAICIN clamps defense >= 0
+      const glassStats = getEffectivePlayerStats(base, [], ITEMS, ['GLASS_OVERDRIVE'], 2);
+      expect(glassStats.maxHp).toBe(80);
+      expect(glassStats.hp).toBe(80);
+      expect(glassStats.critMultiplier).toBe(2.0);
+
+      const fragileStats = getEffectivePlayerStats(
+        { ...base, defense: 2 },
+        [],
+        ITEMS,
+        ['BERSERK_CAPSAICIN'],
+        1
+      );
+      expect(fragileStats.defense).toBe(0);
+
+      // 90% block mitigation override reduces 30 ATK down to 3 before player DEF
+      const zeroDefPlayer = { ...base, defense: 0 };
+      const heavyBlock = calculateMonsterCounterAttack(zeroDefPlayer, 30, true, 1.0, 0.9);
+      expect(heavyBlock.wasBlocked).toBe(true);
+      expect(heavyBlock.damageTaken).toBe(3);
+    });
   });
 });

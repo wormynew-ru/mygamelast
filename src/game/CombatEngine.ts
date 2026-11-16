@@ -167,13 +167,20 @@ export interface CombatAttackOptions {
   loadout?: EquipmentLoadout;
   isUltimate?: boolean;
   xpMultiplier?: number;
+  sanctuaryDamageMultiplier?: number;
+  armorPierceRatio?: number;
+  shieldBreakBonus?: number;
+  breakAllShieldsOnUlt?: boolean;
+  ultimateDamageMultiplier?: number;
+  extraCritChance?: number;
+  dumbbellDamageBonus?: number;
 }
 
 /**
  * Apply damage to monster, return updated monster and combat result.
  * Handles base damage, combo multiplier, exercise affinity, equipment loadout,
  * toxic debuff, Ultimate Overdrive strike, active armor/boss shields, critical hits,
- * monster death, XP gain, and level up.
+ * Sanctuary mix bonuses, monster death, XP gain, and level up.
  */
 export function applyDamageToMonster(
   player: PlayerStats,
@@ -185,12 +192,21 @@ export function applyDamageToMonster(
   const matchup = getExerciseMatchup(monster, options.exerciseId);
   const matchupMultiplier = getMatchupMultiplier(matchup);
   const debuffMultiplier = options.isDebuffed ? TOXIC_DEBUFF_DAMAGE_MULTIPLIER : 1.0;
-  const loadoutMultiplier = getLoadoutDamageMultiplier(options.loadout, options.exerciseId);
+  const rawLoadoutMultiplier = getLoadoutDamageMultiplier(options.loadout, options.exerciseId);
+  const loadoutMultiplier =
+    rawLoadoutMultiplier > 1 && (options.dumbbellDamageBonus ?? 0) > 0
+      ? Math.round((rawLoadoutMultiplier + (options.dumbbellDamageBonus ?? 0)) * 1000) / 1000
+      : rawLoadoutMultiplier;
   const wasUltimate = Boolean(options.isUltimate);
-  const ultimateMultiplier = wasUltimate ? ULTIMATE_DAMAGE_MULTIPLIER : 1.0;
+  const ultimateMultiplier = wasUltimate
+    ? (options.ultimateDamageMultiplier ?? ULTIMATE_DAMAGE_MULTIPLIER)
+    : 1.0;
+  const sanctuaryDamageMultiplier = options.sanctuaryDamageMultiplier ?? 1.0;
+  const armorPierceRatio = Math.min(0.9, Math.max(0, options.armorPierceRatio ?? 0));
+  const effectiveMonsterDefense = Math.floor(monster.defense * (1 - armorPierceRatio));
 
   // Calculate base + tactical damage
-  let damage = calculateBaseDamage(player.attack, monster.defense, exerciseMultiplier);
+  let damage = calculateBaseDamage(player.attack, effectiveMonsterDefense, exerciseMultiplier);
   damage = Math.max(
     1,
     Math.floor(
@@ -199,12 +215,14 @@ export function applyDamageToMonster(
         matchupMultiplier *
         debuffMultiplier *
         loadoutMultiplier *
-        ultimateMultiplier
+        ultimateMultiplier *
+        sanctuaryDamageMultiplier
     )
   );
 
   // Roll for crit
-  const isCrit = rollCritical(player.critChance);
+  const effectiveCritChance = Math.min(1, Math.max(0, player.critChance + (options.extraCritChance ?? 0)));
+  const isCrit = rollCritical(effectiveCritChance);
   if (isCrit) {
     damage = Math.floor(damage * player.critMultiplier);
   }
@@ -219,12 +237,18 @@ export function applyDamageToMonster(
     const isStaticHold = options.exerciseId
       ? EXERCISES[options.exerciseId]?.trackingType === 'hold'
       : false;
-    let shieldBreakPower = matchup === 'WEAK' || isCrit ? 2 : 1;
-    if (wasUltimate || (isStaticHold && loadoutMultiplier > 1)) {
-      shieldBreakPower += 1;
+    if (wasUltimate && options.breakAllShieldsOnUlt) {
+      currentShieldHits = 0;
+      shieldBroken = true;
+    } else {
+      let shieldBreakPower = matchup === 'WEAK' || isCrit ? 2 : 1;
+      if (wasUltimate || (isStaticHold && loadoutMultiplier > 1)) {
+        shieldBreakPower += 1;
+      }
+      shieldBreakPower += options.shieldBreakBonus ?? 0;
+      currentShieldHits = Math.max(0, currentShieldHits - shieldBreakPower);
+      shieldBroken = currentShieldHits === 0;
     }
-    currentShieldHits = Math.max(0, currentShieldHits - shieldBreakPower);
-    shieldBroken = currentShieldHits === 0;
     damage = Math.max(1, Math.floor(damage * (wasUltimate ? 0.5 : 0.25)));
   }
 
@@ -415,13 +439,17 @@ export function getEffectivePlayerStats(
     comboWindowBonusMs += item.stats.comboWindowBonusMs ?? 0;
   }
 
+  const baseMaxHp = player.maxHp + maxHpBonus;
+  const scaledMaxHp = Math.max(10, Math.round(baseMaxHp * sanctuaryBonuses.maxHpMultiplier));
+
   return {
     ...player,
-    attack: player.attack + attackBonus,
-    defense: player.defense + defenseBonus,
-    maxHp: player.maxHp + maxHpBonus,
-    hp: Math.min(player.hp, player.maxHp + maxHpBonus),
-    critChance: Math.min(1, player.critChance + critChanceBonus),
+    attack: Math.max(1, player.attack + attackBonus),
+    defense: Math.max(0, player.defense + defenseBonus),
+    maxHp: scaledMaxHp,
+    hp: Math.min(player.hp, scaledMaxHp),
+    critChance: Math.min(1, Math.max(0, player.critChance + critChanceBonus)),
+    critMultiplier: Math.round((player.critMultiplier + sanctuaryBonuses.critMultiplierBonus) * 100) / 100,
     comboWindowBonusMs,
   };
 }
@@ -464,12 +492,16 @@ export function calculateMonsterCounterAttack(
   player: PlayerStats,
   monsterAttack: number,
   isBlocking: boolean,
-  incomingDamageMultiplier: number = 1.0
+  incomingDamageMultiplier: number = 1.0,
+  blockMitigation: number = 0.7
 ): { player: PlayerStats; damageTaken: number; wasBlocked: boolean } {
   const mult = Math.max(0, incomingDamageMultiplier);
 
   if (isBlocking) {
-    const mitigatedAttack = Math.floor(monsterAttack * 0.3);
+    const clampedMitigation = Math.min(0.95, Math.max(0, blockMitigation));
+    const mitigatedAttack = Math.floor(
+      Math.round(monsterAttack * (1 - clampedMitigation) * 1000) / 1000
+    );
     const rawBlocked = Math.max(0, mitigatedAttack - player.defense);
     const damageTaken = Math.max(0, Math.floor(rawBlocked * mult));
     return {

@@ -19,7 +19,7 @@ import { LEVELS, type CampaignLevel } from '../game/data/levels';
 import { MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { CIRCUITS, type CircuitId } from '../game/data/circuits';
-import { SANCTUARY_MIX_MAP } from '../game/data/sanctuary';
+import { SANCTUARY_MIX_MAP, SANCTUARY_SYNERGY_MAP, getActiveSanctuarySynergies } from '../game/data/sanctuary';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
@@ -30,6 +30,7 @@ import {
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
   SANCTUARY_MIX_KEYS,
+  SANCTUARY_SYNERGY_KEYS,
 } from './gameKeys';
 import { useVoiceCommandHandler } from './VoiceControl';
 
@@ -58,6 +59,7 @@ export function LevelSelectScreen({
   const endlessStats = useGameStore((state) => state.endlessStats);
   const loadout = useGameStore((state) => state.loadout);
   const activeBuffs = useGameStore((state) => state.sanctuary.activeBuffs);
+  const activeSynergies = getActiveSanctuarySynergies(activeBuffs);
   const setLoadout = useGameStore((state) => state.setLoadout);
 
   const defaultLevel =
@@ -253,20 +255,44 @@ export function LevelSelectScreen({
                 <button
                   type="button"
                   onClick={onOpenSanctuary}
-                  className={`inline-flex items-center gap-1.5 font-semibold transition-colors whitespace-nowrap ${
+                  className={`inline-flex flex-wrap items-center gap-1.5 font-semibold transition-colors ${
                     activeBuffs.length > 0
                       ? 'text-emerald-400 hover:text-emerald-300'
                       : 'text-slate-400 hover:text-emerald-300'
                   }`}
                 >
-                  <FlaskConical className="w-3.5 h-3.5" />
+                  <FlaskConical className="w-3.5 h-3.5 shrink-0" />
                   <span>
                     {activeBuffs.length > 0
                       ? activeBuffs
                           .map((id) => `${SANCTUARY_MIX_MAP[id]?.icon ?? ''} ${t(SANCTUARY_MIX_KEYS[id].name)}`)
-                          .join(', ')
+                          .join(' · ')
                       : t('sanctuary.goCraftMixes')}
                   </span>
+                  {activeSynergies.length > 0 && (
+                    <span className="text-amber-300">
+                      ·{' '}
+                      {activeSynergies
+                        .map(
+                          (synId) =>
+                            `${SANCTUARY_SYNERGY_MAP[synId].icon} ${t(SANCTUARY_SYNERGY_KEYS[synId].name)}`
+                        )
+                        .join(' · ')}
+                    </span>
+                  )}
+                  {activeBuffs.length > 0 && (
+                    <span className="text-slate-400 font-normal">
+                      (
+                      {t(
+                        modeTab === 'ENDLESS'
+                          ? 'sanctuary.lifetimeArena'
+                          : modeTab === 'CIRCUIT'
+                            ? 'sanctuary.lifetimeCircuit'
+                            : 'sanctuary.lifetimeSingle'
+                      )}
+                      )
+                    </span>
+                  )}
                 </button>
               </>
             )}
