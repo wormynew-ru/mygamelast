@@ -3,6 +3,13 @@
  * Pure data structures with ZERO dependencies on React, DOM, or CV logic.
  */
 
+import type { ExerciseId } from './data/exercises';
+
+export type MonsterArchetype = 'FAST' | 'ARMORED' | 'TOXIC' | 'BOSS';
+export type BattleRank = 'S' | 'A' | 'B' | 'C';
+export type ItemRarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export type ExerciseMatchup = 'WEAK' | 'NEUTRAL' | 'RESISTANT';
+
 /**
  * Player character stats.
  */
@@ -16,6 +23,7 @@ export interface PlayerStats {
   defense: number;
   critChance: number; // 0.0-1.0
   critMultiplier: number;
+  comboWindowBonusMs?: number;
 }
 
 /**
@@ -33,6 +41,15 @@ export interface MonsterStats {
 
   /** Boss-specific: phase thresholds (e.g., [0.7, 0.4] for 70% and 40% HP) */
   phaseThresholds?: number[];
+
+  /** Tactical archetype & abilities */
+  archetype?: MonsterArchetype;
+  weakTo?: ExerciseId;
+  resistantTo?: ExerciseId;
+  attackIntervalMs?: number;
+  shieldHits?: number;
+  maxShieldHits?: number;
+  coinReward?: number;
 }
 
 /**
@@ -44,6 +61,10 @@ export interface CombatResult {
   targetKilled: boolean;
   playerLeveledUp: boolean;
   xpGained: number;
+  matchup: ExerciseMatchup;
+  comboMultiplier: number;
+  shieldHit: boolean;
+  shieldBroken: boolean;
 }
 
 /**
@@ -58,10 +79,14 @@ export interface Item {
   id: string;
   name: string;
   type: ItemType;
+  rarity: ItemRarity;
+  price: number;
   description: string;
 
   /** For equipment: stat modifiers */
-  stats?: Partial<PlayerStats>;
+  stats?: Partial<PlayerStats> & {
+    comboWindowBonusMs?: number;
+  };
 
   /** For consumables: effect on use */
   effect?: {
@@ -107,6 +132,47 @@ export interface WorkoutStats {
   totalReps: number;
   totalHoldSeconds: number;
   monstersDefeated: number;
+  maxCombo: number;
+}
+
+export interface ExerciseTotals {
+  reps: number;
+  holdSeconds: number;
+}
+
+export interface DailyActivityEntry {
+  date: string; // YYYY-MM-DD
+  reps: number;
+  holdSeconds: number;
+  battlesWon: number;
+  coinsEarned: number;
+  estimatedKcal: number;
+}
+
+export interface DailyQuestState {
+  date: string; // YYYY-MM-DD
+  claimedIds: string[];
+  repsToday: number;
+  holdSecondsToday: number;
+  winsToday: number;
+}
+
+export interface StreakState {
+  current: number;
+  best: number;
+  lastActiveDate: string | null; // YYYY-MM-DD
+}
+
+export interface BestiaryEntry {
+  encounters: number;
+  defeats: number;
+  fastestVictorySec: number | null;
+  weaknessDiscovered: boolean;
+}
+
+export interface EndlessArenaStats {
+  bestWave: number;
+  totalArenaWins: number;
 }
 
 export interface ExerciseCalibrationSettings {
@@ -122,6 +188,7 @@ export interface ExerciseCalibrationSettings {
 export interface GameState {
   player: PlayerStats;
   inventory: Inventory;
+  coins: number;
   currentLevel: string | null;
   unlockedLevels: string[];
   completedLevels: string[];
@@ -132,6 +199,12 @@ export interface GameState {
 
   /** Aggregate workout statistics */
   workoutStats: WorkoutStats;
+  exerciseTotals: Record<ExerciseId, ExerciseTotals>;
+  streak: StreakState;
+  dailyHistory: Record<string, DailyActivityEntry>;
+  dailyQuests: DailyQuestState;
+  bestiary: Record<string, BestiaryEntry>;
+  endlessStats: EndlessArenaStats;
 
   /** Settings and calibration */
   settings: {

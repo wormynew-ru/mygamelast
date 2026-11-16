@@ -12,7 +12,11 @@ export type AchievementId =
   | 'FIRST_VICTORY'
   | 'BOSS_SLAYER'
   | 'GEAR_COLLECTOR'
-  | 'VETERAN_HERO';
+  | 'VETERAN_HERO'
+  | 'COMBO_MASTER'
+  | 'ARENA_SURVIVOR'
+  | 'STREAK_WARRIOR'
+  | 'BESTIARY_SCHOLAR';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -55,6 +59,26 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'VETERAN_HERO',
     icon: '⭐',
     check: (state) => state.player.level >= 5,
+  },
+  {
+    id: 'COMBO_MASTER',
+    icon: '⚡',
+    check: (state) => (state.workoutStats.maxCombo ?? 0) >= 10,
+  },
+  {
+    id: 'ARENA_SURVIVOR',
+    icon: '🏟️',
+    check: (state) => (state.endlessStats?.bestWave ?? 0) >= 5,
+  },
+  {
+    id: 'STREAK_WARRIOR',
+    icon: '📅',
+    check: (state) => (state.streak?.best ?? 0) >= 3,
+  },
+  {
+    id: 'BESTIARY_SCHOLAR',
+    icon: '📖',
+    check: (state) => Object.keys(state.bestiary ?? {}).length >= 5,
   },
 ];
 

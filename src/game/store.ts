@@ -1,21 +1,35 @@
 /**
- * Zustand store for game state with persistence.
- * Handles player stats, inventory, achievements, calibration, workout stats, settings.
+ * Zustand store for game state with persistence (v4).
+ * Handles player stats, inventory, coins, shop, daily quests, streaks,
+ * 7/30-day activity history, monster bestiary, endless arena, calibration, and settings.
  */
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
-  GameState,
-  PlayerStats,
-  MonsterStats,
-  Inventory,
-  WorkoutStats,
+  BestiaryEntry,
+  DailyActivityEntry,
+  DailyQuestState,
+  EndlessArenaStats,
   ExerciseCalibrationSettings,
+  ExerciseTotals,
+  GameState,
+  Inventory,
+  MonsterStats,
+  PlayerStats,
+  StreakState,
+  WorkoutStats,
 } from './types';
-import { createPlayer, getEffectivePlayerStats, useConsumableItem } from './CombatEngine';
+import { createPlayer, getEffectivePlayerStats, levelUp, useConsumableItem } from './CombatEngine';
 import { ITEMS } from './data/items';
 import { evaluateNewAchievements } from './data/achievements';
+import { type ExerciseId } from './data/exercises';
+import {
+  getDailyQuestsForDate,
+  getLocalDateKey,
+  getQuestProgress,
+  updateStreakForDate,
+} from './data/dailyQuests';
 import { setCurrentLanguage, type Language } from '../i18n';
 
 export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
@@ -37,6 +51,41 @@ function createInitialWorkoutStats(): WorkoutStats {
     totalReps: 0,
     totalHoldSeconds: 0,
     monstersDefeated: 0,
+    maxCombo: 0,
+  };
+}
+
+function createInitialExerciseTotals(): Record<ExerciseId, ExerciseTotals> {
+  return {
+    SQUAT: { reps: 0, holdSeconds: 0 },
+    PUSH_UP: { reps: 0, holdSeconds: 0 },
+    PLANK: { reps: 0, holdSeconds: 0 },
+    JUMPING_JACK: { reps: 0, holdSeconds: 0 },
+  };
+}
+
+function createInitialStreak(): StreakState {
+  return {
+    current: 0,
+    best: 0,
+    lastActiveDate: null,
+  };
+}
+
+function createInitialDailyQuests(dateKey: string = getLocalDateKey()): DailyQuestState {
+  return {
+    date: dateKey,
+    claimedIds: [],
+    repsToday: 0,
+    holdSecondsToday: 0,
+    winsToday: 0,
+  };
+}
+
+function createInitialEndlessStats(): EndlessArenaStats {
+  return {
+    bestWave: 0,
+    totalArenaWins: 0,
   };
 }
 
@@ -44,12 +93,19 @@ function createInitialState(): GameState {
   return {
     player: createPlayer(),
     inventory: createInitialInventory(),
+    coins: 0,
     currentLevel: null,
     unlockedLevels: ['LEVEL_1'],
     completedLevels: [],
     unlockedAchievements: [],
     currentEnemy: null,
     workoutStats: createInitialWorkoutStats(),
+    exerciseTotals: createInitialExerciseTotals(),
+    streak: createInitialStreak(),
+    dailyHistory: {},
+    dailyQuests: createInitialDailyQuests(),
+    bestiary: {},
+    endlessStats: createInitialEndlessStats(),
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
@@ -59,6 +115,29 @@ function createInitialState(): GameState {
       language: 'ru',
     },
   };
+}
+
+function normalizeDailyQuests(quests: DailyQuestState, todayKey: string): DailyQuestState {
+  if (quests.date === todayKey) {
+    return quests;
+  }
+  return createInitialDailyQuests(todayKey);
+}
+
+function pruneDailyHistory(
+  history: Record<string, DailyActivityEntry>,
+  maxDays: number = 30
+): Record<string, DailyActivityEntry> {
+  const keys = Object.keys(history).sort();
+  if (keys.length <= maxDays) {
+    return history;
+  }
+  const keepKeys = new Set(keys.slice(keys.length - maxDays));
+  const trimmed: Record<string, DailyActivityEntry> = {};
+  for (const key of keepKeys) {
+    trimmed[key] = history[key];
+  }
+  return trimmed;
 }
 
 interface GameStore extends GameState {
@@ -76,6 +155,10 @@ interface GameStore extends GameState {
   unequipItem: (itemId: string) => void;
   useConsumable: (itemId: string) => boolean;
 
+  addCoins: (amount: number) => void;
+  spendCoins: (amount: number) => boolean;
+  buyItem: (itemId: string) => boolean;
+
   unlockLevel: (levelId: string) => void;
   completeLevel: (levelId: string) => void;
   setCurrentLevel: (levelId: string | null) => void;
@@ -84,7 +167,20 @@ interface GameStore extends GameState {
     reps?: number;
     holdSeconds?: number;
     monstersDefeated?: number;
+    maxCombo?: number;
+    exerciseId?: ExerciseId;
+    estimatedKcal?: number;
+    coinsEarned?: number;
+    dateKey?: string;
   }) => void;
+  recordMonsterBestiary: (params: {
+    monsterId: string;
+    defeated?: boolean;
+    victorySec?: number;
+    weaknessDiscovered?: boolean;
+  }) => void;
+  claimDailyQuest: (questId: string, dateKey?: string) => { coins: number; xp: number; leveledUp: boolean } | null;
+  updateEndlessProgress: (waveReached: number, wonWave: boolean) => void;
   syncAchievements: () => string[];
 
   updateSettings: (settings: Partial<GameState['settings']>) => void;
@@ -110,7 +206,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version === 0 || version === 1 || version === 2 || version === 3) {
+  if (version >= 0 && version <= 4) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -134,6 +230,7 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
     return {
       ...base,
       ...state,
+      coins: typeof state.coins === 'number' ? state.coins : 0,
       player: {
         ...base.player,
         ...(state.player ?? {}),
@@ -146,6 +243,26 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
       workoutStats: {
         ...base.workoutStats,
         ...(state.workoutStats ?? {}),
+      },
+      exerciseTotals: {
+        ...base.exerciseTotals,
+        ...(state.exerciseTotals ?? {}),
+      },
+      streak: {
+        ...base.streak,
+        ...(state.streak ?? {}),
+      },
+      dailyHistory: state.dailyHistory ?? {},
+      dailyQuests: state.dailyQuests
+        ? normalizeDailyQuests(
+            { ...base.dailyQuests, ...state.dailyQuests },
+            getLocalDateKey()
+          )
+        : base.dailyQuests,
+      bestiary: state.bestiary ?? {},
+      endlessStats: {
+        ...base.endlessStats,
+        ...(state.endlessStats ?? {}),
       },
       settings: {
         ...base.settings,
@@ -276,14 +393,22 @@ export const useGameStore = create<GameStore>()(
         const state = get();
         const item = ITEMS[itemId];
         const qty = state.inventory.items.get(itemId) ?? 0;
+        const effective = getEffectivePlayerStats(
+          state.player,
+          state.inventory.equippedItems,
+          ITEMS
+        );
         if (!item || item.type !== 'CONSUMABLE' || qty <= 0) {
           return false;
         }
-        if (state.player.hp >= state.player.maxHp) {
+        if (effective.hp >= effective.maxHp) {
           return false;
         }
 
-        const updatedPlayer = useConsumableItem(state.player, item);
+        const healedEffective = useConsumableItem(effective, item);
+        const hpGained = healedEffective.hp - effective.hp;
+        const nextBaseHp = Math.min(state.player.maxHp, state.player.hp + hpGained);
+
         const newItems = new Map(state.inventory.items);
         if (qty - 1 <= 0) {
           newItems.delete(itemId);
@@ -292,7 +417,43 @@ export const useGameStore = create<GameStore>()(
         }
 
         set({
-          player: updatedPlayer,
+          player: {
+            ...state.player,
+            hp: nextBaseHp,
+          },
+          inventory: {
+            ...state.inventory,
+            items: newItems,
+          },
+        });
+        return true;
+      },
+
+      addCoins: (amount) =>
+        set((state) => ({
+          coins: Math.max(0, state.coins + Math.round(amount)),
+        })),
+
+      spendCoins: (amount) => {
+        const current = get().coins;
+        if (amount <= 0 || current < amount) {
+          return false;
+        }
+        set({ coins: current - amount });
+        return true;
+      },
+
+      buyItem: (itemId) => {
+        const item = ITEMS[itemId];
+        if (!item) return false;
+        const state = get();
+        if (state.coins < item.price) return false;
+
+        const newItems = new Map(state.inventory.items);
+        newItems.set(itemId, (newItems.get(itemId) ?? 0) + 1);
+
+        set({
+          coins: state.coins - item.price,
           inventory: {
             ...state.inventory,
             items: newItems,
@@ -327,11 +488,143 @@ export const useGameStore = create<GameStore>()(
         }),
 
       recordWorkoutProgress: (delta) =>
+        set((state) => {
+          const todayKey = delta.dateKey ?? getLocalDateKey();
+          const repsDelta = delta.reps ?? 0;
+          const holdDelta = delta.holdSeconds ?? 0;
+          const winsDelta = delta.monstersDefeated ?? 0;
+          const coinsDelta = delta.coinsEarned ?? 0;
+          const kcalDelta = delta.estimatedKcal ?? 0;
+
+          const nextQuests = normalizeDailyQuests(state.dailyQuests, todayKey);
+          const updatedDailyQuests: DailyQuestState = {
+            ...nextQuests,
+            repsToday: nextQuests.repsToday + repsDelta,
+            holdSecondsToday: nextQuests.holdSecondsToday + holdDelta,
+            winsToday: nextQuests.winsToday + winsDelta,
+          };
+
+          const existingDay = state.dailyHistory[todayKey] ?? {
+            date: todayKey,
+            reps: 0,
+            holdSeconds: 0,
+            battlesWon: 0,
+            coinsEarned: 0,
+            estimatedKcal: 0,
+          };
+
+          const updatedDay: DailyActivityEntry = {
+            date: todayKey,
+            reps: existingDay.reps + repsDelta,
+            holdSeconds: existingDay.holdSeconds + holdDelta,
+            battlesWon: existingDay.battlesWon + winsDelta,
+            coinsEarned: existingDay.coinsEarned + coinsDelta,
+            estimatedKcal: Math.round((existingDay.estimatedKcal + kcalDelta) * 10) / 10,
+          };
+
+          const nextExerciseTotals = { ...state.exerciseTotals };
+          if (delta.exerciseId && (repsDelta > 0 || holdDelta > 0)) {
+            const currentEx = nextExerciseTotals[delta.exerciseId] ?? { reps: 0, holdSeconds: 0 };
+            nextExerciseTotals[delta.exerciseId] = {
+              reps: currentEx.reps + repsDelta,
+              holdSeconds: currentEx.holdSeconds + holdDelta,
+            };
+          }
+
+          const nextStreak =
+            winsDelta > 0 || repsDelta > 0 || holdDelta > 0
+              ? updateStreakForDate(state.streak, todayKey)
+              : state.streak;
+
+          return {
+            coins: state.coins + coinsDelta,
+            workoutStats: {
+              totalReps: state.workoutStats.totalReps + repsDelta,
+              totalHoldSeconds: state.workoutStats.totalHoldSeconds + holdDelta,
+              monstersDefeated: state.workoutStats.monstersDefeated + winsDelta,
+              maxCombo: Math.max(state.workoutStats.maxCombo ?? 0, delta.maxCombo ?? 0),
+            },
+            exerciseTotals: nextExerciseTotals,
+            dailyQuests: updatedDailyQuests,
+            dailyHistory: pruneDailyHistory({
+              ...state.dailyHistory,
+              [todayKey]: updatedDay,
+            }),
+            streak: nextStreak,
+          };
+        }),
+
+      recordMonsterBestiary: ({ monsterId, defeated = false, victorySec, weaknessDiscovered = false }) =>
+        set((state) => {
+          const prev: BestiaryEntry = state.bestiary[monsterId] ?? {
+            encounters: 0,
+            defeats: 0,
+            fastestVictorySec: null,
+            weaknessDiscovered: false,
+          };
+
+          const nextBestTime =
+            defeated && typeof victorySec === 'number'
+              ? prev.fastestVictorySec === null
+                ? victorySec
+                : Math.min(prev.fastestVictorySec, victorySec)
+              : prev.fastestVictorySec;
+
+          return {
+            bestiary: {
+              ...state.bestiary,
+              [monsterId]: {
+                encounters: prev.encounters + (defeated ? 0 : 1),
+                defeats: prev.defeats + (defeated ? 1 : 0),
+                fastestVictorySec: nextBestTime,
+                weaknessDiscovered: prev.weaknessDiscovered || weaknessDiscovered || defeated,
+              },
+            },
+          };
+        }),
+
+      claimDailyQuest: (questId, dateKey = getLocalDateKey()) => {
+        const state = get();
+        const normalized = normalizeDailyQuests(state.dailyQuests, dateKey);
+        if (normalized.claimedIds.includes(questId)) {
+          return null;
+        }
+        const quest = getDailyQuestsForDate(dateKey).find((q) => q.id === questId);
+        if (!quest) {
+          return null;
+        }
+        if (getQuestProgress(quest, normalized) < quest.target) {
+          return null;
+        }
+
+        let updatedPlayer = { ...state.player, xp: state.player.xp + quest.rewardXp };
+        let leveledUp = false;
+        while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+          updatedPlayer = levelUp(updatedPlayer);
+          leveledUp = true;
+        }
+
+        set({
+          coins: state.coins + quest.rewardCoins,
+          player: updatedPlayer,
+          dailyQuests: {
+            ...normalized,
+            claimedIds: [...normalized.claimedIds, questId],
+          },
+        });
+
+        return {
+          coins: quest.rewardCoins,
+          xp: quest.rewardXp,
+          leveledUp,
+        };
+      },
+
+      updateEndlessProgress: (waveReached, wonWave) =>
         set((state) => ({
-          workoutStats: {
-            totalReps: state.workoutStats.totalReps + (delta.reps ?? 0),
-            totalHoldSeconds: state.workoutStats.totalHoldSeconds + (delta.holdSeconds ?? 0),
-            monstersDefeated: state.workoutStats.monstersDefeated + (delta.monstersDefeated ?? 0),
+          endlessStats: {
+            bestWave: Math.max(state.endlessStats.bestWave, waveReached),
+            totalArenaWins: state.endlessStats.totalArenaWins + (wonWave ? 1 : 0),
           },
         })),
 
@@ -386,7 +679,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 3,
+      version: 4,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

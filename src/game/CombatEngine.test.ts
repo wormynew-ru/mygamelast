@@ -8,11 +8,16 @@ import {
   calculateBaseDamage,
   rollCritical,
   applyDamageToMonster,
+  applyBossPhaseTransition,
   levelUp,
   applyDamageToPlayer,
   isPlayerDead,
   isMonsterDead,
   getBossPhase,
+  getComboMultiplier,
+  getExerciseMatchup,
+  calculateBattleRank,
+  estimateWorkoutKcal,
   createPlayer,
   getEffectivePlayerStats,
   useConsumableItem,
@@ -23,28 +28,34 @@ import {
   isMonsterAttackWarningActive,
 } from './CombatEngine';
 import { ITEMS } from './data/items';
+import { createEndlessWaveMonster } from './data/monsters';
+import {
+  getDailyQuestsForDate,
+  getQuestProgress,
+  updateStreakForDate,
+} from './data/dailyQuests';
 import { evaluateNewAchievements } from './data/achievements';
 import type { PlayerStats, MonsterStats, GameState } from './types';
 
 describe('CombatEngine', () => {
   describe('calculateXPForLevel', () => {
     it('should calculate XP thresholds with exponential curve', () => {
-      expect(calculateXPForLevel(1)).toBe(100); // 100 * 1^1.5 = 100
-      expect(calculateXPForLevel(2)).toBe(282); // 100 * 2^1.5 ≈ 282
-      expect(calculateXPForLevel(3)).toBe(519); // 100 * 3^1.5 ≈ 519
-      expect(calculateXPForLevel(5)).toBe(1118); // 100 * 5^1.5 ≈ 1118
+      expect(calculateXPForLevel(1)).toBe(100);
+      expect(calculateXPForLevel(2)).toBe(282);
+      expect(calculateXPForLevel(3)).toBe(519);
+      expect(calculateXPForLevel(5)).toBe(1118);
     });
   });
 
   describe('calculateBaseDamage', () => {
     it('should calculate damage with attack - defense formula', () => {
-      expect(calculateBaseDamage(10, 2, 1.0)).toBe(8); // (10 - 2) * 1.0 = 8
-      expect(calculateBaseDamage(15, 5, 1.5)).toBe(15); // (15 - 5) * 1.5 = 15
+      expect(calculateBaseDamage(10, 2, 1.0)).toBe(8);
+      expect(calculateBaseDamage(15, 5, 1.5)).toBe(15);
     });
 
     it('should enforce minimum damage of 1', () => {
-      expect(calculateBaseDamage(5, 10, 1.0)).toBe(1); // (5 - 10) * 1.0 = -5 → 1
-      expect(calculateBaseDamage(0, 0, 0.5)).toBe(1); // 0 * 0.5 = 0 → 1
+      expect(calculateBaseDamage(5, 10, 1.0)).toBe(1);
+      expect(calculateBaseDamage(0, 0, 0.5)).toBe(1);
     });
   });
 
@@ -59,10 +70,10 @@ describe('CombatEngine', () => {
 
     it('should crit probabilistically', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      expect(rollCritical(0.15)).toBe(true); // 0.1 < 0.15
+      expect(rollCritical(0.15)).toBe(true);
 
       vi.spyOn(Math, 'random').mockReturnValue(0.2);
-      expect(rollCritical(0.15)).toBe(false); // 0.2 >= 0.15
+      expect(rollCritical(0.15)).toBe(false);
 
       vi.restoreAllMocks();
     });
@@ -77,7 +88,7 @@ describe('CombatEngine', () => {
       maxHp: 100,
       attack: 10,
       defense: 5,
-      critChance: 0.0, // No crits for deterministic tests
+      critChance: 0.0,
       critMultiplier: 1.5,
     };
 
@@ -95,9 +106,9 @@ describe('CombatEngine', () => {
     it('should deal damage to monster', () => {
       const { monster, result } = applyDamageToMonster(mockPlayer, mockMonster, 1.0);
 
-      expect(result.damageDealt).toBe(8); // (10 - 2) * 1.0 = 8
+      expect(result.damageDealt).toBe(8);
       expect(result.wasCritical).toBe(false);
-      expect(monster.hp).toBe(42); // 50 - 8 = 42
+      expect(monster.hp).toBe(42);
       expect(result.targetKilled).toBe(false);
     });
 
@@ -105,7 +116,7 @@ describe('CombatEngine', () => {
       const weakMonster: MonsterStats = { ...mockMonster, hp: 5 };
       const { monster, result } = applyDamageToMonster(mockPlayer, weakMonster, 1.0);
 
-      expect(monster.hp).toBe(0); // 5 - 8 → clamped to 0
+      expect(monster.hp).toBe(0);
       expect(result.targetKilled).toBe(true);
       expect(result.xpGained).toBe(25);
     });
@@ -127,25 +138,62 @@ describe('CombatEngine', () => {
 
       expect(result.playerLeveledUp).toBe(true);
       expect(player.level).toBe(2);
-      expect(player.xp).toBe(40); // 90 + 50 - 100 = 40 (excess XP carried over)
-      expect(player.attack).toBe(12); // +2
-      expect(player.defense).toBe(6); // +1
-      expect(player.maxHp).toBe(110); // +10
-      expect(player.hp).toBe(110); // +10 restored
+      expect(player.xp).toBe(40);
+      expect(player.attack).toBe(12);
+      expect(player.defense).toBe(6);
+      expect(player.maxHp).toBe(110);
+      expect(player.hp).toBe(110);
     });
 
     it('should apply critical hit multiplier', () => {
-      const critPlayer: PlayerStats = { ...mockPlayer, critChance: 1.0 }; // Always crit
+      const critPlayer: PlayerStats = { ...mockPlayer, critChance: 1.0 };
       const { result } = applyDamageToMonster(critPlayer, mockMonster, 1.0);
 
       expect(result.wasCritical).toBe(true);
-      expect(result.damageDealt).toBe(12); // (10 - 2) * 1.0 * 1.5 = 12
+      expect(result.damageDealt).toBe(12);
     });
 
     it('should apply exercise multiplier', () => {
       const { result } = applyDamageToMonster(mockPlayer, mockMonster, 2.0);
 
-      expect(result.damageDealt).toBe(16); // (10 - 2) * 2.0 = 16
+      expect(result.damageDealt).toBe(16);
+    });
+
+    it('applies combo multiplier, weakness affinity, and shield mitigation', () => {
+      expect(getComboMultiplier(0)).toBe(1.0);
+      expect(getComboMultiplier(3)).toBe(1.25);
+      expect(getComboMultiplier(6)).toBe(1.5);
+      expect(getComboMultiplier(10)).toBe(2.0);
+
+      const shieldedMonster: MonsterStats = {
+        ...mockMonster,
+        weakTo: 'SQUAT',
+        resistantTo: 'PLANK',
+        shieldHits: 2,
+        maxShieldHits: 2,
+      };
+
+      expect(getExerciseMatchup(shieldedMonster, 'SQUAT')).toBe('WEAK');
+      expect(getExerciseMatchup(shieldedMonster, 'PLANK')).toBe('RESISTANT');
+
+      // Base damage 8 * combo(1.5) * weak(1.5) = 18 -> shielded 25% = 4, and weak strips 2 shield hits!
+      const { monster: afterHit, result } = applyDamageToMonster(mockPlayer, shieldedMonster, 1.0, {
+        comboCount: 6,
+        exerciseId: 'SQUAT',
+      });
+
+      expect(result.matchup).toBe('WEAK');
+      expect(result.shieldHit).toBe(true);
+      expect(result.shieldBroken).toBe(true);
+      expect(afterHit.shieldHits).toBe(0);
+      expect(result.damageDealt).toBe(4);
+    });
+
+    it('reduces damage when player suffers toxic debuff', () => {
+      const { result } = applyDamageToMonster(mockPlayer, mockMonster, 1.0, {
+        isDebuffed: true,
+      });
+      expect(result.damageDealt).toBe(6); // 8 * 0.75 = 6
     });
   });
 
@@ -166,8 +214,8 @@ describe('CombatEngine', () => {
       const leveledPlayer = levelUp(player);
 
       expect(leveledPlayer.level).toBe(2);
-      expect(leveledPlayer.xp).toBe(50); // 150 - 100 = 50 excess XP
-      expect(leveledPlayer.xpToNextLevel).toBe(282); // Level 2 threshold
+      expect(leveledPlayer.xp).toBe(50);
+      expect(leveledPlayer.xpToNextLevel).toBe(282);
       expect(leveledPlayer.maxHp).toBe(110);
       expect(leveledPlayer.hp).toBe(110);
       expect(leveledPlayer.attack).toBe(12);
@@ -187,14 +235,13 @@ describe('CombatEngine', () => {
         critMultiplier: 1.5,
       };
 
-      // Level up twice
-      player = levelUp(player); // 1→2
-      player = levelUp(player); // 2→3
+      player = levelUp(player);
+      player = levelUp(player);
 
       expect(player.level).toBe(3);
-      expect(player.attack).toBe(14); // +2 per level
-      expect(player.defense).toBe(7); // +1 per level
-      expect(player.maxHp).toBe(120); // +10 per level
+      expect(player.attack).toBe(14);
+      expect(player.defense).toBe(7);
+      expect(player.maxHp).toBe(120);
     });
   });
 
@@ -213,20 +260,17 @@ describe('CombatEngine', () => {
 
     it('should reduce player HP by (monsterAttack - playerDefense)', () => {
       const damaged = applyDamageToPlayer(mockPlayer, 10);
-
-      expect(damaged.hp).toBe(95); // 100 - (10 - 5) = 95
+      expect(damaged.hp).toBe(95);
     });
 
     it('should enforce minimum damage of 1', () => {
       const damaged = applyDamageToPlayer(mockPlayer, 3);
-
-      expect(damaged.hp).toBe(99); // 100 - 1 = 99 (3 - 5 = -2 → 1)
+      expect(damaged.hp).toBe(99);
     });
 
     it('should clamp HP at 0', () => {
       const lowHpPlayer: PlayerStats = { ...mockPlayer, hp: 2 };
       const damaged = applyDamageToPlayer(lowHpPlayer, 20);
-
       expect(damaged.hp).toBe(0);
     });
   });
@@ -258,7 +302,7 @@ describe('CombatEngine', () => {
     });
   });
 
-  describe('getBossPhase', () => {
+  describe('getBossPhase & phase transitions', () => {
     const bossMonster: MonsterStats = {
       id: 'BOSS',
       name: 'Boss',
@@ -268,7 +312,7 @@ describe('CombatEngine', () => {
       defense: 5,
       xpReward: 100,
       isBoss: true,
-      phaseThresholds: [0.7, 0.4], // 70% and 40%
+      phaseThresholds: [0.7, 0.4],
     };
 
     it('should return phase 0 at full HP', () => {
@@ -276,17 +320,17 @@ describe('CombatEngine', () => {
     });
 
     it('should return phase 1 at 70% HP', () => {
-      const boss = { ...bossMonster, hp: 140 }; // 70%
+      const boss = { ...bossMonster, hp: 140 };
       expect(getBossPhase(boss)).toBe(1);
     });
 
     it('should return phase 2 at 40% HP', () => {
-      const boss = { ...bossMonster, hp: 80 }; // 40%
+      const boss = { ...bossMonster, hp: 80 };
       expect(getBossPhase(boss)).toBe(2);
     });
 
     it('should return phase 2 at 10% HP (lowest phase)', () => {
-      const boss = { ...bossMonster, hp: 20 }; // 10%
+      const boss = { ...bossMonster, hp: 20 };
       expect(getBossPhase(boss)).toBe(2);
     });
 
@@ -303,9 +347,15 @@ describe('CombatEngine', () => {
       };
       expect(getBossPhase(normalMonster)).toBe(0);
     });
+
+    it('grants Boss Grease Shield when transitioning into Phase 1', () => {
+      const shifted = applyBossPhaseTransition(bossMonster, 0, 1);
+      expect(shifted.shieldHits).toBe(2);
+      expect(shifted.maxShieldHits).toBe(2);
+    });
   });
 
-  describe('createPlayer', () => {
+  describe('createPlayer & getEffectivePlayerStats', () => {
     it('should create a fresh player with starting stats', () => {
       const player = createPlayer();
 
@@ -319,19 +369,19 @@ describe('CombatEngine', () => {
       expect(player.critChance).toBe(0.15);
       expect(player.critMultiplier).toBe(1.5);
     });
-  });
 
-  describe('getEffectivePlayerStats', () => {
-    it('adds equipment stat bonuses without mutating base player', () => {
+    it('adds equipment stat bonuses including comboWindowBonusMs without mutating base player', () => {
       const base = createPlayer();
       const effective = getEffectivePlayerStats(
         base,
-        ['RUNNING_SHOES', 'WEIGHT_BELT', 'ARMOR_VEST'],
+        ['RUNNING_SHOES', 'WEIGHT_BELT', 'ARMOR_VEST', 'CHAMPION_BELT'],
         ITEMS
       );
 
-      expect(effective.attack).toBe(base.attack + 2 + 3);
-      expect(effective.defense).toBe(base.defense + 5);
+      expect(effective.attack).toBe(base.attack + 2 + 3 + 8);
+      expect(effective.defense).toBe(base.defense + 5 + 6);
+      expect(effective.maxHp).toBe(base.maxHp + 25);
+      expect(effective.comboWindowBonusMs).toBe(1000);
       expect(base.attack).toBe(10);
     });
 
@@ -348,7 +398,7 @@ describe('CombatEngine', () => {
     });
   });
 
-  describe('useConsumableItem', () => {
+  describe('useConsumableItem & rollItemDrop', () => {
     it('restores HP capped at maxHp', () => {
       const wounded: PlayerStats = { ...createPlayer(), hp: 60, maxHp: 100 };
       const healed = useConsumableItem(wounded, ITEMS.PROTEIN_SHAKE);
@@ -364,9 +414,7 @@ describe('CombatEngine', () => {
       const result = useConsumableItem(wounded, ITEMS.RUNNING_SHOES);
       expect(result.hp).toBe(50);
     });
-  });
 
-  describe('rollItemDrop', () => {
     it('returns matching item when rng falls below drop chance', () => {
       const table = [
         { itemId: 'ENERGY_BAR', chance: 0.3 },
@@ -385,17 +433,30 @@ describe('CombatEngine', () => {
 
   describe('calculateMonsterCounterAttack & intervals', () => {
     it('reduces damage and allows full block during plank hold', () => {
-      const player = createPlayer(); // defense 5
+      const player = createPlayer();
       const unblocked = calculateMonsterCounterAttack(player, 15, false);
       expect(unblocked.wasBlocked).toBe(false);
-      expect(unblocked.damageTaken).toBe(10); // 15 - 5
+      expect(unblocked.damageTaken).toBe(10);
 
       const blocked = calculateMonsterCounterAttack(player, 15, true);
       expect(blocked.wasBlocked).toBe(true);
-      expect(blocked.damageTaken).toBe(0); // floor(15*0.3)=4 <= 5 defense
+      expect(blocked.damageTaken).toBe(0);
     });
 
-    it('speeds up attack interval in boss phases', () => {
+    it('speeds up attack interval in boss phases and respects fast archetype intervals', () => {
+      const fastMob: MonsterStats = {
+        id: 'SODA',
+        name: 'Soda',
+        hp: 30,
+        maxHp: 30,
+        attack: 5,
+        defense: 1,
+        xpReward: 15,
+        isBoss: false,
+        attackIntervalMs: 5200,
+      };
+      expect(getMonsterAttackIntervalMs(fastMob)).toBe(5200);
+
       const boss: MonsterStats = {
         id: 'BOSS_KING_BURGER',
         name: 'King Burger',
@@ -420,28 +481,108 @@ describe('CombatEngine', () => {
       expect(isMonsterAttackWarningActive(5500, 7000)).toBe(true);
       expect(isMonsterAttackWarningActive(6999, 7000)).toBe(true);
       expect(isMonsterAttackWarningActive(7000, 7000)).toBe(false);
-
-      // Boss enraged shorter intervals (4000ms -> warns at 2500ms..3999ms)
       expect(isMonsterAttackWarningActive(2499, 4000)).toBe(false);
       expect(isMonsterAttackWarningActive(2500, 4000)).toBe(true);
-
-      // Edge cases: invalid interval or warning window larger than interval
       expect(isMonsterAttackWarningActive(0, 0)).toBe(false);
       expect(isMonsterAttackWarningActive(100, 1000, 1500)).toBe(true);
     });
   });
 
+  describe('Battle Ranks, Kcal, Endless Waves & Daily Quests', () => {
+    it('computes battle rank S/A/B/C and reward multipliers accurately', () => {
+      expect(
+        calculateBattleRank({ damageTaken: 0, playerMaxHp: 100, maxCombo: 10, durationSec: 25 })
+      ).toEqual({ rank: 'S', rewardMultiplier: 1.3 });
+
+      expect(
+        calculateBattleRank({ damageTaken: 20, playerMaxHp: 100, maxCombo: 5, durationSec: 50 })
+      ).toEqual({ rank: 'A', rewardMultiplier: 1.15 });
+
+      expect(
+        calculateBattleRank({ damageTaken: 80, playerMaxHp: 100, maxCombo: 1, durationSec: 90 })
+      ).toEqual({ rank: 'C', rewardMultiplier: 1.0 });
+    });
+
+    it('estimates workout kcal and scales endless arena waves with bosses every 5th wave', () => {
+      expect(
+        estimateWorkoutKcal({
+          SQUAT: { reps: 10 },
+          PLANK: { holdSeconds: 50 },
+        })
+      ).toBe(7.5);
+
+      const wave1 = createEndlessWaveMonster(1);
+      const wave4 = createEndlessWaveMonster(4);
+      const wave5 = createEndlessWaveMonster(5);
+
+      expect(wave1.isBoss).toBe(false);
+      expect(wave4.maxHp).toBeGreaterThan(wave1.maxHp);
+      expect(wave5.isBoss).toBe(true);
+      expect(wave5.coinReward).toBeGreaterThan(wave1.coinReward ?? 0);
+    });
+
+    it('generates deterministic daily quests and updates day streaks safely', () => {
+      const questsA = getDailyQuestsForDate('2026-11-15');
+      const questsB = getDailyQuestsForDate('2026-11-15');
+      expect(questsA).toEqual(questsB);
+      expect(questsA).toHaveLength(3);
+
+      expect(
+        getQuestProgress(questsA[0], {
+          date: '2026-11-15',
+          claimedIds: [],
+          repsToday: 12,
+          holdSecondsToday: 5,
+          winsToday: 1,
+        })
+      ).toBe(12);
+
+      const s1 = updateStreakForDate({ current: 0, best: 0, lastActiveDate: null }, '2026-11-14');
+      expect(s1).toEqual({ current: 1, best: 1, lastActiveDate: '2026-11-14' });
+
+      const s2 = updateStreakForDate(s1, '2026-11-15');
+      expect(s2).toEqual({ current: 2, best: 2, lastActiveDate: '2026-11-15' });
+
+      const sReset = updateStreakForDate(s2, '2026-11-18');
+      expect(sReset).toEqual({ current: 1, best: 2, lastActiveDate: '2026-11-18' });
+    });
+  });
+
   describe('evaluateNewAchievements', () => {
-    it('unlocks achievements matching workout & progression milestones without duplicates', () => {
+    it('unlocks achievements matching workout, combo, endless, streak, and bestiary milestones without duplicates', () => {
       const state: GameState = {
         player: { ...createPlayer(), level: 5 },
         inventory: { items: new Map(), equippedItems: [] },
+        coins: 120,
         currentLevel: null,
         unlockedLevels: ['LEVEL_1'],
         completedLevels: ['LEVEL_5'],
         unlockedAchievements: ['FIRST_REP'],
         currentEnemy: null,
-        workoutStats: { totalReps: 55, totalHoldSeconds: 35, monstersDefeated: 2 },
+        workoutStats: { totalReps: 55, totalHoldSeconds: 35, monstersDefeated: 2, maxCombo: 12 },
+        exerciseTotals: {
+          SQUAT: { reps: 30, holdSeconds: 0 },
+          PUSH_UP: { reps: 15, holdSeconds: 0 },
+          PLANK: { reps: 0, holdSeconds: 35 },
+          JUMPING_JACK: { reps: 10, holdSeconds: 0 },
+        },
+        streak: { current: 3, best: 3, lastActiveDate: '2026-11-15' },
+        dailyHistory: {},
+        dailyQuests: {
+          date: '2026-11-15',
+          claimedIds: [],
+          repsToday: 0,
+          holdSecondsToday: 0,
+          winsToday: 0,
+        },
+        bestiary: {
+          SODA: { encounters: 1, defeats: 1, fastestVictorySec: 12, weaknessDiscovered: true },
+          DONUT: { encounters: 1, defeats: 1, fastestVictorySec: 15, weaknessDiscovered: true },
+          BURGER: { encounters: 1, defeats: 1, fastestVictorySec: 20, weaknessDiscovered: true },
+          PIZZA: { encounters: 1, defeats: 1, fastestVictorySec: 22, weaknessDiscovered: true },
+          FRIES: { encounters: 1, defeats: 0, fastestVictorySec: null, weaknessDiscovered: false },
+        },
+        endlessStats: { bestWave: 5, totalArenaWins: 5 },
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
@@ -464,6 +605,10 @@ describe('CombatEngine', () => {
       expect(unlocked).toContain('FIRST_VICTORY');
       expect(unlocked).toContain('BOSS_SLAYER');
       expect(unlocked).toContain('VETERAN_HERO');
+      expect(unlocked).toContain('COMBO_MASTER');
+      expect(unlocked).toContain('ARENA_SURVIVOR');
+      expect(unlocked).toContain('STREAK_WARRIOR');
+      expect(unlocked).toContain('BESTIARY_SCHOLAR');
     });
   });
 });

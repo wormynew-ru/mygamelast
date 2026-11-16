@@ -109,17 +109,17 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 #### **Audio System (100% complete, 10 tests)**
 - ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (8 synthesized sounds incl. `WARNING` two-tone strike alert, NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
 
-#### **Game System (100% complete, 35 tests)**
-- ✅ `src/game/types.ts` — RPG, WorkoutStats, Achievement, and `ExerciseCalibrationSettings` interfaces
-- ✅ `src/game/CombatEngine.ts` — Damage calculation, crits, XP, leveling, boss phases, monster counter-attacks + Plank hold blocking (`calculateMonsterCounterAttack`, `getMonsterAttackIntervalMs`, `ATTACK_WARNING_WINDOW_MS`, `isMonsterAttackWarningActive`), equipment bonuses (`getEffectivePlayerStats`), consumable healing (`useConsumableItem`), loot drops (`rollItemDrop`) + 35 tests
-- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 3`, `migrateGameState`), consumable usage, player revive, workout stats, achievements sync, persistent per-exercise angle thresholds, language hydration sync
-- ✅ `src/game/data/` — `exercises.ts` (4 exercises), `monsters.ts` (4 monsters + boss), `items.ts` (5 items), `levels.ts` (5 progressive campaign stages + drop tables), `achievements.ts` (7 data-driven achievements + pure `evaluateNewAchievements`)
+#### **Game System (100% complete, 41 tests)**
+- ✅ `src/game/types.ts` — RPG, WorkoutStats, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, and `ExerciseCalibrationSettings` interfaces
+- ✅ `src/game/CombatEngine.ts` — Damage calculation, Tempo Combo streaks (`getComboMultiplier`, `COMBO_WINDOW_BASE_MS`), exercise matchups (`getExerciseMatchup`, `getMatchupMultiplier`), enemy shield mitigation, Boss Phase 1 Grease Shield (`applyBossPhaseTransition`), Toxic debuff (`TOXIC_DEBUFF_DAMAGE_MULTIPLIER`), Battle Rank (`calculateBattleRank`), kcal estimation (`estimateWorkoutKcal`), counter-attacks + Plank hold blocking, equipment bonuses (`comboWindowBonusMs`), consumable healing, loot drops + 41 tests
+- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 4`, backwards-compatible `v0–v4` `migrateGameState`), Fit-Coins economy (`addCoins`, `spendCoins`, `buyItem`), daily quest claims (`claimDailyQuest`), 7-day streak tracking, 30-day activity history, Bestiary tracking (`recordMonsterBestiary`), Endless Arena records (`updateEndlessProgress`), 11-achievement sync, per-exercise calibration, language hydration sync
+- ✅ `src/game/data/` — `exercises.ts` (4 exercises), `monsters.ts` (8 monsters across 4 archetypes `FAST`/`ARMORED`/`TOXIC`/`BOSS` + `createEndlessWaveMonster`), `items.ts` (10 items across `COMMON`/`RARE`/`EPIC`/`LEGENDARY` rarities + `SHOP_ITEM_IDS`), `levels.ts` (5 progressive campaign stages + drop tables), `dailyQuests.ts` (deterministic local-date Daily Quests & Streak helpers), `achievements.ts` (11 achievements + pure `evaluateNewAchievements`)
 
-#### **Session Layer (100% complete, 10 tests)**
-- ✅ `src/session/WorkoutSession.ts` — Coordinator (CV→Exercise→Combat→Audio→Store glue), ~100ms steady-state HUD throttling with immediate discrete event emission, `worldLandmarks` forwarding, localized camera/MediaPipe error mapping, rep & 1s hold-tick damage, monster counter-attack timer, 1.5s once-per-cycle `WARNING` sound/voice telegraph & `isAttackWarning` state, Plank block defense, `DEFEAT` state, gear bonuses without mutating base stats, level unlock & loot drops, achievement syncing, Screen Wake Lock, `visibilitychange` auto-pause, 5s `LOW_VISIBILITY` auto-pause, audio unlock API, `createExerciseDetector` + `applyExerciseCalibration` + `createWorkoutSessionForBattle` + 10 tests
+#### **Session Layer (100% complete, 12 tests)**
+- ✅ `src/session/WorkoutSession.ts` — Coordinator (CV→Exercise→Combat→Audio→Store glue), tempo combo window & decay tracking, matchup & shield & Boss Phase 1 Grease Shield handling, Toxic debuff application & Plank-block cleanse, Fit-Coins & Battle Rank (`S/A/B/C`) & `~kcal` summary, Bestiary encounter/defeat tracking, Endless Arena wave reset support without tearing down camera, ~100ms steady-state HUD throttling, `worldLandmarks` forwarding, localized camera/MediaPipe error mapping, rep & 1s hold-tick damage, counter-attack timer & 1.5s warning telegraph, Screen Wake Lock, auto-pause, audio unlock API + 12 tests
 
 #### **Localization Layer (100% complete)**
-- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries (type-checked `TranslationKey`) including PWA, achievements, counter-attacks, and calibration sliders
+- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries (type-checked `TranslationKey`) covering Junk Slayer 2.0 combat, shop, daily quests, streaks, bestiary analytics, Endless Arena, and PWA
 - ✅ `src/i18n/index.ts` & `src/i18n/useTranslation.ts` — Translation helpers & React hook synced with Zustand store
 
 #### **PWA & Offline Assets (100% complete)**
@@ -128,18 +128,20 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 - ✅ `public/icon.svg`, `public/pwa-192x192.png`, `public/pwa-512x512.png`, `public/pwa-maskable-512x512.png`, `public/apple-touch-icon.png` — Complete multi-platform PWA & iOS icon set
 - ✅ `src/ui/PWAInstallButton.tsx` — In-app Chromium install prompt (`beforeinstallprompt`), iOS Safari installation modal, and `OfflineIndicator`
 
-#### **UI Layer (Complete MVP+ Campaign Loop)**
-- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (effective stats + gear bonuses, workout stats), PWA install CTA, 7-badge Achievements grid, navigation to Campaign, Quick Battle, Inventory, Calibration, Settings
-- ✅ `src/ui/LevelSelectScreen.tsx` — 5-stage campaign selector (Soda → Donut → Burger → Pizza → King Burger Boss) + 4-exercise selector
-- ✅ `src/ui/InventoryScreen.tsx` — Equipment equip/unequip + consumable healing items
+#### **UI Layer (Complete Junk Slayer 2.0 RPG, Shop, Modes & Metagame)**
+- ✅ `src/ui/gameKeys.ts` — Shared lookup dictionary mapping game item/monster/exercise/archetype/rarity/achievement IDs to i18n keys
+- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (Fit-Coins, effective stats, Endless record), Daily Quests & 7-day Streak calendar strip with rewards, PWA install CTA, 11-badge Achievements grid, navigation to Campaign/Endless, Inventory/Shop, Bestiary/Analytics, Calibration, Settings
+- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena` selector, monster archetypes & weaknesses preview, 4-exercise selector
+- ✅ `src/ui/InventoryScreen.tsx` — Segmented `Bag | Shop` tabs with Fit-Coins, 4-tier rarity labels, equipment equip/unequip, consumables (used strictly between battles)
+- ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — 7-day workout bar chart, `~kcal` estimate, streak summary, per-exercise totals, and 8-monster Bestiary with unlocked weaknesses/resistances
 - ✅ `src/ui/SettingsScreen.tsx` — RU/EN language switcher, Sound/Voice toggles, Front/Rear camera selector, in-app reset confirmation modal
-- ✅ `src/ui/BattleScreen.tsx` — Live video/canvas binding via `WorkoutSession`, rep & hold-timer HUDs, enemy counter-attack countdown bar + 1.5s wind-up telegraph (`AlertTriangle` label, red bar/border highlight, emoji wind-up shake, Plank block hint), Plank block / damage popups, boss phase alerts, visibility warnings, audio unlock button, victory loot/XP/achievements summary, and Defeat HP revive flow
+- ✅ `src/ui/BattleScreen.tsx` — Live CV battle HUD with Tempo Combo meter/decay bar, Matchup indicator, Enemy Shield counter, Toxic debuff indicator, 1.5s counter-attack wind-up warning, Plank block/damage popups, boss phase alerts, Victory Rank `S/A/B/C` + Fit-Coins + `~kcal` summary, and seamless multi-wave Endless Arena progression (`Next Wave` vs `Bank Loot & Exit`)
 - ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 4 detectors) with persistent live angle-threshold sliders and localized camera error handling
-- ✅ `src/App.tsx` — Root screen router + global `OfflineIndicator` (no `window.alert` / `window.confirm`)
+- ✅ `src/App.tsx` — Root screen router (`MENU`, `LEVEL_SELECT`, `INVENTORY`, `BESTIARY`, `SETTINGS`, `CALIBRATION`, `BATTLE`) + global `OfflineIndicator`
 
 ### 6.2 Test Coverage Summary
 
-**Total: 164/164 tests passing across 9 test files (100% ✅)**
+**Total: 172/172 tests passing across 9 test files (100% ✅)**
 
 | File | Tests | Status |
 |------|-------|--------|
@@ -150,8 +152,8 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 | `JumpingJackDetector.test.ts` | 6 | ✅ Pass |
 | `PoseTracker.test.ts` | 10 | ✅ Pass |
 | `SoundFX.test.ts` | 10 | ✅ Pass |
-| `CombatEngine.test.ts` | 35 | ✅ Pass |
-| `WorkoutSession.test.ts` | 10 | ✅ Pass |
+| `CombatEngine.test.ts` | 41 | ✅ Pass |
+| `WorkoutSession.test.ts` | 12 | ✅ Pass |
 
 ### 6.3 What's NOT Implemented Yet ❌
 
@@ -185,20 +187,21 @@ src/
 │       ├── PlankDetector.ts / .test.ts       ✅ (17 tests)
 │       └── JumpingJackDetector.ts / .test.ts ✅ (6 tests)
 │
-├── session/                         ✅ Complete (10 tests)
-│   ├── WorkoutSession.ts           ✅ Coordinator, throttled HUD, counter-attacks, attack warning, calibration, battle factory
+├── session/                         ✅ Complete (12 tests)
+│   ├── WorkoutSession.ts           ✅ Coordinator, combos/matchups/shields/debuffs, Endless waves, counter-attacks, warning, calibration
 │   └── WorkoutSession.test.ts      ✅
 │
-├── game/                            ✅ Complete (35 tests)
-│   ├── types.ts                    ✅ RPG, WorkoutStats, Calibration & Achievement interfaces
-│   ├── CombatEngine.ts / .test.ts  ✅ Combat, counter-attacks, warning window, gear, consumables, drops (35 tests)
-│   ├── store.ts                    ✅ Zustand v3 persist + Map serializer
+├── game/                            ✅ Complete (41 tests)
+│   ├── types.ts                    ✅ RPG, Combo, Rank, Economy, DailyQuests, Streaks, Bestiary, Endless, Calibration & Achievement interfaces
+│   ├── CombatEngine.ts / .test.ts  ✅ Combat, combos, matchups, shields, boss transitions, toxic debuff, ranks, kcal, counter-attacks, gear, consumables (41 tests)
+│   ├── store.ts                    ✅ Zustand v4 persist + backwards-compatible v0–v4 migration + Map serializer
 │   └── data/
 │       ├── exercises.ts            ✅ 4 exercises (rep/hold)
-│       ├── monsters.ts             ✅ 4 monsters + boss
-│       ├── items.ts                ✅ 5 items
+│       ├── monsters.ts             ✅ 8 monsters (4 archetypes) + createEndlessWaveMonster
+│       ├── items.ts                ✅ 10 items (4 rarities) + SHOP_ITEM_IDS
 │       ├── levels.ts               ✅ 5 campaign stages + drop tables
-│       └── achievements.ts         ✅ 7 achievements + pure evaluator
+│       ├── dailyQuests.ts          ✅ Deterministic Daily Quests & 7-day Streak calendar helpers
+│       └── achievements.ts         ✅ 11 achievements + pure evaluator
 │
 ├── audio/                           ✅ Complete (10 tests)
 │   ├── SoundFX.ts                  ✅ 8 synthesized sounds (incl. WARNING) + unlock check + speak()
@@ -210,12 +213,14 @@ src/
 │   ├── ru.ts                       ✅ Primary Russian translations
 │   └── en.ts                       ✅ Secondary English translations
 │
-└── ui/                              ✅ Complete RPG & PWA UI Flow
-    ├── MainMenu.tsx                ✅ Hero profile, achievements grid, PWA CTA & hub
-    ├── LevelSelectScreen.tsx       ✅ Campaign & exercise selector
-    ├── InventoryScreen.tsx         ✅ Equipment & consumables
+└── ui/                              ✅ Complete Junk Slayer 2.0 RPG & PWA UI Flow
+    ├── gameKeys.ts                 ✅ Shared entity/archetype/rarity i18n lookup dictionary
+    ├── MainMenu.tsx                ✅ Hero profile, Fit-Coins, Daily Quests & 7-day Streak strip, 11-item Achievements, PWA CTA
+    ├── LevelSelectScreen.tsx       ✅ Segmented Campaign & Endless Arena selector + archetype/weakness badges
+    ├── InventoryScreen.tsx         ✅ Segmented Bag & Fit-Coins Shop (4 rarities, consumables, gear)
+    ├── BestiaryAnalyticsScreen.tsx ✅ 7-day workout bar chart, ~kcal, exercise totals & 8-monster Bestiary
     ├── SettingsScreen.tsx          ✅ Language, audio, camera, reset modal
-    ├── BattleScreen.tsx            ✅ Live CV arena + enemy counter-attack HUD
+    ├── BattleScreen.tsx            ✅ Live CV arena, Combo meter, Matchups, Shields, Toxic debuff, Rank S/A/B/C & multi-wave Endless flow
     ├── CalibrationSandbox.tsx      ✅ Multi-exercise calibration + angle threshold sliders
     └── PWAInstallButton.tsx        ✅ Chromium/iOS install prompt + OfflineIndicator
 ```
@@ -225,7 +230,7 @@ src/
 ```bash
 ✅ npm run typecheck  — Strict TypeScript, 0 errors
 ✅ npm run lint       — ESLint strict boundaries & no-any, 0 errors / 0 warnings
-✅ npm test           — 164/164 tests passing (9/9 files)
+✅ npm test           — 172/172 tests passing (9/9 files)
 ✅ npm run build      — Clean Vite production build + PWA manifest & Service Worker
 ```
 
@@ -236,7 +241,7 @@ src/
 - ✅ `src/game/` — ZERO React/DOM/`src/vision/` imports
 - ✅ `src/audio/` — ZERO React/Zustand imports
 - ✅ `src/session/` — ZERO React imports
-- ✅ `src/ui/` — Subscribes to `WorkoutSession` and `store.ts`; BattleScreen has ZERO direct `PoseTracker`/`CombatEngine`/`SoundFX` imports
+- ✅ `src/ui/` — Subscribes to `WorkoutSession` and `store.ts`; BattleScreen & BestiaryAnalyticsScreen have ZERO direct `PoseTracker`/`CombatEngine`/`SoundFX` imports
 
 ### 6.7 Quick Start for New Sessions
 
@@ -257,15 +262,17 @@ npm run dev
 
 ### 6.9 Session History & Timestamps
 
-**Latest update:** 2026-11-15 22:53 UTC
+**Latest update:** 2026-11-16 06:18 UTC
 
 **Recent work:**
-- ✅ 2026-11-15: Optimized pose recognition and game runtime (`PoseTracker` batched skeleton canvas rendering, adaptive inference throttling, GPU→CPU delegate fallback, `worldLandmarks` 3D pipeline; `SquatDetector` bilateral averaging & right-leg fallback; `PushUpDetector`/`PlankDetector` hysteresis side-switching, 3D world coords, & frame-0 EMA init; zero-alloc `angle3D` & `JumpingJackDetector`; `WorkoutSession` ~100ms HUD throttling + localized camera error mapping; `BattleScreen` memoized `HPBar` & `effectivePlayer` + timer cleanup; `CalibrationSandbox` throttled UI updates & 3D `worldLandmarks` forwarding; 164/164 tests + Chromium verification)
-- ✅ 2026-11-15: Implemented 1.5s enemy/boss attack wind-up telegraph (`ATTACK_WARNING_WINDOW_MS`, `isMonsterAttackWarningActive`, `SoundFX` `'WARNING'` two-tone chime + optional localized voice cue, once-per-cycle `WorkoutSession` trigger, `BattleScreen` warning HUD + emoji wind-up shake + Plank block hint)
-- ✅ 2026-11-15: Integrated PWA (`vite-plugin-pwa`, manifest, Service Worker `CacheFirst`, PNG/SVG icons, `PWAInstallButton`, `OfflineIndicator`) and bundled local MediaPipe WASM + `pose_landmarker_lite.task` in `public/mediapipe/` with CDN fallback
-- ✅ 2026-11-15: Implemented Monster/Boss counter-attack timer (`calculateMonsterCounterAttack`, `getMonsterAttackIntervalMs`), Plank hold blocking, `DEFEAT` flow with HP revive, and live counter-attack HUD in `BattleScreen`
-- ✅ 2026-11-15: Added 7 data-driven achievements (`src/game/data/achievements.ts`, MainMenu progress grid, Victory summary unlocks) and persistent per-exercise calibration angle sliders in `CalibrationSandbox`
-- ✅ 2026-11-15: Verified `typecheck`, `lint`, `vitest` (164/164), `vite build`, and live browser inspection across desktop and mobile viewports
+- ✅ 2026-11-16: Implemented **Junk Slayer 2.0** expansion:
+  - **Combat Depth**: Tempo Combo streaks (`x1.0 → x1.25 → x1.5 → x2.0`) with item-extendable combo decay window, exercise matchups (`weakTo` 1.5x / `resistantTo` 0.75x), 4 monster archetypes (`FAST`, `ARMORED`, `TOXIC`, `BOSS`), enemy shields & Boss Phase 1 Grease Shield (`applyBossPhaseTransition`), Toxic debuff (`-25%` damage when unblocked, cleared by Plank block), and Battle Rank (`S/A/B/C`) + `~kcal` calculation.
+  - **Game Modes**: Endless Arena (`ENDLESS`) with scaling waves, Boss every 5th wave, seamless `Next Wave` vs `Bank Loot & Exit` without restarting camera, and deterministic local-date Daily Quests.
+  - **RPG Economy & Gear**: Fit-Coins rewards & `Bag | Shop` in `InventoryScreen`, `COMMON`/`RARE`/`EPIC`/`LEGENDARY` rarities, and 5 new items (`ISOTONIC_FLASK`, `MEGA_RECOVERY_SMOOTHIE`, `FITNESS_WRISTBANDS`, `TITANIUM_DUMBBELLS`, `CHAMPION_BELT`) with Zustand `v4` backwards-compatible migration.
+  - **Metagame & Analytics**: 7-day Workout Streaks + calendar strip, 8-monster Bestiary & 7-day bar chart + per-exercise breakdown (`BestiaryAnalyticsScreen`), 3 new monsters (`FRIES`, `HOT_SAUCE`, `BOSS_PIZZA_EMPEROR`), and 4 new achievements (11 total).
+  - Verified cleanly via `typecheck`, `lint`, `vitest` (172/172), `vite build`, and live headless Chromium inspection across desktop (`1440x900`) and mobile (`390x844`).
+- ✅ 2026-11-15: Optimized pose recognition and game runtime (`PoseTracker` batched skeleton rendering, adaptive throttling, GPU→CPU fallback, `worldLandmarks` 3D pipeline; detector bilateral/hysteresis improvements; zero-alloc `angle3D`/`JumpingJackDetector`; `WorkoutSession` throttled HUD; 164/164 tests)
+- ✅ 2026-11-15: Implemented 1.5s enemy/boss attack wind-up telegraph (`ATTACK_WARNING_WINDOW_MS`, `SoundFX` `'WARNING'`, `BattleScreen` warning HUD) and integrated offline PWA + local MediaPipe assets
 
 **Next session priorities:**
 1. Consider E2E Playwright mock-stream harness for automated CV battle regression testing

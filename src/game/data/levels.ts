@@ -28,6 +28,7 @@ export const LEVELS: CampaignLevel[] = [
     nextLevelId: 'LEVEL_2',
     dropTable: [
       { itemId: 'ENERGY_BAR', chance: 0.65 },
+      { itemId: 'ISOTONIC_FLASK', chance: 0.35 },
       { itemId: 'RUNNING_SHOES', chance: 0.25 },
     ],
   },
@@ -38,7 +39,7 @@ export const LEVELS: CampaignLevel[] = [
     recommendedExercise: 'SQUAT',
     nextLevelId: 'LEVEL_3',
     dropTable: [
-      { itemId: 'ENERGY_BAR', chance: 0.5 },
+      { itemId: 'ISOTONIC_FLASK', chance: 0.5 },
       { itemId: 'PROTEIN_SHAKE', chance: 0.35 },
       { itemId: 'RUNNING_SHOES', chance: 0.3 },
     ],
@@ -52,6 +53,7 @@ export const LEVELS: CampaignLevel[] = [
     dropTable: [
       { itemId: 'PROTEIN_SHAKE', chance: 0.5 },
       { itemId: 'WEIGHT_BELT', chance: 0.35 },
+      { itemId: 'FITNESS_WRISTBANDS', chance: 0.2 },
     ],
   },
   {
@@ -63,6 +65,7 @@ export const LEVELS: CampaignLevel[] = [
     dropTable: [
       { itemId: 'PROTEIN_SHAKE', chance: 0.55 },
       { itemId: 'ARMOR_VEST', chance: 0.4 },
+      { itemId: 'TITANIUM_DUMBBELLS', chance: 0.2 },
     ],
   },
   {
@@ -72,9 +75,10 @@ export const LEVELS: CampaignLevel[] = [
     recommendedExercise: 'SQUAT',
     nextLevelId: null,
     dropTable: [
+      { itemId: 'CHAMPION_BELT', chance: 0.35 },
+      { itemId: 'MEGA_RECOVERY_SMOOTHIE', chance: 0.6 },
       { itemId: 'ARMOR_VEST', chance: 0.6 },
       { itemId: 'WEIGHT_BELT', chance: 0.6 },
-      { itemId: 'PROTEIN_SHAKE', chance: 0.8 },
     ],
   },
 ];

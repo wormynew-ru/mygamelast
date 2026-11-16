@@ -1,70 +1,66 @@
 /**
- * BattleScreen - Main combat arena UI.
- * Mounts the live camera video/canvas and binds a WorkoutSession instance.
+ * BattleScreen - Main combat arena UI supporting Campaign and Endless Survival waves.
+ * Mounts live camera video/canvas and binds a WorkoutSession instance.
  * ZERO direct imports from PoseTracker, CombatEngine, or SoundFX.
  */
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Volume2, Pause, Play, LogOut, Shield, Trophy, AlertTriangle } from 'lucide-react';
+import {
+  Volume2,
+  Pause,
+  Play,
+  LogOut,
+  Shield,
+  Trophy,
+  AlertTriangle,
+  Zap,
+  Coins,
+  Skull,
+} from 'lucide-react';
 import {
   createWorkoutSessionForBattle,
+  type BattleMode,
   type WorkoutSession,
   type SessionStatus,
 } from '../session/WorkoutSession';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
-import { createMonster, MONSTERS } from '../game/data/monsters';
+import { createEndlessWaveMonster, createMonster, MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { getLevelById } from '../game/data/levels';
 import { ITEMS } from '../game/data/items';
 import { type AchievementId } from '../game/data/achievements';
+import type { BattleRank } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
+import {
+  ACHIEVEMENT_KEYS,
+  ARCHETYPE_KEYS,
+  EXERCISE_NAME_KEYS,
+  ITEM_NAME_KEYS,
+  MONSTER_NAME_KEYS,
+} from './gameKeys';
 
 interface BattleScreenProps {
   levelId?: string;
   exerciseId: ExerciseId;
+  mode?: BattleMode;
+  initialWave?: number;
   onExit: () => void;
   onStartNextLevel?: (nextLevelId: string, exerciseId: ExerciseId) => void;
 }
-
-const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
-  BURGER: 'monster.BURGER.name',
-  PIZZA: 'monster.PIZZA.name',
-  SODA: 'monster.SODA.name',
-  DONUT: 'monster.DONUT.name',
-  BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.name',
-};
-
-const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
-  SQUAT: 'exercise.SQUAT.name',
-  PUSH_UP: 'exercise.PUSH_UP.name',
-  PLANK: 'exercise.PLANK.name',
-  JUMPING_JACK: 'exercise.JUMPING_JACK.name',
-};
-
-const ITEM_NAME_KEYS: Record<string, TranslationKey> = {
-  PROTEIN_SHAKE: 'item.PROTEIN_SHAKE.name',
-  ENERGY_BAR: 'item.ENERGY_BAR.name',
-  RUNNING_SHOES: 'item.RUNNING_SHOES.name',
-  WEIGHT_BELT: 'item.WEIGHT_BELT.name',
-  ARMOR_VEST: 'item.ARMOR_VEST.name',
-};
-
-const ACHIEVEMENT_NAME_KEYS: Record<AchievementId, TranslationKey> = {
-  FIRST_REP: 'achievement.FIRST_REP.name',
-  FIFTY_REPS: 'achievement.FIFTY_REPS.name',
-  PLANK_SURVIVOR: 'achievement.PLANK_SURVIVOR.name',
-  FIRST_VICTORY: 'achievement.FIRST_VICTORY.name',
-  BOSS_SLAYER: 'achievement.BOSS_SLAYER.name',
-  GEAR_COLLECTOR: 'achievement.GEAR_COLLECTOR.name',
-  VETERAN_HERO: 'achievement.VETERAN_HERO.name',
-};
 
 const PHASE_KEYS: Record<string, TranslationKey> = {
   IDLE: 'phase.IDLE',
   DOWN: 'phase.DOWN',
   UP: 'phase.UP',
   TRANSITION: 'phase.TRANSITION',
+};
+
+const RANK_COLOR_CLASS: Record<BattleRank, string> = {
+  S: 'text-amber-400',
+  A: 'text-emerald-400',
+  B: 'text-sky-400',
+  C: 'text-slate-300',
 };
 
 function formatHoldDuration(ms: number): string {
@@ -111,6 +107,8 @@ const HPBar = memo(function HPBar({
 export function BattleScreen({
   levelId,
   exerciseId,
+  mode = 'CAMPAIGN',
+  initialWave = 1,
   onExit,
   onStartNextLevel,
 }: BattleScreenProps) {
@@ -123,6 +121,7 @@ export function BattleScreen({
   const damageTimerRef = useRef<number | null>(null);
   const heroHitTimerRef = useRef<number | null>(null);
 
+  const [currentWave, setCurrentWave] = useState<number>(initialWave);
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
     state: 'STARTING',
     exerciseState: null,
@@ -133,6 +132,12 @@ export function BattleScreen({
     nextAttackProgress: 0,
     monsterAttackIntervalMs: 7000,
     isAttackWarning: false,
+    comboCount: 0,
+    comboMultiplier: 1,
+    comboRemainingRatio: 0,
+    matchup: 'NEUTRAL',
+    isPlayerDebuffed: false,
+    debuffRemainingSec: 0,
     lastCombatEvent: null,
     lastMonsterAttackEvent: null,
     victorySummary: null,
@@ -168,6 +173,8 @@ export function BattleScreen({
       canvasElement: canvasEl,
       exerciseId,
       levelId,
+      mode,
+      endlessWave: initialWave,
     });
     sessionRef.current = session;
 
@@ -217,7 +224,7 @@ export function BattleScreen({
       session.stop();
       sessionRef.current = null;
     };
-  }, [exerciseId, levelId]);
+  }, [exerciseId, levelId, mode, initialWave]);
 
   const handlePauseToggle = () => {
     const session = sessionRef.current;
@@ -247,13 +254,32 @@ export function BattleScreen({
     if (useGameStore.getState().player.hp <= 0) {
       revivePlayer();
     }
+    if (mode === 'ENDLESS') {
+      setCurrentWave(1);
+      const freshEnemy = createEndlessWaveMonster(1);
+      startCombat(freshEnemy);
+      sessionRef.current?.reset(freshEnemy, 1);
+      return;
+    }
     const template = MONSTERS[initialMonsterId] ?? MONSTERS.BURGER;
     const freshEnemy = createMonster(template);
     startCombat(freshEnemy);
     sessionRef.current?.reset(freshEnemy);
   };
 
+  const handleNextEndlessWave = () => {
+    const nextWave = currentWave + 1;
+    setCurrentWave(nextWave);
+    const nextEnemy = createEndlessWaveMonster(nextWave);
+    startCombat(nextEnemy);
+    sessionRef.current?.reset(nextEnemy, nextWave);
+  };
+
   const handleNextFight = () => {
+    if (mode === 'ENDLESS') {
+      handleNextEndlessWave();
+      return;
+    }
     if (levelDef?.nextLevelId && onStartNextLevel) {
       const nextLevel = getLevelById(levelDef.nextLevelId);
       if (nextLevel) {
@@ -276,7 +302,9 @@ export function BattleScreen({
   const phaseKey = PHASE_KEYS[exerciseState?.phase ?? 'IDLE'] ?? 'phase.IDLE';
 
   const nextLevel = levelDef?.nextLevelId ? getLevelById(levelDef.nextLevelId) : undefined;
-  const canAdvance = sessionStatus.state === 'VICTORY' && Boolean(nextLevel && onStartNextLevel);
+  const canAdvance =
+    sessionStatus.state === 'VICTORY' &&
+    (mode === 'ENDLESS' || Boolean(nextLevel && onStartNextLevel));
 
   const attackTimerPercent = Math.round(
     Math.max(0, Math.min(1, sessionStatus.nextAttackProgress)) * 100
@@ -286,6 +314,9 @@ export function BattleScreen({
     ((1 - sessionStatus.nextAttackProgress) * sessionStatus.monsterAttackIntervalMs) / 1000
   ).toFixed(1);
   const isWarningActive = sessionStatus.state === 'ACTIVE' && sessionStatus.isAttackWarning;
+  const comboPercent = Math.round(
+    Math.max(0, Math.min(1, sessionStatus.comboRemainingRatio)) * 100
+  );
 
   return (
     <div className="w-full h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
@@ -305,7 +336,11 @@ export function BattleScreen({
           <HPBar
             current={displayEnemy?.hp ?? 0}
             max={displayEnemy?.maxHp ?? monsterTemplate.maxHp}
-            label={monsterName}
+            label={
+              mode === 'ENDLESS'
+                ? `${t('battle.waveLabel')} ${currentWave} · ${monsterName}`
+                : monsterName
+            }
             tone="enemy"
           />
         </div>
@@ -318,9 +353,21 @@ export function BattleScreen({
           <video ref={videoRef} className="hidden" playsInline muted autoPlay />
           <canvas ref={canvasRef} className="w-full h-full object-contain" />
 
-          {/* Top-left Exercise & FPS Info */}
-          <div className="absolute top-4 left-4 bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg text-xs text-slate-200 flex items-center gap-2">
+          {/* Top-left Exercise, Matchup & FPS Info */}
+          <div className="absolute top-4 left-4 bg-slate-950/85 border border-slate-800 px-3 py-1.5 rounded-lg text-xs text-slate-200 flex items-center gap-2">
             <span className="font-semibold">{t(EXERCISE_NAME_KEYS[exerciseId])}</span>
+            {sessionStatus.matchup === 'WEAK' && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-emerald-400 font-semibold">{t('battle.matchupWeak')}</span>
+              </>
+            )}
+            {sessionStatus.matchup === 'RESISTANT' && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-slate-400">{t('battle.matchupResistant')}</span>
+              </>
+            )}
             {typeof sessionStatus.fps === 'number' && sessionStatus.fps > 0 && (
               <>
                 <span aria-hidden="true">·</span>
@@ -331,7 +378,7 @@ export function BattleScreen({
             )}
           </div>
 
-          {/* Audio Unlock Banner (iOS / Safari autoplay policy) */}
+          {/* Audio Unlock Banner */}
           {!sessionStatus.isAudioUnlocked && (
             <button
               onClick={handleUnlockAudio}
@@ -353,7 +400,7 @@ export function BattleScreen({
 
           {/* Starting / Loading Overlay */}
           {sessionStatus.state === 'STARTING' && (
-            <div className="absolute inset-0 bg-slate-950/85 flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-slate-950/85 flex items-center justify-center p-6 z-10">
               <div className="text-center space-y-3">
                 <div className="w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
                 <p className="text-sm text-slate-200 font-medium">{t('battle.starting')}</p>
@@ -363,7 +410,7 @@ export function BattleScreen({
 
           {/* Paused Overlay */}
           {sessionStatus.state === 'PAUSED' && (
-            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-10">
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full text-center space-y-4">
                 <h3 className="text-xl font-bold text-white">{t('battle.paused')}</h3>
                 {sessionStatus.autoPauseReason === 'LOW_VISIBILITY' && (
@@ -384,7 +431,7 @@ export function BattleScreen({
 
           {/* Error Overlay */}
           {sessionStatus.state === 'ERROR' && (
-            <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center p-6 z-20">
               <div className="bg-slate-900 border border-red-800 rounded-xl p-6 max-w-md w-full text-center space-y-3">
                 <h3 className="text-lg font-bold text-red-400">{t('battle.error')}</h3>
                 <p className="text-sm text-slate-300">
@@ -402,9 +449,9 @@ export function BattleScreen({
         </div>
 
         {/* Right Combat HUD Panel */}
-        <aside className="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 p-6 flex flex-col justify-between gap-5 shrink-0">
-          {/* Monster Sprite + Counter-attack Timer */}
-          <div className="flex flex-col items-center text-center pt-1 space-y-3">
+        <aside className="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 p-5 flex flex-col justify-between gap-4 shrink-0 overflow-y-auto">
+          {/* Monster Sprite + Archetype + Shield + Attack Timer */}
+          <div className="flex flex-col items-center text-center pt-1 space-y-2.5">
             {sessionStatus.bossPhase > 0 && (
               <div className="text-xs font-semibold text-red-400">
                 {t('battle.bossEnrage')} {sessionStatus.bossPhase}
@@ -426,12 +473,32 @@ export function BattleScreen({
                     ? { duration: 0.45, repeat: Infinity, ease: 'easeInOut' }
                     : { duration: 0.2 }
               }
-              className="text-7xl select-none"
+              className="text-6xl select-none"
             >
               {monsterTemplate.sprite}
             </motion.div>
 
-            <h2 className="text-xl font-bold text-white">{monsterName}</h2>
+            <div>
+              <h2 className="text-lg font-bold text-white">{monsterName}</h2>
+              {displayEnemy?.archetype && (
+                <div className="text-xs text-amber-400 font-medium">
+                  {t(ARCHETYPE_KEYS[displayEnemy.archetype])}
+                </div>
+              )}
+            </div>
+
+            {/* Enemy Shield Bar */}
+            {typeof displayEnemy?.shieldHits === 'number' && displayEnemy.shieldHits > 0 && (
+              <div className="w-full bg-sky-950/40 border border-sky-700/60 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs font-semibold text-sky-300">
+                <span className="inline-flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>{t('battle.shield')}</span>
+                </span>
+                <span className="font-numeric">
+                  {displayEnemy.shieldHits} / {displayEnemy.maxShieldHits ?? displayEnemy.shieldHits}
+                </span>
+              </div>
+            )}
 
             {/* Enemy Counter-Attack Bar */}
             <div
@@ -476,6 +543,17 @@ export function BattleScreen({
               )}
             </div>
 
+            {/* Active Toxic Debuff Warning */}
+            {sessionStatus.isPlayerDebuffed && (
+              <div className="w-full bg-purple-950/40 border border-purple-700/60 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs font-semibold text-purple-300">
+                <span className="inline-flex items-center gap-1.5">
+                  <Skull className="w-3.5 h-3.5" />
+                  <span>{t('battle.toxicDebuff')}</span>
+                </span>
+                <span className="font-numeric">{sessionStatus.debuffRemainingSec}s</span>
+              </div>
+            )}
+
             {/* Damage / Block Popups */}
             <div className="min-h-[24px] flex flex-col items-center gap-1">
               <AnimatePresence mode="wait">
@@ -495,6 +573,9 @@ export function BattleScreen({
                     -{sessionStatus.lastCombatEvent.damage} HP
                     {sessionStatus.lastCombatEvent.wasCritical
                       ? ` · ${t('battle.criticalHit')}`
+                      : ''}
+                    {sessionStatus.lastCombatEvent.shieldBroken
+                      ? ` · ${t('battle.shieldBroken')}`
                       : ''}
                   </motion.div>
                 )}
@@ -528,47 +609,69 @@ export function BattleScreen({
             </div>
           </div>
 
-          {/* Exercise Telemetry */}
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-            {exerciseDef.trackingType === 'hold' ? (
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-xs text-slate-400">{t('battle.holdTime')}</div>
-                  <div className="font-numeric text-3xl font-bold text-white mt-0.5">
-                    {formatHoldDuration(exerciseState?.holdDurationMs ?? 0)}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-slate-400">{t('battle.phase')}</div>
-                  <div
-                    className={`text-sm font-semibold mt-1 ${
-                      exerciseState?.isHolding ? 'text-emerald-400' : 'text-amber-400'
-                    }`}
-                  >
-                    {exerciseState?.isHolding ? t('battle.holding') : t('battle.notHolding')}
-                  </div>
-                </div>
+          {/* Tempo Combo Meter + Exercise Telemetry */}
+          <div className="space-y-3">
+            <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-numeric">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-amber-400">
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>
+                    {t('battle.combo')}: {sessionStatus.comboCount}
+                  </span>
+                </span>
+                <span className="font-bold text-white">
+                  ×{sessionStatus.comboMultiplier.toFixed(2).replace(/\.00$/, '')}
+                </span>
               </div>
-            ) : (
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-xs text-slate-400">{t('battle.reps')}</div>
-                  <div className="font-numeric text-4xl font-bold text-white mt-0.5">
-                    {exerciseState?.repCount ?? 0}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-slate-400">{t('battle.phase')}</div>
-                  <div className="text-sm font-semibold text-amber-400 mt-1">
-                    {t(phaseKey)}
-                  </div>
-                </div>
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-400 transition-[width] duration-100"
+                  style={{ width: `${comboPercent}%` }}
+                />
               </div>
-            )}
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+              {exerciseDef.trackingType === 'hold' ? (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-xs text-slate-400">{t('battle.holdTime')}</div>
+                    <div className="font-numeric text-3xl font-bold text-white mt-0.5">
+                      {formatHoldDuration(exerciseState?.holdDurationMs ?? 0)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-400">{t('battle.phase')}</div>
+                    <div
+                      className={`text-sm font-semibold mt-1 ${
+                        exerciseState?.isHolding ? 'text-emerald-400' : 'text-amber-400'
+                      }`}
+                    >
+                      {exerciseState?.isHolding ? t('battle.holding') : t('battle.notHolding')}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-xs text-slate-400">{t('battle.reps')}</div>
+                    <div className="font-numeric text-4xl font-bold text-white mt-0.5">
+                      {exerciseState?.repCount ?? 0}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-400">{t('battle.phase')}</div>
+                    <div className="text-sm font-semibold text-amber-400 mt-1">
+                      {t(phaseKey)}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Battle Controls */}
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2">
             <button
               onClick={handlePauseToggle}
               disabled={sessionStatus.state !== 'ACTIVE' && sessionStatus.state !== 'PAUSED'}
@@ -627,12 +730,47 @@ export function BattleScreen({
 
               {sessionStatus.state === 'VICTORY' && sessionStatus.victorySummary && (
                 <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-2 text-sm">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                    <span className="text-slate-400">{t('battle.rankLabel')}</span>
+                    <span
+                      className={`font-display text-2xl font-bold ${
+                        RANK_COLOR_CLASS[sessionStatus.victorySummary.rank]
+                      }`}
+                    >
+                      {sessionStatus.victorySummary.rank}
+                    </span>
+                  </div>
+
                   <div className="flex justify-between">
                     <span className="text-slate-400">{t('battle.xpGained')}</span>
                     <span className="font-numeric font-semibold text-amber-400">
                       +{sessionStatus.victorySummary.xpGained} XP
                     </span>
                   </div>
+
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">{t('battle.coinsEarned')}</span>
+                    <span className="inline-flex items-center gap-1 font-numeric font-semibold text-amber-400">
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>+{sessionStatus.victorySummary.coinsEarned}</span>
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">{t('battle.maxComboLabel')}</span>
+                    <span className="font-numeric font-semibold text-white">
+                      x{sessionStatus.victorySummary.maxCombo}
+                    </span>
+                  </div>
+
+                  {sessionStatus.victorySummary.estimatedKcal > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">{t('battle.caloriesEst')}</span>
+                      <span className="font-numeric text-slate-200">
+                        ~{sessionStatus.victorySummary.estimatedKcal} {t('battle.kcalUnit')}
+                      </span>
+                    </div>
+                  )}
 
                   {sessionStatus.victorySummary.leveledUp && (
                     <div className="text-emerald-400 font-semibold">
@@ -665,8 +803,8 @@ export function BattleScreen({
                       </div>
                       <ul className="space-y-0.5 text-xs text-slate-200">
                         {sessionStatus.victorySummary.newlyUnlockedAchievements.map((achId) => {
-                          const key = ACHIEVEMENT_NAME_KEYS[achId as AchievementId];
-                          return <li key={achId}>· {key ? t(key) : achId}</li>;
+                          const entry = ACHIEVEMENT_KEYS[achId as AchievementId];
+                          return <li key={achId}>· {entry ? t(entry.name) : achId}</li>;
                         })}
                       </ul>
                     </div>
@@ -679,13 +817,23 @@ export function BattleScreen({
                   onClick={canAdvance ? handleNextFight : handleRetry}
                   className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
                 >
-                  {t(canAdvance ? 'battle.nextFight' : 'battle.tryAgain')}
+                  {t(
+                    mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
+                      ? 'battle.nextWave'
+                      : canAdvance
+                        ? 'battle.nextFight'
+                        : 'battle.tryAgain'
+                  )}
                 </button>
                 <button
                   onClick={handleSurrender}
                   className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
                 >
-                  {t('battle.exit')}
+                  {t(
+                    mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
+                      ? 'battle.bankAndExit'
+                      : 'battle.exit'
+                  )}
                 </button>
               </div>
             </div>

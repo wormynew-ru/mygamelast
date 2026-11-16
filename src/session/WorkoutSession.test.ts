@@ -482,4 +482,109 @@ describe('WorkoutSession', () => {
     expect(session.getStatus().state).toBe('ERROR');
     expect(errorStatusMessage).toBe('Камера не найдена.');
   });
+
+  it('builds combo streaks across rapid reps, records coins/rank/bestiary on victory, and resets combo on unblocked hit', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      const store = useGameStore.getState();
+      store.startCombat({ ...createMonster(MONSTERS.BURGER), hp: 55 }); // TOXIC monster
+
+      const detector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 3, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 3, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 4, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 5, progress: 0, visibility: 'VISIBLE' },
+      ]);
+
+      const tracker = createMockTracker();
+      const sound = createMockSoundFX();
+
+      const session = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: detector,
+        exerciseDamageMultiplier: 1.0,
+        exerciseId: 'PUSH_UP',
+        levelId: 'LEVEL_3',
+        poseTracker: tracker,
+        soundFX: sound,
+      });
+
+      await session.start();
+      tracker.triggerPose(1000);
+      tracker.triggerPose(1500);
+      tracker.triggerPose(2000);
+      tracker.triggerPose(2500); // 3rd combo hit -> multiplier 1.25x
+      expect(session.getStatus().comboCount).toBe(3);
+      expect(session.getStatus().comboMultiplier).toBe(1.25);
+
+      // Unblocked TOXIC strike at 8100ms (> 7000ms) resets combo and applies toxic debuff
+      tracker.triggerPose(8100);
+      expect(session.getStatus().comboCount).toBe(0);
+      expect(session.getStatus().isPlayerDebuffed).toBe(true);
+
+      // Finish monster (16 HP remaining; debuffed PUSH_UP weak hits deal 9 damage each)
+      tracker.triggerPose(8500);
+      tracker.triggerPose(9000);
+
+      const status = session.getStatus();
+      expect(status.state).toBe('VICTORY');
+      expect(status.victorySummary?.coinsEarned).toBeGreaterThan(0);
+      expect(['S', 'A', 'B', 'C']).toContain(status.victorySummary?.rank);
+
+      const finalState = useGameStore.getState();
+      expect(finalState.coins).toBe(status.victorySummary?.coinsEarned);
+      expect(finalState.bestiary.BURGER?.defeats).toBe(1);
+      expect(finalState.streak.current).toBe(1);
+
+      // Verify shop purchasing spends coins and adds item
+      const bought = finalState.buyItem('ENERGY_BAR');
+      expect(bought).toBe(true);
+      expect(useGameStore.getState().inventory.items.get('ENERGY_BAR')).toBeGreaterThanOrEqual(1);
+
+      session.stop();
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('tracks Endless Arena waves cleanly in store on wave victory', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.SODA), hp: 5 });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+    ]);
+
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'JUMPING_JACK',
+      mode: 'ENDLESS',
+      endlessWave: 3,
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    tracker.triggerPose(500);
+    tracker.triggerPose(1000);
+
+    expect(session.getStatus().state).toBe('VICTORY');
+    expect(session.getStatus().victorySummary?.mode).toBe('ENDLESS');
+    expect(session.getStatus().victorySummary?.wave).toBe(3);
+    expect(useGameStore.getState().endlessStats.bestWave).toBe(3);
+    expect(useGameStore.getState().endlessStats.totalArenaWins).toBe(1);
+
+    session.stop();
+  });
 });

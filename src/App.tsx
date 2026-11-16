@@ -1,28 +1,39 @@
 /**
  * App - Root component with screen navigation.
- * Connects MainMenu, LevelSelectScreen, InventoryScreen, BattleScreen,
- * CalibrationSandbox, SettingsScreen, and OfflineIndicator.
+ * Connects MainMenu, LevelSelectScreen (Campaign + Endless Arena), InventoryScreen (+ Shop),
+ * BestiaryAnalyticsScreen, BattleScreen, CalibrationSandbox, SettingsScreen, and OfflineIndicator.
  */
 
 import { useState, useEffect } from 'react';
 import { MainMenu } from './ui/MainMenu';
 import { LevelSelectScreen } from './ui/LevelSelectScreen';
 import { InventoryScreen } from './ui/InventoryScreen';
+import { BestiaryAnalyticsScreen } from './ui/BestiaryAnalyticsScreen';
 import { BattleScreen } from './ui/BattleScreen';
 import { CalibrationSandbox } from './ui/CalibrationSandbox';
 import { SettingsScreen } from './ui/SettingsScreen';
 import { OfflineIndicator } from './ui/PWAInstallButton';
 import { useGameStore } from './game/store';
-import { createMonster, MONSTERS } from './game/data/monsters';
+import { createEndlessWaveMonster, createMonster, MONSTERS } from './game/data/monsters';
 import { getLevelById } from './game/data/levels';
 import type { ExerciseId } from './game/data/exercises';
+import type { BattleMode } from './session/WorkoutSession';
 import { setCurrentLanguage } from './i18n';
 
-type Screen = 'MENU' | 'CAMPAIGN' | 'INVENTORY' | 'BATTLE' | 'CALIBRATION' | 'SETTINGS';
+type Screen =
+  | 'MENU'
+  | 'CAMPAIGN'
+  | 'INVENTORY'
+  | 'BESTIARY'
+  | 'BATTLE'
+  | 'CALIBRATION'
+  | 'SETTINGS';
 
 interface ActiveEncounter {
-  levelId: string;
+  levelId?: string;
   exerciseId: ExerciseId;
+  mode: BattleMode;
+  wave: number;
 }
 
 function App() {
@@ -30,6 +41,8 @@ function App() {
   const [activeEncounter, setActiveEncounter] = useState<ActiveEncounter>({
     levelId: 'LEVEL_1',
     exerciseId: 'JUMPING_JACK',
+    mode: 'CAMPAIGN',
+    wave: 1,
   });
 
   const language = useGameStore((state) => state.settings.language);
@@ -49,7 +62,15 @@ function App() {
 
     setCurrentLevel(levelId);
     startCombat(monster);
-    setActiveEncounter({ levelId, exerciseId });
+    setActiveEncounter({ levelId, exerciseId, mode: 'CAMPAIGN', wave: 1 });
+    setCurrentScreen('BATTLE');
+  };
+
+  const handleStartEndless = (exerciseId: ExerciseId) => {
+    const wave1Enemy = createEndlessWaveMonster(1);
+    setCurrentLevel(null);
+    startCombat(wave1Enemy);
+    setActiveEncounter({ exerciseId, mode: 'ENDLESS', wave: 1 });
     setCurrentScreen('BATTLE');
   };
 
@@ -74,6 +95,7 @@ function App() {
           onOpenCampaign={() => setCurrentScreen('CAMPAIGN')}
           onQuickBattle={handleQuickBattle}
           onInventory={() => setCurrentScreen('INVENTORY')}
+          onBestiary={() => setCurrentScreen('BESTIARY')}
           onCalibration={() => setCurrentScreen('CALIBRATION')}
           onSettings={() => setCurrentScreen('SETTINGS')}
         />
@@ -83,6 +105,7 @@ function App() {
         <LevelSelectScreen
           onBack={() => setCurrentScreen('MENU')}
           onStartEncounter={handleStartEncounter}
+          onStartEndless={handleStartEndless}
         />
       )}
 
@@ -90,10 +113,16 @@ function App() {
         <InventoryScreen onBack={() => setCurrentScreen('MENU')} />
       )}
 
+      {currentScreen === 'BESTIARY' && (
+        <BestiaryAnalyticsScreen onBack={() => setCurrentScreen('MENU')} />
+      )}
+
       {currentScreen === 'BATTLE' && (
         <BattleScreen
           levelId={activeEncounter.levelId}
           exerciseId={activeEncounter.exerciseId}
+          mode={activeEncounter.mode}
+          initialWave={activeEncounter.wave}
           onExit={handleExitBattle}
           onStartNextLevel={handleStartEncounter}
         />

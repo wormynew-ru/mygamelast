@@ -1,71 +1,70 @@
 /**
- * MainMenu - Primary hub with hero RPG profile, aggregate workout stats,
+ * MainMenu - Primary hub with hero RPG profile, Fit-Coins, daily quests & 7-day streak,
  * achievements progress, PWA installation CTA, and screen navigation.
  */
 
 import { motion } from 'framer-motion';
-import { Swords, Backpack, Crosshair, Settings, Play, Trophy } from 'lucide-react';
+import {
+  Swords,
+  Backpack,
+  Crosshair,
+  Settings,
+  Play,
+  Trophy,
+  Coins,
+  BookOpen,
+  CalendarCheck,
+} from 'lucide-react';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
-import { ACHIEVEMENTS, type AchievementId } from '../game/data/achievements';
+import { ACHIEVEMENTS } from '../game/data/achievements';
+import {
+  getDailyQuestsForDate,
+  getLocalDateKey,
+  getQuestProgress,
+  getRecentDateKeys,
+  type DailyQuestMetric,
+} from '../game/data/dailyQuests';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ACHIEVEMENT_KEYS } from './gameKeys';
 
 interface MainMenuProps {
   onOpenCampaign: () => void;
   onQuickBattle: () => void;
   onInventory: () => void;
+  onBestiary: () => void;
   onCalibration: () => void;
   onSettings: () => void;
 }
 
-const ACHIEVEMENT_KEYS: Record<
-  AchievementId,
-  { name: TranslationKey; description: TranslationKey }
-> = {
-  FIRST_REP: {
-    name: 'achievement.FIRST_REP.name',
-    description: 'achievement.FIRST_REP.description',
-  },
-  FIFTY_REPS: {
-    name: 'achievement.FIFTY_REPS.name',
-    description: 'achievement.FIFTY_REPS.description',
-  },
-  PLANK_SURVIVOR: {
-    name: 'achievement.PLANK_SURVIVOR.name',
-    description: 'achievement.PLANK_SURVIVOR.description',
-  },
-  FIRST_VICTORY: {
-    name: 'achievement.FIRST_VICTORY.name',
-    description: 'achievement.FIRST_VICTORY.description',
-  },
-  BOSS_SLAYER: {
-    name: 'achievement.BOSS_SLAYER.name',
-    description: 'achievement.BOSS_SLAYER.description',
-  },
-  GEAR_COLLECTOR: {
-    name: 'achievement.GEAR_COLLECTOR.name',
-    description: 'achievement.GEAR_COLLECTOR.description',
-  },
-  VETERAN_HERO: {
-    name: 'achievement.VETERAN_HERO.name',
-    description: 'achievement.VETERAN_HERO.description',
-  },
+const QUEST_TITLE_KEYS: Record<DailyQuestMetric, TranslationKey> = {
+  reps: 'quests.repsTitle',
+  holdSeconds: 'quests.plankTitle',
+  wins: 'quests.winsTitle',
 };
 
 export function MainMenu({
   onOpenCampaign,
   onQuickBattle,
   onInventory,
+  onBestiary,
   onCalibration,
   onSettings,
 }: MainMenuProps) {
   const { t } = useTranslation();
   const basePlayer = useGameStore((state) => state.player);
+  const coins = useGameStore((state) => state.coins);
   const equippedItems = useGameStore((state) => state.inventory.equippedItems);
   const inventoryItems = useGameStore((state) => state.inventory.items);
   const workoutStats = useGameStore((state) => state.workoutStats);
   const completedLevels = useGameStore((state) => state.completedLevels);
   const unlockedAchievements = useGameStore((state) => state.unlockedAchievements);
+  const streak = useGameStore((state) => state.streak);
+  const dailyQuests = useGameStore((state) => state.dailyQuests);
+  const dailyHistory = useGameStore((state) => state.dailyHistory);
+  const endlessStats = useGameStore((state) => state.endlessStats);
+  const claimDailyQuest = useGameStore((state) => state.claimDailyQuest);
+  const syncAchievements = useGameStore((state) => state.syncAchievements);
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const attackBonus = effectivePlayer.attack - basePlayer.attack;
@@ -80,9 +79,24 @@ export function MainMenu({
   const hpPercent = Math.min(100, Math.round((effectivePlayer.hp / effectivePlayer.maxHp) * 100));
   const unlockedSet = new Set(unlockedAchievements);
 
+  const todayKey = getLocalDateKey();
+  const todaysQuests = getDailyQuestsForDate(todayKey);
+  const normalizedQuests =
+    dailyQuests.date === todayKey
+      ? dailyQuests
+      : { date: todayKey, claimedIds: [], repsToday: 0, holdSecondsToday: 0, winsToday: 0 };
+  const recent7Days = getRecentDateKeys(7);
+
+  const handleClaimQuest = (questId: string) => {
+    const reward = claimDailyQuest(questId, todayKey);
+    if (reward) {
+      syncAchievements();
+    }
+  };
+
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Bar */}
+      {/* Top Bar (Strict 3-zone contract) */}
       <header className="border-b border-slate-800 bg-slate-950/90">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
           <span className="font-display text-2xl font-bold tracking-tight text-slate-100 whitespace-nowrap shrink-0">
@@ -100,7 +114,13 @@ export function MainMenu({
               onClick={onInventory}
               className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
             >
-              {t('menu.inventory')}
+              {t('menu.shopAndGear')}
+            </button>
+            <button
+              onClick={onBestiary}
+              className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
+            >
+              {t('menu.bestiary')}
             </button>
             <button
               onClick={onCalibration}
@@ -164,9 +184,16 @@ export function MainMenu({
           <section className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between gap-6">
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="text-lg font-semibold text-white">{t('stats.title')}</h2>
-              <span className="font-numeric text-sm text-amber-400 font-semibold">
-                {t('stats.level')} {basePlayer.level}
-              </span>
+              <div className="flex items-center gap-4 font-numeric text-sm font-semibold">
+                <span className="inline-flex items-center gap-1 text-amber-400">
+                  <Coins className="w-4 h-4" />
+                  <span>{coins}</span>
+                </span>
+                <span className="text-slate-600" aria-hidden="true">·</span>
+                <span className="text-amber-400">
+                  {t('stats.level')} {basePlayer.level}
+                </span>
+              </div>
             </div>
 
             {/* HP & XP Progress */}
@@ -180,7 +207,7 @@ export function MainMenu({
                 </div>
                 <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-emerald-500 transition-all duration-200"
+                    className="h-full bg-emerald-500 transition-[width] duration-200"
                     style={{ width: `${hpPercent}%` }}
                   />
                 </div>
@@ -195,7 +222,7 @@ export function MainMenu({
                 </div>
                 <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-amber-500 transition-all duration-200"
+                    className="h-full bg-amber-500 transition-[width] duration-200"
                     style={{ width: `${xpPercent}%` }}
                   />
                 </div>
@@ -239,9 +266,9 @@ export function MainMenu({
               </div>
 
               <div>
-                <div className="text-xs text-slate-400">{t('stats.totalHold')}</div>
-                <div className="font-numeric text-lg font-semibold text-slate-200 mt-0.5">
-                  {workoutStats.totalHoldSeconds}
+                <div className="text-xs text-slate-400">{t('stats.bestWave')}</div>
+                <div className="font-numeric text-lg font-semibold text-emerald-400 mt-0.5">
+                  {endlessStats.bestWave}
                 </div>
               </div>
 
@@ -258,41 +285,146 @@ export function MainMenu({
           <section className="lg:col-span-5 flex flex-col gap-3 justify-between">
             <button
               onClick={onInventory}
-              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-5 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <div>
-                <div className="text-base font-semibold text-white">{t('menu.inventory')}</div>
-                <div className="text-xs text-slate-400 mt-1 font-numeric">
+                <div className="text-base font-semibold text-white">{t('menu.shopAndGear')}</div>
+                <div className="text-xs text-slate-400 mt-0.5 font-numeric">
                   {totalInventoryCount} {t('inventory.qty')} · {equippedItems.length}{' '}
-                  {t('inventory.equipped')}
+                  {t('inventory.equipped')} · {coins} {t('stats.coins')}
                 </div>
               </div>
               <Backpack className="w-5 h-5 text-slate-400 shrink-0" />
             </button>
 
             <button
+              onClick={onBestiary}
+              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            >
+              <div>
+                <div className="text-base font-semibold text-white">{t('menu.bestiary')}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{t('menu.bestiaryDesc')}</div>
+              </div>
+              <BookOpen className="w-5 h-5 text-slate-400 shrink-0" />
+            </button>
+
+            <button
               onClick={onCalibration}
-              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-5 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <div>
                 <div className="text-base font-semibold text-white">{t('menu.calibration')}</div>
-                <div className="text-xs text-slate-400 mt-1">{t('calibration.instructions')}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{t('calibration.instructions')}</div>
               </div>
               <Crosshair className="w-5 h-5 text-slate-400 shrink-0" />
             </button>
 
             <button
               onClick={onSettings}
-              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-5 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <div>
                 <div className="text-base font-semibold text-white">{t('menu.settings')}</div>
-                <div className="text-xs text-slate-400 mt-1">{t('settings.subtitle')}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{t('settings.subtitle')}</div>
               </div>
               <Settings className="w-5 h-5 text-slate-400 shrink-0" />
             </button>
           </section>
         </div>
+
+        {/* Daily Quests & 7-Day Streak Section */}
+        <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <CalendarCheck className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-base font-semibold text-white">{t('quests.title')}</h2>
+            </div>
+
+            <div className="flex items-center gap-4 text-xs font-numeric">
+              <span className="text-emerald-400 font-semibold">
+                {t('quests.streakLabel')}: {streak.current} {t('quests.daysUnit')}
+              </span>
+              <span className="text-slate-400">
+                {t('quests.streakBest')}: {streak.best} {t('quests.daysUnit')}
+              </span>
+              <div className="flex items-center gap-1" aria-label={t('quests.streakLabel')}>
+                {recent7Days.map((dateKey) => {
+                  const active = Boolean(
+                    dailyHistory[dateKey] &&
+                      (dailyHistory[dateKey].reps > 0 ||
+                        dailyHistory[dateKey].holdSeconds > 0 ||
+                        dailyHistory[dateKey].battlesWon > 0)
+                  );
+                  return (
+                    <span
+                      key={dateKey}
+                      title={dateKey}
+                      className={`w-5 h-5 rounded text-[10px] flex items-center justify-center border ${
+                        active
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                          : 'bg-slate-950 border-slate-800 text-slate-600'
+                      }`}
+                    >
+                      {dateKey.slice(8)}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {todaysQuests.map((quest) => {
+              const current = getQuestProgress(quest, normalizedQuests);
+              const pct = Math.min(100, Math.round((current / quest.target) * 100));
+              const isClaimed = normalizedQuests.claimedIds.includes(quest.id);
+              const isReady = current >= quest.target && !isClaimed;
+
+              return (
+                <div
+                  key={quest.id}
+                  className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-semibold text-white">
+                        {t(QUEST_TITLE_KEYS[quest.metric])}
+                      </span>
+                      <span className="font-numeric text-xs text-slate-400 shrink-0">
+                        {Math.min(current, quest.target)} / {quest.target}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                      <div
+                        className="h-full bg-emerald-500 transition-[width] duration-200"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <span className="font-numeric text-xs text-amber-400">
+                      +{quest.rewardCoins} {t('stats.coins')} · +{quest.rewardXp} XP
+                    </span>
+                    <button
+                      onClick={() => handleClaimQuest(quest.id)}
+                      disabled={!isReady}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                        isClaimed
+                          ? 'bg-slate-800 text-emerald-400'
+                          : isReady
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          : 'bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed'
+                      }`}
+                    >
+                      {isClaimed ? t('quests.claimed') : t('quests.claim')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Achievements Progress Section */}
         <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
