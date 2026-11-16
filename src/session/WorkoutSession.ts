@@ -15,7 +15,7 @@ import type {
   ExerciseMatchup,
   MonsterStats,
 } from '../game/types';
-import { PoseTracker, type TrackerError } from '../vision/PoseTracker';
+import { PoseTracker, type PoseDelegate, type TrackerError } from '../vision/PoseTracker';
 import {
   SquatDetector,
   PushUpDetector,
@@ -138,6 +138,8 @@ export interface SessionStatus {
   victorySummary: VictorySummary | null;
   fps?: number;
   lastFrameTime?: number;
+  poseDelegate: PoseDelegate;
+  poseDelegateFallback: boolean;
 }
 
 export type SessionStateChangeCallback = (status: SessionStatus) => void;
@@ -152,6 +154,8 @@ export interface PoseTrackerLike {
   stop(): void;
   dispose(): void;
   getError?(): TrackerError | null;
+  getActiveDelegate?(): PoseDelegate | null;
+  didFallbackToCpu?(): boolean;
 }
 
 export interface SoundFXLike {
@@ -189,7 +193,8 @@ export interface WorkoutSessionConfig {
   enableSound?: boolean;
   enableVoice?: boolean;
   cameraFacingMode?: 'user' | 'environment';
-  targetPoseFps?: 30 | 60;
+  targetPoseFps?: 15 | 30 | 60;
+  poseDelegate?: PoseDelegate;
   /** Optional dependency injection for testing */
   poseTracker?: PoseTrackerLike;
   soundFX?: SoundFXLike;
@@ -266,6 +271,7 @@ export class WorkoutSession {
   private stateChangeCallbacks: SessionStateChangeCallback[] = [];
   private enableSound: boolean;
   private enableVoice: boolean;
+  private requestedPoseDelegate: PoseDelegate;
 
   private frameCount = 0;
   private lastFpsUpdate = 0;
@@ -300,6 +306,7 @@ export class WorkoutSession {
     this.loadoutOverride = config.loadout;
     this.enableSound = config.enableSound ?? true;
     this.enableVoice = config.enableVoice ?? false;
+    this.requestedPoseDelegate = config.poseDelegate ?? 'GPU';
     this.videoElement = config.videoElement;
     this.canvasElement = config.canvasElement;
 
@@ -309,9 +316,10 @@ export class WorkoutSession {
       new PoseTracker(
         {
           facingMode: config.cameraFacingMode ?? 'user',
-          frameRate: targetPoseFps,
+          frameRate: Math.max(30, targetPoseFps),
         },
         {
+          delegate: this.requestedPoseDelegate,
           targetInferenceFPS: targetPoseFps,
         }
       );
@@ -551,6 +559,8 @@ export class WorkoutSession {
       lastMonsterAttackEvent: this.lastMonsterAttackEvent,
       victorySummary: this.victorySummary,
       fps: this.currentFps,
+      poseDelegate: this.poseTracker.getActiveDelegate?.() ?? this.requestedPoseDelegate,
+      poseDelegateFallback: this.poseTracker.didFallbackToCpu?.() ?? false,
     };
   }
 
@@ -1416,5 +1426,6 @@ export function createWorkoutSessionForBattle(params: {
     enableVoice: store.settings.voiceEnabled,
     cameraFacingMode: store.settings.cameraFacingMode,
     targetPoseFps: store.settings.targetPoseFps,
+    poseDelegate: store.settings.poseDelegate,
   });
 }

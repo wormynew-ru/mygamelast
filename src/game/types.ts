@@ -207,6 +207,7 @@ export interface GardenState {
   unlockedPlots: number;
   plots: GardenPlotState[];
   seedInventory: Record<SeedId, number>;
+  cropInventory: Record<SeedId, number>;
   wateringCanTier: WateringCanTier;
   waterCharges: number;
   totalHarvested: number;
@@ -222,6 +223,8 @@ export interface ExerciseCalibrationSettings {
   wallSitMaxKneeAngle: number;
   overheadPressTopAngle: number;
 }
+
+export type PoseComputeDelegate = 'GPU' | 'CPU';
 
 /**
  * Persistent game state (saved/loaded via Zustand).
@@ -255,7 +258,8 @@ export interface GameState {
     voiceEnabled: boolean;
     voiceControlEnabled: boolean;
     cameraFacingMode: 'user' | 'environment';
-    targetPoseFps: 30 | 60;
+    targetPoseFps: 15 | 30 | 60;
+    poseDelegate: PoseComputeDelegate;
     exerciseConfigs: Record<string, unknown>; // exerciseId -> ExerciseConfig
     exerciseCalibration: ExerciseCalibrationSettings;
     language: 'ru' | 'en'; // UI language

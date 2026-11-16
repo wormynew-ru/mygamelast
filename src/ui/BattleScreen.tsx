@@ -34,7 +34,7 @@ import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { getLevelById } from '../game/data/levels';
 import { ITEMS } from '../game/data/items';
 import { type AchievementId } from '../game/data/achievements';
-import type { BattleRank } from '../game/types';
+import type { BattleRank, WeedId } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import {
   ACHIEVEMENT_KEYS,
@@ -53,6 +53,7 @@ interface BattleScreenProps {
   initialWave?: number;
   circuitId?: CircuitId;
   gardenPlotId?: number;
+  weedId?: WeedId;
   onExit: () => void;
   onBackToGarden?: () => void;
   onStartNextLevel?: (nextLevelId: string, exerciseId: ExerciseId) => void;
@@ -120,6 +121,7 @@ export function BattleScreen({
   initialWave = 1,
   circuitId,
   gardenPlotId,
+  weedId,
   onExit,
   onBackToGarden,
   onStartNextLevel,
@@ -163,6 +165,8 @@ export function BattleScreen({
     lastCombatEvent: null,
     lastMonsterAttackEvent: null,
     victorySummary: null,
+    poseDelegate: useGameStore.getState().settings.poseDelegate,
+    poseDelegateFallback: false,
   });
   const [isDamaged, setIsDamaged] = useState(false);
   const [isHeroHit, setIsHeroHit] = useState(false);
@@ -183,14 +187,19 @@ export function BattleScreen({
   const circuitDef = circuitId ? getCircuitById(circuitId) : undefined;
   const exerciseDef = EXERCISES[activeExerciseId];
   const levelDef = levelId ? getLevelById(levelId) : undefined;
-  const initialMonsterId = levelDef?.monsterId ?? enemy?.id ?? 'BURGER';
+  const initialEnemyIdRef = useRef<string | undefined>(enemy?.id);
+  if (enemy?.id) {
+    initialEnemyIdRef.current = enemy.id;
+  }
+  const initialMonsterId =
+    levelDef?.monsterId ?? weedId ?? initialEnemyIdRef.current ?? 'BURGER';
 
   useEffect(() => {
     setActiveExerciseId(exerciseId);
     setCircuitRoomIndex(0);
     setCircuitRestSec(null);
     setCurrentWave(initialWave);
-  }, [exerciseId, levelId, mode, initialWave, circuitId]);
+  }, [exerciseId, levelId, mode, initialWave, circuitId, weedId]);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -353,7 +362,11 @@ export function BattleScreen({
     }
     sessionRef.current?.stop();
     endCombat();
-    onExit();
+    if (mode === 'WEED' && onBackToGarden) {
+      onBackToGarden();
+    } else {
+      onExit();
+    }
   };
 
   const handleUnlockAudio = () => {
@@ -460,6 +473,8 @@ export function BattleScreen({
       case 'NEXT':
         if (isBetweenCircuitRooms) {
           handleAdvanceCircuitRoom();
+        } else if (mode === 'WEED' && sessionStatus.state === 'VICTORY') {
+          handleSurrender();
         } else if (sessionStatus.state === 'VICTORY' && canAdvance) {
           handleNextFight();
         } else if (sessionStatus.state === 'PAUSED') {
@@ -564,6 +579,20 @@ export function BattleScreen({
                 </span>
               </>
             )}
+            <span aria-hidden="true">·</span>
+            <span
+              className={`font-numeric font-semibold ${
+                sessionStatus.poseDelegateFallback
+                  ? 'text-amber-400'
+                  : sessionStatus.poseDelegate === 'GPU'
+                    ? 'text-emerald-400'
+                    : 'text-sky-400'
+              }`}
+            >
+              {sessionStatus.poseDelegateFallback
+                ? t('battle.delegateFallback')
+                : sessionStatus.poseDelegate}
+            </span>
           </div>
 
           {/* Audio Unlock Banner */}
@@ -629,7 +658,7 @@ export function BattleScreen({
                   onClick={handleSurrender}
                   className="mt-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-lg transition-colors"
                 >
-                  {t('battle.exit')}
+                  {t(mode === 'WEED' ? 'battle.backToGarden' : 'battle.exit')}
                 </button>
               </div>
             </div>
@@ -1107,11 +1136,7 @@ export function BattleScreen({
                 <div className="flex gap-3">
                   {mode === 'WEED' && sessionStatus.state === 'VICTORY' ? (
                     <button
-                      onClick={() => {
-                        sessionRef.current?.stop();
-                        endCombat();
-                        (onBackToGarden ?? onExit)();
-                      }}
+                      onClick={handleSurrender}
                       className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
                     >
                       {t('battle.backToGarden')}
@@ -1135,9 +1160,11 @@ export function BattleScreen({
                         className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
                       >
                         {t(
-                          mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
-                            ? 'battle.bankAndExit'
-                            : 'battle.exit'
+                          mode === 'WEED'
+                            ? 'battle.backToGarden'
+                            : mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
+                              ? 'battle.bankAndExit'
+                              : 'battle.exit'
                         )}
                       </button>
                     </>

@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { ArrowLeft, Mic, Trash2 } from 'lucide-react';
+import { ArrowLeft, Cpu, Mic, Trash2 } from 'lucide-react';
 import { useGameStore } from '../game/store';
 import { AVAILABLE_LANGUAGES } from '../i18n';
 import { useTranslation } from '../i18n/useTranslation';
@@ -173,6 +173,18 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
             <span className="text-sm font-semibold text-white">{t('settings.poseFps')}</span>
             <div className="inline-flex p-1 bg-slate-950 rounded-lg border border-slate-800">
               <button
+                type="button"
+                onClick={() => updateSettings({ targetPoseFps: 15 })}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  settings.targetPoseFps === 15
+                    ? 'bg-sky-400 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('settings.poseFps15')}
+              </button>
+              <button
+                type="button"
                 onClick={() => updateSettings({ targetPoseFps: 30 })}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                   settings.targetPoseFps === 30
@@ -183,6 +195,7 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
                 {t('settings.poseFps30')}
               </button>
               <button
+                type="button"
                 onClick={() => updateSettings({ targetPoseFps: 60 })}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                   settings.targetPoseFps === 60
@@ -191,6 +204,41 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
                 }`}
               >
                 {t('settings.poseFps60')}
+              </button>
+            </div>
+          </div>
+
+          {/* Neural Network Compute Delegate (GPU / CPU) */}
+          <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+                <Cpu className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{t('settings.poseDelegate')}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">{t('settings.poseDelegateDesc')}</p>
+            </div>
+            <div className="inline-flex p-1 bg-slate-950 rounded-lg border border-slate-800 shrink-0 self-start sm:self-center">
+              <button
+                type="button"
+                onClick={() => updateSettings({ poseDelegate: 'GPU' })}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  settings.poseDelegate === 'GPU'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('settings.poseDelegateGpu')}
+              </button>
+              <button
+                type="button"
+                onClick={() => updateSettings({ poseDelegate: 'CPU' })}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  settings.poseDelegate === 'CPU'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('settings.poseDelegateCpu')}
               </button>
             </div>
           </div>

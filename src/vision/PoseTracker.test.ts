@@ -4,7 +4,8 @@
  * Note: Camera and MediaPipe integration require mocking in unit tests.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 import { PoseTracker } from './PoseTracker';
 
 describe('PoseTracker', () => {
@@ -14,10 +15,17 @@ describe('PoseTracker', () => {
     tracker = new PoseTracker();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe('Initialization', () => {
-    it('should start in IDLE status', () => {
+    it('should start in IDLE status and default to GPU delegate', () => {
       expect(tracker.getStatus()).toBe('IDLE');
       expect(tracker.getError()).toBeNull();
+      expect(tracker.getRequestedDelegate()).toBe('GPU');
+      expect(tracker.getActiveDelegate()).toBeNull();
+      expect(tracker.didFallbackToCpu()).toBe(false);
     });
 
     it('should accept custom camera config', () => {
@@ -30,7 +38,7 @@ describe('PoseTracker', () => {
       expect(customTracker.getStatus()).toBe('IDLE');
     });
 
-    it('should accept custom model config', () => {
+    it('should accept custom model config with CPU delegate', () => {
       const customTracker = new PoseTracker(
         {},
         {
@@ -41,6 +49,85 @@ describe('PoseTracker', () => {
       );
 
       expect(customTracker.getStatus()).toBe('IDLE');
+      expect(customTracker.getRequestedDelegate()).toBe('CPU');
+    });
+
+    it('should track active GPU delegate when MediaPipe initializes on GPU', async () => {
+      const closeMock = vi.fn();
+      vi.spyOn(FilesetResolver, 'forVisionTasks').mockResolvedValue({} as never);
+      const createSpy = vi
+        .spyOn(PoseLandmarker, 'createFromOptions')
+        .mockResolvedValue({ close: closeMock } as unknown as PoseLandmarker);
+
+      await tracker.loadModel();
+
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          baseOptions: expect.objectContaining({ delegate: 'GPU' }),
+        })
+      );
+      expect(tracker.getActiveDelegate()).toBe('GPU');
+      expect(tracker.didFallbackToCpu()).toBe(false);
+      expect(tracker.getStatus()).toBe('READY');
+
+      tracker.dispose();
+      expect(closeMock).toHaveBeenCalledTimes(1);
+      expect(tracker.getActiveDelegate()).toBeNull();
+    });
+
+    it('should fall back to CPU and mark fallbackUsed if GPU delegate initialization fails', async () => {
+      const closeMock = vi.fn();
+      vi.spyOn(FilesetResolver, 'forVisionTasks').mockResolvedValue({} as never);
+      const createSpy = vi
+        .spyOn(PoseLandmarker, 'createFromOptions')
+        .mockRejectedValueOnce(new Error('WebGL2 unavailable'))
+        .mockResolvedValueOnce({ close: closeMock } as unknown as PoseLandmarker);
+
+      await tracker.loadModel();
+
+      expect(createSpy).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        expect.objectContaining({
+          baseOptions: expect.objectContaining({ delegate: 'GPU' }),
+        })
+      );
+      expect(createSpy).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        expect.objectContaining({
+          baseOptions: expect.objectContaining({ delegate: 'CPU' }),
+        })
+      );
+      expect(tracker.getActiveDelegate()).toBe('CPU');
+      expect(tracker.didFallbackToCpu()).toBe(true);
+      expect(tracker.getStatus()).toBe('READY');
+
+      tracker.dispose();
+    });
+
+    it('should initialize directly on CPU without attempting GPU when CPU delegate is configured', async () => {
+      const cpuTracker = new PoseTracker({}, { delegate: 'CPU' });
+      const closeMock = vi.fn();
+      vi.spyOn(FilesetResolver, 'forVisionTasks').mockResolvedValue({} as never);
+      const createSpy = vi
+        .spyOn(PoseLandmarker, 'createFromOptions')
+        .mockResolvedValue({ close: closeMock } as unknown as PoseLandmarker);
+
+      await cpuTracker.loadModel();
+
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          baseOptions: expect.objectContaining({ delegate: 'CPU' }),
+        })
+      );
+      expect(cpuTracker.getActiveDelegate()).toBe('CPU');
+      expect(cpuTracker.didFallbackToCpu()).toBe(false);
+
+      cpuTracker.dispose();
     });
 
     it('should pass ideal frameRate constraint when starting camera', async () => {

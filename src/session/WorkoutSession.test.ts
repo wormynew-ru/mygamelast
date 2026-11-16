@@ -805,4 +805,34 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('defaults poseDelegate to GPU in store, supports 15/30/60 FPS, and reports active delegate in SessionStatus', () => {
+    expect(useGameStore.getState().settings.poseDelegate).toBe('GPU');
+
+    useGameStore.getState().updateSettings({ poseDelegate: 'CPU', targetPoseFps: 15 });
+    expect(useGameStore.getState().settings.poseDelegate).toBe('CPU');
+    expect(useGameStore.getState().settings.targetPoseFps).toBe(15);
+
+    const detector = createStubDetector([]);
+    const tracker = createMockTracker();
+    tracker.getActiveDelegate = () => 'CPU';
+    tracker.didFallbackToCpu = () => false;
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      targetPoseFps: 15,
+      poseDelegate: 'CPU',
+      poseTracker: tracker,
+      soundFX: createMockSoundFX(),
+    });
+
+    const status = session.getStatus();
+    expect(status.poseDelegate).toBe('CPU');
+    expect(status.poseDelegateFallback).toBe(false);
+
+    session.stop();
+  });
 });

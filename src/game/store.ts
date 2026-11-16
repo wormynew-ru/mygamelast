@@ -1,7 +1,7 @@
 /**
- * Zustand store for game state with persistence (v9).
+ * Zustand store for game state with persistence (v11).
  * Handles player stats, loadout weight, inventory, coins, shop, daily quests, streaks,
- * 7/30-day activity history, monster bestiary, endless arena, circuits, garden, calibration, and settings.
+ * 7/30-day activity history, monster bestiary, endless arena, garden & harvested crops, calibration, and settings.
  */
 
 import { create } from 'zustand';
@@ -151,6 +151,7 @@ function createInitialState(): GameState {
       voiceControlEnabled: false,
       cameraFacingMode: 'user',
       targetPoseFps: 60,
+      poseDelegate: 'GPU',
       exerciseConfigs: {},
       exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
       language: 'ru',
@@ -264,7 +265,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 9) {
+  if (version >= 0 && version <= 11) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -332,7 +333,11 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
         ...base.settings,
         ...(state.settings ?? {}),
         voiceControlEnabled: Boolean(state.settings?.voiceControlEnabled),
-        targetPoseFps: state.settings?.targetPoseFps === 30 ? 30 : 60,
+        targetPoseFps:
+          state.settings?.targetPoseFps === 15 || state.settings?.targetPoseFps === 30
+            ? state.settings.targetPoseFps
+            : 60,
+        poseDelegate: state.settings?.poseDelegate === 'CPU' ? 'CPU' : 'GPU',
         exerciseCalibration: {
           ...base.settings.exerciseCalibration,
           ...(state.settings?.exerciseCalibration ?? {}),
@@ -900,8 +905,9 @@ export const useGameStore = create<GameStore>()(
           );
         }
 
+        const prevCropQty = state.garden.cropInventory?.[reward.cropId] ?? 0;
+
         set({
-          coins: state.coins + reward.coins,
           player: updatedPlayer,
           inventory: {
             ...state.inventory,
@@ -909,6 +915,10 @@ export const useGameStore = create<GameStore>()(
           },
           garden: {
             ...state.garden,
+            cropInventory: {
+              ...state.garden.cropInventory,
+              [reward.cropId]: prevCropQty + reward.cropQty,
+            },
             totalHarvested: state.garden.totalHarvested + 1,
             plots: state.garden.plots.map((p) =>
               p.id === plotId ? { ...p, seedId: null, growth: 0 } : p
@@ -1018,7 +1028,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 9,
+      version: 11,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

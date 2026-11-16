@@ -5,6 +5,7 @@
 import type { AchievementId } from '../game/data/achievements';
 import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
+import type { SanctuaryMixId } from '../game/data/sanctuary';
 import type { ItemRarity, MonsterArchetype, SeedId, WateringCanTier } from '../game/types';
 import type { TranslationKey } from '../i18n/useTranslation';
 
@@ -45,6 +46,13 @@ export const ARCHETYPE_KEYS: Record<MonsterArchetype, TranslationKey> = {
   ARMORED: 'archetype.ARMORED',
   TOXIC: 'archetype.TOXIC',
   BOSS: 'archetype.BOSS',
+};
+
+export const ARCHETYPE_TRAIT_KEYS: Record<MonsterArchetype, TranslationKey> = {
+  FAST: 'bestiary.trait.FAST',
+  ARMORED: 'bestiary.trait.ARMORED',
+  TOXIC: 'bestiary.trait.TOXIC',
+  BOSS: 'bestiary.trait.BOSS',
 };
 
 export const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
@@ -225,4 +233,26 @@ export const WATERING_CAN_KEYS: Record<
   2: { name: 'garden.can.2.name', perk: 'garden.can.2.perk' },
   3: { name: 'garden.can.3.name', perk: 'garden.can.3.perk' },
   4: { name: 'garden.can.4.name', perk: 'garden.can.4.perk' },
+};
+
+export const SANCTUARY_MIX_KEYS: Record<
+  SanctuaryMixId,
+  { name: TranslationKey; effect: TranslationKey }
+> = {
+  MINT_ISOTONIC: {
+    name: 'garden.mix.MINT_ISOTONIC.name',
+    effect: 'garden.mix.MINT_ISOTONIC.effect',
+  },
+  BAMBOO_FORTIFIER: {
+    name: 'garden.mix.BAMBOO_FORTIFIER.name',
+    effect: 'garden.mix.BAMBOO_FORTIFIER.effect',
+  },
+  CHILI_OVERDRIVE_SHOT: {
+    name: 'garden.mix.CHILI_OVERDRIVE_SHOT.name',
+    effect: 'garden.mix.CHILI_OVERDRIVE_SHOT.effect',
+  },
+  LOTUS_NECTAR: {
+    name: 'garden.mix.LOTUS_NECTAR.name',
+    effect: 'garden.mix.LOTUS_NECTAR.effect',
+  },
 };

@@ -80,6 +80,11 @@ export interface CameraConfig {
 }
 
 /**
+ * Compute delegate for MediaPipe neural network inference.
+ */
+export type PoseDelegate = 'GPU' | 'CPU';
+
+/**
  * MediaPipe model loading configuration.
  */
 export interface ModelConfig {
@@ -90,7 +95,7 @@ export interface ModelConfig {
   modelAssetPath?: string;
 
   /** Delegate to use (GPU/CPU) */
-  delegate?: 'GPU' | 'CPU';
+  delegate?: PoseDelegate;
 
   /** Number of poses to detect (default: 1) */
   numPoses?: number;
@@ -181,6 +186,8 @@ export class PoseTracker {
 
   private poseLandmarker: PoseLandmarker | null = null;
   private mediaStream: MediaStream | null = null;
+  private activeDelegate: PoseDelegate | null = null;
+  private fallbackUsed = false;
 
   private animationFrameId: number | null = null;
   private isRunning = false;
@@ -223,17 +230,21 @@ export class PoseTracker {
 
     const token = this.lifecycleToken;
     this.setStatus('LOADING_MODEL');
+    this.activeDelegate = null;
+    this.fallbackUsed = false;
 
     try {
-      const landmarker = await this.createLandmarkerWithDelegateFallback(
+      const created = await this.createLandmarkerWithDelegateFallback(
         this.modelConfig.wasmPath,
         this.modelConfig.modelAssetPath
       );
       if (token !== this.lifecycleToken) {
-        landmarker.close();
+        created.landmarker.close();
         return;
       }
-      this.poseLandmarker = landmarker;
+      this.poseLandmarker = created.landmarker;
+      this.activeDelegate = created.delegate;
+      this.fallbackUsed = created.fallbackUsed;
       this.setStatus('READY');
     } catch (localErr) {
       if (token !== this.lifecycleToken) {
@@ -246,15 +257,17 @@ export class PoseTracker {
       ) {
         try {
           console.warn('Local MediaPipe load failed, falling back to CDN:', localErr);
-          const landmarker = await this.createLandmarkerWithDelegateFallback(
+          const created = await this.createLandmarkerWithDelegateFallback(
             CDN_WASM_PATH,
             CDN_MODEL_ASSET_PATH
           );
           if (token !== this.lifecycleToken) {
-            landmarker.close();
+            created.landmarker.close();
             return;
           }
-          this.poseLandmarker = landmarker;
+          this.poseLandmarker = created.landmarker;
+          this.activeDelegate = created.delegate;
+          this.fallbackUsed = created.fallbackUsed;
           this.setStatus('READY');
           return;
         } catch (cdnErr) {
@@ -276,13 +289,27 @@ export class PoseTracker {
   private async createLandmarkerWithDelegateFallback(
     wasmPath: string,
     modelAssetPath: string
-  ): Promise<PoseLandmarker> {
+  ): Promise<{ landmarker: PoseLandmarker; delegate: PoseDelegate; fallbackUsed: boolean }> {
     try {
-      return await this.createLandmarker(wasmPath, modelAssetPath, this.modelConfig.delegate);
+      const landmarker = await this.createLandmarker(
+        wasmPath,
+        modelAssetPath,
+        this.modelConfig.delegate
+      );
+      return {
+        landmarker,
+        delegate: this.modelConfig.delegate,
+        fallbackUsed: false,
+      };
     } catch (err) {
       if (this.modelConfig.delegate === 'GPU') {
         console.warn('GPU delegate initialization failed, falling back to CPU delegate:', err);
-        return this.createLandmarker(wasmPath, modelAssetPath, 'CPU');
+        const landmarker = await this.createLandmarker(wasmPath, modelAssetPath, 'CPU');
+        return {
+          landmarker,
+          delegate: 'CPU',
+          fallbackUsed: true,
+        };
       }
       throw err;
     }
@@ -291,7 +318,7 @@ export class PoseTracker {
   private async createLandmarker(
     wasmPath: string,
     modelAssetPath: string,
-    delegate: 'GPU' | 'CPU'
+    delegate: PoseDelegate
   ): Promise<PoseLandmarker> {
     const vision = await FilesetResolver.forVisionTasks(wasmPath);
     return PoseLandmarker.createFromOptions(vision, {
@@ -477,7 +504,7 @@ export class PoseTracker {
     // Setup canvas for skeleton rendering if provided
     if (canvasElement) {
       this.canvasElement = canvasElement;
-      this.canvasCtx = canvasElement.getContext('2d', { alpha: false });
+      this.canvasCtx = canvasElement.getContext('2d', { alpha: false, desynchronized: true });
 
       if (this.canvasCtx) {
         // Match canvas size to video
@@ -541,6 +568,8 @@ export class PoseTracker {
       this.poseLandmarker.close();
       this.poseLandmarker = null;
     }
+    this.activeDelegate = null;
+    this.fallbackUsed = false;
 
     // Clear canvas
     this.canvasElement = null;
@@ -575,6 +604,27 @@ export class PoseTracker {
    */
   getError(): TrackerError | null {
     return this.error;
+  }
+
+  /**
+   * Get configured compute delegate ('GPU' | 'CPU').
+   */
+  getRequestedDelegate(): PoseDelegate {
+    return this.modelConfig.delegate;
+  }
+
+  /**
+   * Get active runtime compute delegate after model initialization.
+   */
+  getActiveDelegate(): PoseDelegate | null {
+    return this.activeDelegate;
+  }
+
+  /**
+   * Returns true when GPU initialization failed and fell back to CPU.
+   */
+  didFallbackToCpu(): boolean {
+    return this.fallbackUsed;
   }
 
   /**

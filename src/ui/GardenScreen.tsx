@@ -4,11 +4,12 @@
  * harvest rewards; and defend plots in live camera-tracked Weed Battles.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ArrowLeft,
   Coins,
   Droplets,
+  FlaskConical,
   Lock,
   Sparkles,
   Sprout,
@@ -31,6 +32,11 @@ import {
   getPlantVisualEmoji,
   isPlotReadyToHarvest,
 } from '../game/data/garden';
+import {
+  SANCTUARY_MIX_BLUEPRINTS,
+  getTotalCropCount,
+  isMixReadyToCraft,
+} from '../game/data/sanctuary';
 import { ITEMS } from '../game/data/items';
 import { MONSTERS } from '../game/data/monsters';
 import { useGameStore } from '../game/store';
@@ -44,6 +50,7 @@ import {
   MONSTER_NAME_KEYS,
   RARITY_KEYS,
   RARITY_TEXT_CLASS,
+  SANCTUARY_MIX_KEYS,
   SEED_KEYS,
   WATERING_CAN_KEYS,
 } from './gameKeys';
@@ -78,10 +85,11 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
   const clearPlotWeedWithCoins = useGameStore((state) => state.clearPlotWeedWithCoins);
   const triggerGardenWeed = useGameStore((state) => state.triggerGardenWeed);
 
-  const [shopTab, setShopTab] = useState<'SEEDS' | 'TOOLS'>('SEEDS');
+  const [shopTab, setShopTab] = useState<'SEEDS' | 'TOOLS' | 'SANCTUARY'>('SEEDS');
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
   const [weedModal, setWeedModal] = useState<{ plotId: number; weedId: WeedId } | null>(null);
   const [selectedWeedExercise, setSelectedWeedExercise] = useState<ExerciseId>('SQUAT');
+  const shopSectionRef = useRef<HTMLElement | null>(null);
 
   const currentCan = WATERING_CANS[garden.wateringCanTier];
   const nextTier = getNextWateringCanTier(garden.wateringCanTier);
@@ -121,12 +129,14 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
     if (!reward) return;
 
     const parts = [
-      `${t('garden.harvestToast')}: ${t(SEED_KEYS[seedId].name)}`,
-      `+${reward.coins} ${t('stats.coins')}`,
+      `${t('garden.harvestToast')}: ${SEEDS[seedId].icon} ${t(SEED_KEYS[seedId].name)} ×${reward.cropQty}`,
       `+${reward.xp} XP`,
     ];
     if (reward.healHp > 0) {
       parts.push(`+${reward.healHp} HP`);
+    }
+    if (reward.leveledUp) {
+      parts.push(t('battle.levelUp'));
     }
     if (reward.droppedItemId) {
       const itemName = ITEM_NAME_KEYS[reward.droppedItemId]
@@ -138,8 +148,11 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
   };
 
   const handleHarvestAll = () => {
-    let totalCoins = 0;
+    const cropTotals: Partial<Record<SeedId, number>> = {};
     let totalXp = 0;
+    let totalHeal = 0;
+    let anyLeveledUp = false;
+    const droppedNames: string[] = [];
     let count = 0;
 
     for (let idx = 0; idx < garden.unlockedPlots; idx++) {
@@ -147,18 +160,45 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
       if (p && isPlotReadyToHarvest(p)) {
         const reward = harvestPlot(p.id);
         if (reward) {
-          totalCoins += reward.coins;
+          cropTotals[reward.cropId] = (cropTotals[reward.cropId] ?? 0) + reward.cropQty;
           totalXp += reward.xp;
+          totalHeal += reward.healHp;
+          if (reward.leveledUp) anyLeveledUp = true;
+          if (reward.droppedItemId) {
+            const itemName = ITEM_NAME_KEYS[reward.droppedItemId]
+              ? t(ITEM_NAME_KEYS[reward.droppedItemId])
+              : ITEMS[reward.droppedItemId]?.name;
+            if (itemName) droppedNames.push(itemName);
+          }
           count += 1;
         }
       }
     }
 
     if (count > 0) {
-      setFeedbackBanner(
-        `${t('garden.harvestToast')} ×${count} · +${totalCoins} ${t('stats.coins')} · +${totalXp} XP`
-      );
+      const cropSummary = SEED_ORDER.filter((id) => (cropTotals[id] ?? 0) > 0)
+        .map((id) => `${SEEDS[id].icon} ${t(SEED_KEYS[id].name)} ×${cropTotals[id]}`)
+        .join(', ');
+      const parts = [
+        `${t('garden.harvestToast')}: ${cropSummary}`,
+        `+${totalXp} XP`,
+      ];
+      if (totalHeal > 0) parts.push(`+${totalHeal} HP`);
+      if (anyLeveledUp) parts.push(t('battle.levelUp'));
+      if (droppedNames.length > 0) parts.push(...droppedNames);
+      setFeedbackBanner(parts.join(' · '));
     }
+  };
+
+  const handleClearWeed = (plotId: number) => {
+    if (clearPlotWeedWithCoins(plotId)) {
+      setFeedbackBanner(`${t('garden.weedHerbicideToast')} (#${plotId + 1})`);
+    }
+  };
+
+  const scrollToSeedShop = () => {
+    setShopTab('SEEDS');
+    shopSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   useVoiceCommandHandler((cmd) => {
@@ -184,10 +224,20 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
           return true;
         }
         return false;
+      case 'EXIT':
+        if (weedModal) {
+          setWeedModal(null);
+          return true;
+        }
+        return false;
       default:
         return false;
     }
   });
+
+  const readyHarvestCount = garden.plots
+    .slice(0, garden.unlockedPlots)
+    .filter((p) => isPlotReadyToHarvest(p)).length;
 
   const anyWaterable = garden.plots
     .slice(0, garden.unlockedPlots)
@@ -197,6 +247,13 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
     );
 
   const ownedSeedList = SEED_ORDER.filter((id) => (garden.seedInventory[id] ?? 0) > 0);
+  const cropInventory = garden.cropInventory ?? {
+    PROTEIN_MINT: 0,
+    IRON_BAMBOO: 0,
+    CHILI_PEPPER: 0,
+    GOLDEN_LOTUS: 0,
+  };
+  const totalCropCount = getTotalCropCount(cropInventory);
   const canUpgradeCan = nextCan !== null && coins >= nextCan.upgradeCost;
   const canRefillWater =
     garden.waterCharges < currentCan.maxCharges && coins >= WATER_REFILL_COST;
@@ -292,6 +349,18 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                 {t('garden.refillWater')} ({WATER_REFILL_COST})
               </span>
             </button>
+
+            {readyHarvestCount > 0 && (
+              <button
+                onClick={handleHarvestAll}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Sprout className="w-4 h-4" />
+                <span>
+                  {t('garden.harvestAll')} ({readyHarvestCount})
+                </span>
+              </button>
+            )}
 
             <button
               onClick={handleWeedPatrol}
@@ -419,7 +488,7 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                       </button>
 
                       <button
-                        onClick={() => clearPlotWeedWithCoins(plot.id)}
+                        onClick={() => handleClearWeed(plot.id)}
                         disabled={coins < QUICK_WEED_CLEAR_COST}
                         className="inline-flex items-center justify-center gap-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
                       >
@@ -476,7 +545,7 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                       </div>
                     ) : (
                       <button
-                        onClick={() => setShopTab('SEEDS')}
+                        onClick={scrollToSeedShop}
                         className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors"
                       >
                         {t('garden.buySeed')}
@@ -542,7 +611,8 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                     >
                       <Sprout className="w-4 h-4" />
                       <span>
-                        {t('garden.harvest')} (+{seedDef.harvestCoins} {t('stats.coins')})
+                        {t('garden.harvest')} (+{seedDef.harvestCropYield} {t('garden.cropUnit')} · +
+                        {seedDef.harvestXp} XP)
                       </span>
                     </button>
                   ) : (
@@ -564,11 +634,65 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
           </div>
         </section>
 
-        {/* Garden Supply Shop (Seeds & Watering Cans / Land Expansion) */}
-        <section className="space-y-4 pt-2 border-t border-slate-800">
+        {/* Harvested Botanical Stash (Sanctuary Prep) */}
+        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="w-4 h-4 text-emerald-400 shrink-0" />
+              <h2 className="text-base font-semibold text-white">{t('garden.stashTitle')}</h2>
+            </div>
+            <button
+              onClick={() => {
+                setShopTab('SANCTUARY');
+                shopSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors whitespace-nowrap"
+            >
+              {t('garden.sanctuaryTab')} →
+            </button>
+          </div>
+
+          {totalCropCount === 0 ? (
+            <p className="text-xs text-slate-400">{t('garden.stashEmpty')}</p>
+          ) : (
+            <div className="space-y-2.5">
+              <p className="text-xs text-slate-400">{t('garden.stashHint')}</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {SEED_ORDER.map((seedId) => {
+                  const qty = cropInventory[seedId] ?? 0;
+                  return (
+                    <div
+                      key={seedId}
+                      className={`rounded-lg border px-3.5 py-2.5 flex items-center justify-between gap-2 ${
+                        qty > 0
+                          ? 'bg-slate-950 border-emerald-500/40'
+                          : 'bg-slate-950/60 border-slate-800 opacity-65'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xl shrink-0" aria-hidden="true">
+                          {SEEDS[seedId].icon}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-200 truncate">
+                          {t(SEED_KEYS[seedId].name)}
+                        </span>
+                      </div>
+                      <span className="font-numeric text-sm font-bold text-emerald-400 shrink-0">
+                        ×{qty}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Garden Supply Shop & Sanctuary Prep */}
+        <section ref={shopSectionRef} className="space-y-4 pt-2 border-t border-slate-800">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h2 className="text-lg font-bold text-white">{t('garden.shopTitle')}</h2>
-            <div className="inline-flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
+            <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
               <button
                 onClick={() => setShopTab('SEEDS')}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
@@ -588,6 +712,16 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                 }`}
               >
                 {t('garden.toolsTab')}
+              </button>
+              <button
+                onClick={() => setShopTab('SANCTUARY')}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  shopTab === 'SANCTUARY'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                {t('garden.sanctuaryTab')}
               </button>
             </div>
           </div>
@@ -722,6 +856,90 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
               )}
             </div>
           )}
+
+          {shopTab === 'SANCTUARY' && (
+            <div className="space-y-4">
+              <div className="bg-emerald-950/30 border border-emerald-700/50 rounded-xl p-5 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-2 text-sm font-bold text-white">
+                    <FlaskConical className="w-4 h-4 text-emerald-400" />
+                    <span>{t('garden.sanctuaryBannerTitle')}</span>
+                  </div>
+                  <span className="text-xs font-semibold text-amber-300">
+                    {t('garden.comingSoonBadge')}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">{t('garden.sanctuaryBannerDesc')}</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {SANCTUARY_MIX_BLUEPRINTS.map((mix) => {
+                  const readyToMix = isMixReadyToCraft(cropInventory, mix);
+                  const keys = SANCTUARY_MIX_KEYS[mix.id];
+
+                  return (
+                    <div
+                      key={mix.id}
+                      className={`rounded-xl border p-4 space-y-3 ${
+                        readyToMix
+                          ? 'bg-slate-900 border-emerald-500/60'
+                          : 'bg-slate-900 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-3xl leading-none shrink-0" aria-hidden="true">
+                            {mix.icon}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-white truncate">
+                              {t(keys.name)}
+                            </div>
+                            <div className={`text-xs font-medium ${RARITY_TEXT_CLASS[mix.rarity]}`}>
+                              {t(RARITY_KEYS[mix.rarity])}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`text-xs font-semibold whitespace-nowrap shrink-0 ${
+                            readyToMix ? 'text-emerald-400' : 'text-slate-500'
+                          }`}
+                        >
+                          {readyToMix ? t('garden.ingredientsReady') : t('garden.comingSoonBadge')}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-snug">{t(keys.effect)}</p>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {mix.ingredients.map((req) => {
+                          const have = cropInventory[req.seedId] ?? 0;
+                          const enough = have >= req.qty;
+                          return (
+                            <span
+                              key={req.seedId}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-numeric ${
+                                enough
+                                  ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
+                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              <span>{SEEDS[req.seedId].icon}</span>
+                              <span>{t(SEED_KEYS[req.seedId].name)}</span>
+                              <span className="font-bold">
+                                {Math.min(have, req.qty)}/{req.qty}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </section>
       </main>
 
@@ -781,6 +999,7 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {Object.values(EXERCISES).map((ex) => {
                         const isWeak = ex.id === weedTemplate.weakTo;
+                        const isResistant = ex.id === weedTemplate.resistantTo;
                         const isSelected = selectedWeedExercise === ex.id;
                         return (
                           <button
@@ -798,6 +1017,11 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                             {isWeak && (
                               <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
                                 {t('battle.matchupWeak')}
+                              </div>
+                            )}
+                            {isResistant && (
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                {t('battle.matchupResistant')}
                               </div>
                             )}
                           </button>

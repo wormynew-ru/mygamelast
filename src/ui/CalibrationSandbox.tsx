@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, RotateCcw, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
-import { PoseTracker } from '../vision/PoseTracker';
+import { PoseTracker, type PoseDelegate } from '../vision/PoseTracker';
 import { SoundFX } from '../audio/SoundFX';
 import { applyExerciseCalibration, createExerciseDetector } from '../session/WorkoutSession';
 import type { ExerciseDetector, ExerciseState, VisibilityStatus } from '../vision/types';
@@ -102,6 +102,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const { t } = useTranslation();
   const cameraFacingMode = useGameStore((state) => state.settings.cameraFacingMode);
   const targetPoseFps = useGameStore((state) => state.settings.targetPoseFps);
+  const poseDelegate = useGameStore((state) => state.settings.poseDelegate);
   const exerciseCalibration = useGameStore((state) => state.settings.exerciseCalibration);
   const updateExerciseCalibration = useGameStore((state) => state.updateExerciseCalibration);
   const resetExerciseCalibration = useGameStore((state) => state.resetExerciseCalibration);
@@ -124,6 +125,8 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const [detectorState, setDetectorState] = useState<ExerciseState | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [activeDelegate, setActiveDelegate] = useState<PoseDelegate>(poseDelegate);
+  const [delegateFallback, setDelegateFallback] = useState(false);
 
   // Switch detector cleanly when user changes exercise
   useEffect(() => {
@@ -148,8 +151,13 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
     const initSystem = async () => {
       try {
         const tracker = new PoseTracker(
-          { facingMode: cameraFacingMode, width: 640, height: 480, frameRate: targetPoseFps },
-          { delegate: 'GPU', targetInferenceFPS: targetPoseFps }
+          {
+            facingMode: cameraFacingMode,
+            width: 640,
+            height: 480,
+            frameRate: Math.max(30, targetPoseFps),
+          },
+          { delegate: poseDelegate, targetInferenceFPS: targetPoseFps }
         );
         const soundFX = new SoundFX({ volume: 0.7, enabled: true });
 
@@ -215,6 +223,8 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
         }
 
         if (!disposed) {
+          setActiveDelegate(tracker.getActiveDelegate() ?? poseDelegate);
+          setDelegateFallback(tracker.didFallbackToCpu());
           setIsInitialized(true);
         }
       } catch (err) {
@@ -240,7 +250,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
       trackerRef.current?.dispose();
       soundFXRef.current?.dispose();
     };
-  }, [cameraFacingMode, targetPoseFps]);
+  }, [cameraFacingMode, targetPoseFps, poseDelegate]);
 
   const handleReset = () => {
     detectorRef.current?.reset();
@@ -382,6 +392,22 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
                       <p className="text-sm text-slate-200">{t('battle.starting')}</p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {isInitialized && (
+                <div className="absolute bottom-3 left-3 bg-slate-950/85 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-numeric">
+                  <span
+                    className={
+                      delegateFallback
+                        ? 'text-amber-400 font-semibold'
+                        : activeDelegate === 'GPU'
+                          ? 'text-emerald-400 font-semibold'
+                          : 'text-sky-400 font-semibold'
+                    }
+                  >
+                    {delegateFallback ? t('battle.delegateFallback') : activeDelegate}
+                  </span>
                 </div>
               )}
 

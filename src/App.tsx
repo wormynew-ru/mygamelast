@@ -44,6 +44,7 @@ interface ActiveEncounter {
   wave: number;
   circuitId?: CircuitId;
   gardenPlotId?: number;
+  weedId?: WeedId;
 }
 
 function AppContent() {
@@ -125,6 +126,7 @@ function AppContent() {
         mode: 'WEED',
         wave: 1,
         gardenPlotId: plotId,
+        weedId,
       });
       setCurrentScreen('BATTLE');
     },
@@ -259,6 +261,7 @@ function AppContent() {
           initialWave={activeEncounter.wave}
           circuitId={activeEncounter.circuitId}
           gardenPlotId={activeEncounter.gardenPlotId}
+          weedId={activeEncounter.weedId}
           onExit={handleExitBattle}
           onBackToGarden={handleBackToGarden}
           onStartNextLevel={handleStartEncounter}

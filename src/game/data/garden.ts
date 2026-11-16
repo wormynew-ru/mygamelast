@@ -25,7 +25,7 @@ export interface SeedDefinition {
   rarity: ItemRarity;
   price: number;
   growthRequired: number;
-  harvestCoins: number;
+  harvestCropYield: number;
   harvestXp: number;
   healHp: number;
   dropPool: readonly string[];
@@ -39,7 +39,7 @@ export const SEEDS: Record<SeedId, SeedDefinition> = {
     rarity: 'COMMON',
     price: 30,
     growthRequired: 3,
-    harvestCoins: 55,
+    harvestCropYield: 2,
     harvestXp: 25,
     healHp: 20,
     dropPool: ['ENERGY_BAR'],
@@ -51,7 +51,7 @@ export const SEEDS: Record<SeedId, SeedDefinition> = {
     rarity: 'RARE',
     price: 85,
     growthRequired: 5,
-    harvestCoins: 155,
+    harvestCropYield: 2,
     harvestXp: 55,
     healHp: 0,
     dropPool: ['ENERGY_BAR', 'ISOTONIC_FLASK', 'RUNNING_SHOES'],
@@ -63,7 +63,7 @@ export const SEEDS: Record<SeedId, SeedDefinition> = {
     rarity: 'EPIC',
     price: 160,
     growthRequired: 7,
-    harvestCoins: 290,
+    harvestCropYield: 3,
     harvestXp: 100,
     healHp: 0,
     dropPool: ['PROTEIN_SHAKE', 'WEIGHT_BELT', 'ARMOR_VEST'],
@@ -75,7 +75,7 @@ export const SEEDS: Record<SeedId, SeedDefinition> = {
     rarity: 'LEGENDARY',
     price: 320,
     growthRequired: 10,
-    harvestCoins: 580,
+    harvestCropYield: 1,
     harvestXp: 190,
     healHp: 40,
     dropPool: ['MEGA_RECOVERY_SMOOTHIE', 'FITNESS_WRISTBANDS', 'TITANIUM_DUMBBELLS', 'CHAMPION_BELT'],
@@ -160,6 +160,12 @@ export function createInitialGardenState(): GardenState {
       CHILI_PEPPER: 0,
       GOLDEN_LOTUS: 0,
     },
+    cropInventory: {
+      PROTEIN_MINT: 0,
+      IRON_BAMBOO: 0,
+      CHILI_PEPPER: 0,
+      GOLDEN_LOTUS: 0,
+    },
     wateringCanTier: 1,
     waterCharges: WATERING_CANS[1].maxCharges,
     totalHarvested: 0,
@@ -202,6 +208,12 @@ export function normalizeGardenState(raw: Partial<GardenState> | undefined): Gar
       IRON_BAMBOO: Math.max(0, raw.seedInventory?.IRON_BAMBOO ?? 0),
       CHILI_PEPPER: Math.max(0, raw.seedInventory?.CHILI_PEPPER ?? 0),
       GOLDEN_LOTUS: Math.max(0, raw.seedInventory?.GOLDEN_LOTUS ?? 0),
+    },
+    cropInventory: {
+      PROTEIN_MINT: Math.max(0, raw.cropInventory?.PROTEIN_MINT ?? 0),
+      IRON_BAMBOO: Math.max(0, raw.cropInventory?.IRON_BAMBOO ?? 0),
+      CHILI_PEPPER: Math.max(0, raw.cropInventory?.CHILI_PEPPER ?? 0),
+      GOLDEN_LOTUS: Math.max(0, raw.cropInventory?.GOLDEN_LOTUS ?? 0),
     },
     wateringCanTier,
     waterCharges: Math.max(0, Math.min(maxCharges, raw.waterCharges ?? maxCharges)),
@@ -253,7 +265,8 @@ export function getPlantVisualEmoji(plot: GardenPlotState): string {
 }
 
 export interface HarvestReward {
-  coins: number;
+  cropId: SeedId;
+  cropQty: number;
   xp: number;
   healHp: number;
   droppedItemId: string | null;
@@ -271,7 +284,8 @@ export function computeHarvestReward(
   }
 
   return {
-    coins: def.harvestCoins,
+    cropId: seedId,
+    cropQty: def.harvestCropYield,
     xp: def.harvestXp,
     healHp: def.healHp,
     droppedItemId,
