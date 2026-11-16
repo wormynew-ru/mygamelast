@@ -44,6 +44,7 @@ import {
   ITEM_NAME_KEYS,
   MONSTER_NAME_KEYS,
 } from './gameKeys';
+import { VoiceToggleButton, useVoiceCommandHandler } from './VoiceControl';
 
 interface BattleScreenProps {
   levelId?: string;
@@ -51,7 +52,9 @@ interface BattleScreenProps {
   mode?: BattleMode;
   initialWave?: number;
   circuitId?: CircuitId;
+  gardenPlotId?: number;
   onExit: () => void;
+  onBackToGarden?: () => void;
   onStartNextLevel?: (nextLevelId: string, exerciseId: ExerciseId) => void;
 }
 
@@ -116,7 +119,9 @@ export function BattleScreen({
   mode = 'CAMPAIGN',
   initialWave = 1,
   circuitId,
+  gardenPlotId,
   onExit,
+  onBackToGarden,
   onStartNextLevel,
 }: BattleScreenProps) {
   const { t } = useTranslation();
@@ -205,6 +210,7 @@ export function BattleScreen({
       endlessWave: initialWave,
       circuitId,
       circuitRoomIndex: 0,
+      gardenPlotId,
     });
     sessionRef.current = session;
 
@@ -272,7 +278,7 @@ export function BattleScreen({
       session.stop();
       sessionRef.current = null;
     };
-  }, [exerciseId, levelId, mode, initialWave, circuitId]);
+  }, [exerciseId, levelId, mode, initialWave, circuitId, gardenPlotId]);
 
   const handleAdvanceCircuitRoom = useCallback(() => {
     if (!circuitDef) return;
@@ -439,6 +445,44 @@ export function BattleScreen({
 
   const nextCircuitRoom = circuitDef?.rooms[circuitRoomIndex + 1];
 
+  useVoiceCommandHandler((cmd) => {
+    switch (cmd.type) {
+      case 'PAUSE':
+        if (sessionStatus.state === 'ACTIVE') {
+          sessionRef.current?.pause('USER');
+        }
+        return true;
+      case 'RESUME':
+        if (sessionStatus.state === 'PAUSED') {
+          sessionRef.current?.resume();
+        }
+        return true;
+      case 'NEXT':
+        if (isBetweenCircuitRooms) {
+          handleAdvanceCircuitRoom();
+        } else if (sessionStatus.state === 'VICTORY' && canAdvance) {
+          handleNextFight();
+        } else if (sessionStatus.state === 'PAUSED') {
+          sessionRef.current?.resume();
+        }
+        return true;
+      case 'RETRY':
+        if (sessionStatus.state === 'VICTORY' || sessionStatus.state === 'DEFEAT') {
+          handleRetry();
+        }
+        return true;
+      case 'EXIT':
+        handleSurrender();
+        return true;
+      case 'SOUND_UNLOCK':
+        handleUnlockAudio();
+        return true;
+      default:
+        // Block unintended navigation commands while in an active battle
+        return true;
+    }
+  });
+
   return (
     <div className="w-full h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       {/* Header: HP Bars */}
@@ -462,7 +506,9 @@ export function BattleScreen({
                 ? `${t('battle.waveLabel')} ${currentWave} · ${monsterName}`
                 : mode === 'CIRCUIT' && circuitDef
                   ? `${t(CIRCUIT_KEYS[circuitDef.id].name)} (${circuitRoomIndex + 1}/${circuitDef.rooms.length}) · ${monsterName}`
-                  : monsterName
+                  : mode === 'WEED' && typeof gardenPlotId === 'number'
+                    ? `${t('battle.weedModeBadge')} #${gardenPlotId + 1} · ${monsterName}`
+                    : monsterName
             }
             tone="enemy"
           />
@@ -851,6 +897,8 @@ export function BattleScreen({
 
           {/* Battle Controls */}
           <div className="flex flex-col gap-2">
+            <VoiceToggleButton className="w-full" />
+
             <button
               onClick={handlePauseToggle}
               disabled={sessionStatus.state !== 'ACTIVE' && sessionStatus.state !== 'PAUSED'}
@@ -1027,6 +1075,12 @@ export function BattleScreen({
                       </div>
                     )}
 
+                    {sessionStatus.victorySummary.gardenPlotCleared && (
+                      <div className="text-emerald-400 text-xs font-semibold pt-1">
+                        {t('battle.weedClearedNote')}
+                      </div>
+                    )}
+
                     {sessionStatus.victorySummary.unlockedLevelId && (
                       <div className="text-sky-400 text-xs font-medium pt-1">
                         {t('battle.levelUnlocked')}
@@ -1051,28 +1105,43 @@ export function BattleScreen({
                 )}
 
                 <div className="flex gap-3">
-                  <button
-                    onClick={canAdvance ? handleNextFight : handleRetry}
-                    className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
-                  >
-                    {t(
-                      mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
-                        ? 'battle.nextWave'
-                        : canAdvance
-                          ? 'battle.nextFight'
-                          : 'battle.tryAgain'
-                    )}
-                  </button>
-                  <button
-                    onClick={handleSurrender}
-                    className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
-                  >
-                    {t(
-                      mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
-                        ? 'battle.bankAndExit'
-                        : 'battle.exit'
-                    )}
-                  </button>
+                  {mode === 'WEED' && sessionStatus.state === 'VICTORY' ? (
+                    <button
+                      onClick={() => {
+                        sessionRef.current?.stop();
+                        endCombat();
+                        (onBackToGarden ?? onExit)();
+                      }}
+                      className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      {t('battle.backToGarden')}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={canAdvance ? handleNextFight : handleRetry}
+                        className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        {t(
+                          mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
+                            ? 'battle.nextWave'
+                            : canAdvance
+                              ? 'battle.nextFight'
+                              : 'battle.tryAgain'
+                        )}
+                      </button>
+                      <button
+                        onClick={handleSurrender}
+                        className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        {t(
+                          mode === 'ENDLESS' && sessionStatus.state === 'VICTORY'
+                            ? 'battle.bankAndExit'
+                            : 'battle.exit'
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}

@@ -14,7 +14,9 @@ import {
   Coins,
   BookOpen,
   CalendarCheck,
+  Sprout,
 } from 'lucide-react';
+import { isPlotReadyToHarvest } from '../game/data/garden';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { ACHIEVEMENTS } from '../game/data/achievements';
 import {
@@ -26,11 +28,13 @@ import {
 } from '../game/data/dailyQuests';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import { PWAInstallButton } from './PWAInstallButton';
+import { VoiceToggleButton } from './VoiceControl';
 import { ACHIEVEMENT_KEYS } from './gameKeys';
 
 interface MainMenuProps {
   onOpenCampaign: () => void;
   onQuickBattle: () => void;
+  onGarden: () => void;
   onInventory: () => void;
   onBestiary: () => void;
   onCalibration: () => void;
@@ -46,6 +50,7 @@ const QUEST_TITLE_KEYS: Record<DailyQuestMetric, TranslationKey> = {
 export function MainMenu({
   onOpenCampaign,
   onQuickBattle,
+  onGarden,
   onInventory,
   onBestiary,
   onCalibration,
@@ -63,8 +68,16 @@ export function MainMenu({
   const dailyQuests = useGameStore((state) => state.dailyQuests);
   const dailyHistory = useGameStore((state) => state.dailyHistory);
   const endlessStats = useGameStore((state) => state.endlessStats);
+  const garden = useGameStore((state) => state.garden);
   const claimDailyQuest = useGameStore((state) => state.claimDailyQuest);
   const syncAchievements = useGameStore((state) => state.syncAchievements);
+
+  const readyHarvestCount = garden.plots
+    .slice(0, garden.unlockedPlots)
+    .filter((p) => isPlotReadyToHarvest(p)).length;
+  const activeWeedCount = garden.plots
+    .slice(0, garden.unlockedPlots)
+    .filter((p) => p.weedId !== null).length;
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const attackBonus = effectivePlayer.attack - basePlayer.attack;
@@ -103,12 +116,18 @@ export function MainMenu({
             {t('menu.title')}
           </span>
 
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
+          <nav className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-400">
             <button
               onClick={onOpenCampaign}
               className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
             >
               {t('menu.startBattle')}
+            </button>
+            <button
+              onClick={onGarden}
+              className="hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
+            >
+              {t('menu.garden')}
             </button>
             <button
               onClick={onInventory}
@@ -123,12 +142,6 @@ export function MainMenu({
               {t('menu.bestiary')}
             </button>
             <button
-              onClick={onCalibration}
-              className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
-            >
-              {t('menu.calibration')}
-            </button>
-            <button
               onClick={onSettings}
               className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
             >
@@ -136,7 +149,8 @@ export function MainMenu({
             </button>
           </nav>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <VoiceToggleButton compact />
             <PWAInstallButton />
             <button
               onClick={onQuickBattle}
@@ -297,6 +311,23 @@ export function MainMenu({
 
           {/* Secondary Actions Column */}
           <section className="lg:col-span-5 flex flex-col gap-3 justify-between">
+            <button
+              onClick={onGarden}
+              className="flex-1 bg-emerald-950/35 hover:bg-emerald-950/60 border border-emerald-700/60 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            >
+              <div>
+                <div className="text-base font-semibold text-white">{t('menu.garden')}</div>
+                <div className="text-xs text-emerald-300/90 mt-0.5 font-numeric">
+                  {activeWeedCount > 0
+                    ? `${t('garden.weedAlert')} (${activeWeedCount})`
+                    : readyHarvestCount > 0
+                      ? `${t('garden.readyBadge')} (${readyHarvestCount})`
+                      : t('menu.gardenDesc')}
+                </div>
+              </div>
+              <Sprout className="w-5 h-5 text-emerald-400 shrink-0" />
+            </button>
+
             <button
               onClick={onInventory}
               className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"

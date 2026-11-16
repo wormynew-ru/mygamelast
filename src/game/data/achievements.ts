@@ -19,7 +19,9 @@ export type AchievementId =
   | 'BESTIARY_SCHOLAR'
   | 'IRON_TONNAGE'
   | 'STATIC_MASTER'
-  | 'CIRCUIT_CHAMPION';
+  | 'CIRCUIT_CHAMPION'
+  | 'GARDENER'
+  | 'WEED_SLAYER';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -101,6 +103,16 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'CIRCUIT_CHAMPION',
     icon: '🔁',
     check: (state) => (state.workoutStats.circuitsCompleted ?? 0) >= 1,
+  },
+  {
+    id: 'GARDENER',
+    icon: '🌻',
+    check: (state) => (state.garden?.totalHarvested ?? 0) >= 3,
+  },
+  {
+    id: 'WEED_SLAYER',
+    icon: '🌿',
+    check: (state) => (state.garden?.weedsDefeated ?? 0) >= 3,
   },
 ];
 

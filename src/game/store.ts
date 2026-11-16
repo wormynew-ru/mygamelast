@@ -1,7 +1,7 @@
 /**
- * Zustand store for game state with persistence (v6).
+ * Zustand store for game state with persistence (v9).
  * Handles player stats, loadout weight, inventory, coins, shop, daily quests, streaks,
- * 7/30-day activity history, monster bestiary, endless arena, circuits, calibration, and settings.
+ * 7/30-day activity history, monster bestiary, endless arena, circuits, garden, calibration, and settings.
  */
 
 import { create } from 'zustand';
@@ -18,6 +18,7 @@ import type {
   Inventory,
   MonsterStats,
   PlayerStats,
+  SeedId,
   StreakState,
   WorkoutStats,
 } from './types';
@@ -25,6 +26,23 @@ import { createPlayer, getEffectivePlayerStats, levelUp, useConsumableItem } fro
 import { ITEMS } from './data/items';
 import { evaluateNewAchievements } from './data/achievements';
 import { type ExerciseId } from './data/exercises';
+import {
+  QUICK_WEED_CLEAR_COST,
+  SEEDS,
+  WATERING_CANS,
+  WATER_REFILL_COST,
+  applyWorkoutVictoryToGarden,
+  computeHarvestReward,
+  createInitialGardenState,
+  getNextPlotUnlockCost,
+  getNextWateringCanTier,
+  isPlotReadyToHarvest,
+  normalizeGardenState,
+  spawnWeedInGarden,
+  waterAllPlotsInGarden,
+  waterSinglePlotInGarden,
+  type HarvestReward,
+} from './data/garden';
 import {
   getDailyQuestsForDate,
   getLocalDateKey,
@@ -126,9 +144,11 @@ function createInitialState(): GameState {
     dailyQuests: createInitialDailyQuests(),
     bestiary: {},
     endlessStats: createInitialEndlessStats(),
+    garden: createInitialGardenState(),
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
+      voiceControlEnabled: false,
       cameraFacingMode: 'user',
       targetPoseFps: 60,
       exerciseConfigs: {},
@@ -197,6 +217,7 @@ interface GameStore extends GameState {
     circuitsCompleted?: number;
     durationSec?: number;
     dateKey?: string;
+    suppressWeedSpawn?: boolean;
   }) => void;
   recordMonsterBestiary: (params: {
     monsterId: string;
@@ -207,6 +228,18 @@ interface GameStore extends GameState {
   claimDailyQuest: (questId: string, dateKey?: string) => { coins: number; xp: number; leveledUp: boolean } | null;
   updateEndlessProgress: (waveReached: number, wonWave: boolean) => void;
   syncAchievements: () => string[];
+
+  buySeed: (seedId: SeedId) => boolean;
+  plantSeed: (plotId: number, seedId: SeedId) => boolean;
+  waterPlot: (plotId: number) => boolean;
+  waterAllPlots: () => boolean;
+  upgradeWateringCan: () => boolean;
+  refillWateringCan: () => boolean;
+  unlockGardenPlot: () => boolean;
+  harvestPlot: (plotId: number) => (HarvestReward & { leveledUp: boolean }) | null;
+  clearPlotWeedWithCoins: (plotId: number) => boolean;
+  defeatPlotWeed: (plotId: number) => boolean;
+  triggerGardenWeed: (plotId?: number) => number | null;
 
   updateSettings: (settings: Partial<GameState['settings']>) => void;
   updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
@@ -231,7 +264,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 7) {
+  if (version >= 0 && version <= 9) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -294,9 +327,11 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
         ...base.endlessStats,
         ...(state.endlessStats ?? {}),
       },
+      garden: normalizeGardenState(state.garden),
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
+        voiceControlEnabled: Boolean(state.settings?.voiceControlEnabled),
         targetPoseFps: state.settings?.targetPoseFps === 30 ? 30 : 60,
         exerciseCalibration: {
           ...base.settings.exerciseCalibration,
@@ -602,6 +637,13 @@ export const useGameStore = create<GameStore>()(
               ? updateStreakForDate(state.streak, todayKey)
               : state.streak;
 
+          const nextGarden =
+            winsDelta > 0
+              ? applyWorkoutVictoryToGarden(state.garden, {
+                  suppressWeedSpawn: delta.suppressWeedSpawn,
+                })
+              : state.garden;
+
           return {
             coins: state.coins + coinsDelta,
             workoutStats: {
@@ -624,6 +666,7 @@ export const useGameStore = create<GameStore>()(
               [todayKey]: updatedDay,
             }),
             streak: nextStreak,
+            garden: nextGarden,
           };
         }),
 
@@ -712,6 +755,229 @@ export const useGameStore = create<GameStore>()(
         return newlyUnlocked;
       },
 
+      buySeed: (seedId) => {
+        const seed = SEEDS[seedId];
+        if (!seed) return false;
+        const state = get();
+        if (state.coins < seed.price) return false;
+
+        set({
+          coins: state.coins - seed.price,
+          garden: {
+            ...state.garden,
+            seedInventory: {
+              ...state.garden.seedInventory,
+              [seedId]: (state.garden.seedInventory[seedId] ?? 0) + 1,
+            },
+          },
+        });
+        return true;
+      },
+
+      plantSeed: (plotId, seedId) => {
+        const state = get();
+        if (plotId < 0 || plotId >= state.garden.unlockedPlots) return false;
+        const plot = state.garden.plots[plotId];
+        const qty = state.garden.seedInventory[seedId] ?? 0;
+        if (!plot || plot.seedId !== null || plot.weedId !== null || qty <= 0) {
+          return false;
+        }
+
+        set({
+          garden: {
+            ...state.garden,
+            seedInventory: {
+              ...state.garden.seedInventory,
+              [seedId]: qty - 1,
+            },
+            plots: state.garden.plots.map((p) =>
+              p.id === plotId ? { ...p, seedId, growth: 0 } : p
+            ),
+          },
+        });
+        return true;
+      },
+
+      waterPlot: (plotId) => {
+        const state = get();
+        const nextGarden = waterSinglePlotInGarden(state.garden, plotId);
+        if (!nextGarden) return false;
+        set({ garden: nextGarden });
+        return true;
+      },
+
+      waterAllPlots: () => {
+        const state = get();
+        const nextGarden = waterAllPlotsInGarden(state.garden);
+        if (!nextGarden) return false;
+        set({ garden: nextGarden });
+        return true;
+      },
+
+      upgradeWateringCan: () => {
+        const state = get();
+        const nextTier = getNextWateringCanTier(state.garden.wateringCanTier);
+        if (!nextTier) return false;
+        const nextCan = WATERING_CANS[nextTier];
+        if (state.coins < nextCan.upgradeCost) return false;
+
+        set({
+          coins: state.coins - nextCan.upgradeCost,
+          garden: {
+            ...state.garden,
+            wateringCanTier: nextTier,
+            waterCharges: nextCan.maxCharges,
+          },
+        });
+        return true;
+      },
+
+      refillWateringCan: () => {
+        const state = get();
+        const maxCharges = WATERING_CANS[state.garden.wateringCanTier].maxCharges;
+        if (state.garden.waterCharges >= maxCharges || state.coins < WATER_REFILL_COST) {
+          return false;
+        }
+        set({
+          coins: state.coins - WATER_REFILL_COST,
+          garden: {
+            ...state.garden,
+            waterCharges: maxCharges,
+          },
+        });
+        return true;
+      },
+
+      unlockGardenPlot: () => {
+        const state = get();
+        const cost = getNextPlotUnlockCost(state.garden.unlockedPlots);
+        if (cost === null || state.coins < cost) return false;
+
+        set({
+          coins: state.coins - cost,
+          garden: {
+            ...state.garden,
+            unlockedPlots: state.garden.unlockedPlots + 1,
+          },
+        });
+        return true;
+      },
+
+      harvestPlot: (plotId) => {
+        const state = get();
+        if (plotId < 0 || plotId >= state.garden.unlockedPlots) return null;
+        const plot = state.garden.plots[plotId];
+        if (!plot || !plot.seedId || !isPlotReadyToHarvest(plot)) return null;
+
+        const reward = computeHarvestReward(plot.seedId);
+
+        let updatedPlayer = { ...state.player, xp: state.player.xp + reward.xp };
+        let leveledUp = false;
+        while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+          updatedPlayer = levelUp(updatedPlayer);
+          leveledUp = true;
+        }
+
+        if (reward.healHp > 0) {
+          const eff = getEffectivePlayerStats(
+            updatedPlayer,
+            state.inventory.equippedItems,
+            ITEMS
+          );
+          const maxGain = Math.max(0, eff.maxHp - eff.hp);
+          const actualHeal = Math.min(reward.healHp, maxGain);
+          updatedPlayer = {
+            ...updatedPlayer,
+            hp: Math.min(updatedPlayer.maxHp, updatedPlayer.hp + actualHeal),
+          };
+        }
+
+        const nextItems = new Map(state.inventory.items);
+        if (reward.droppedItemId) {
+          nextItems.set(
+            reward.droppedItemId,
+            (nextItems.get(reward.droppedItemId) ?? 0) + 1
+          );
+        }
+
+        set({
+          coins: state.coins + reward.coins,
+          player: updatedPlayer,
+          inventory: {
+            ...state.inventory,
+            items: nextItems,
+          },
+          garden: {
+            ...state.garden,
+            totalHarvested: state.garden.totalHarvested + 1,
+            plots: state.garden.plots.map((p) =>
+              p.id === plotId ? { ...p, seedId: null, growth: 0 } : p
+            ),
+          },
+        });
+
+        get().syncAchievements();
+        return {
+          ...reward,
+          leveledUp,
+        };
+      },
+
+      clearPlotWeedWithCoins: (plotId) => {
+        const state = get();
+        if (plotId < 0 || plotId >= state.garden.unlockedPlots) return false;
+        const plot = state.garden.plots[plotId];
+        if (!plot || !plot.weedId || state.coins < QUICK_WEED_CLEAR_COST) return false;
+
+        set({
+          coins: state.coins - QUICK_WEED_CLEAR_COST,
+          garden: {
+            ...state.garden,
+            weedsDefeated: state.garden.weedsDefeated + 1,
+            plots: state.garden.plots.map((p) =>
+              p.id === plotId ? { ...p, weedId: null } : p
+            ),
+          },
+        });
+        get().syncAchievements();
+        return true;
+      },
+
+      defeatPlotWeed: (plotId) => {
+        const state = get();
+        if (plotId < 0 || plotId >= state.garden.unlockedPlots) return false;
+        const plot = state.garden.plots[plotId];
+        if (!plot || !plot.weedId) return false;
+
+        const maxGrowth = plot.seedId ? SEEDS[plot.seedId].growthRequired : 0;
+
+        set({
+          garden: {
+            ...state.garden,
+            weedsDefeated: state.garden.weedsDefeated + 1,
+            plots: state.garden.plots.map((p) =>
+              p.id === plotId
+                ? {
+                    ...p,
+                    weedId: null,
+                    growth: p.seedId ? Math.min(maxGrowth, p.growth + 1) : 0,
+                  }
+                : p
+            ),
+          },
+        });
+        get().syncAchievements();
+        return true;
+      },
+
+      triggerGardenWeed: (plotId) => {
+        const state = get();
+        const { garden, spawnedPlotId } = spawnWeedInGarden(state.garden, Math.random, plotId);
+        if (spawnedPlotId === null) return null;
+        set({ garden });
+        return spawnedPlotId;
+      },
+
       updateSettings: (settingsUpdate) =>
         set((state) => ({
           settings: { ...state.settings, ...settingsUpdate },
@@ -752,7 +1018,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 7,
+      version: 9,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

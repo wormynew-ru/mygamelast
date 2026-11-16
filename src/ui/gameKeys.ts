@@ -5,7 +5,7 @@
 import type { AchievementId } from '../game/data/achievements';
 import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
-import type { ItemRarity, MonsterArchetype } from '../game/types';
+import type { ItemRarity, MonsterArchetype, SeedId, WateringCanTier } from '../game/types';
 import type { TranslationKey } from '../i18n/useTranslation';
 
 export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
@@ -19,6 +19,9 @@ export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
   PIZZA: 'monster.PIZZA.name',
   BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.name',
   BOSS_PIZZA_EMPEROR: 'monster.BOSS_PIZZA_EMPEROR.name',
+  WEED_DANDELION: 'monster.WEED_DANDELION.name',
+  WEED_THISTLE: 'monster.WEED_THISTLE.name',
+  WEED_VINE: 'monster.WEED_VINE.name',
 };
 
 export const MONSTER_DESC_KEYS: Record<string, TranslationKey> = {
@@ -32,6 +35,9 @@ export const MONSTER_DESC_KEYS: Record<string, TranslationKey> = {
   PIZZA: 'monster.PIZZA.description',
   BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.description',
   BOSS_PIZZA_EMPEROR: 'monster.BOSS_PIZZA_EMPEROR.description',
+  WEED_DANDELION: 'monster.WEED_DANDELION.description',
+  WEED_THISTLE: 'monster.WEED_THISTLE.description',
+  WEED_VINE: 'monster.WEED_VINE.description',
 };
 
 export const ARCHETYPE_KEYS: Record<MonsterArchetype, TranslationKey> = {
@@ -179,4 +185,44 @@ export const ACHIEVEMENT_KEYS: Record<
     name: 'achievement.CIRCUIT_CHAMPION.name',
     description: 'achievement.CIRCUIT_CHAMPION.description',
   },
+  GARDENER: {
+    name: 'achievement.GARDENER.name',
+    description: 'achievement.GARDENER.description',
+  },
+  WEED_SLAYER: {
+    name: 'achievement.WEED_SLAYER.name',
+    description: 'achievement.WEED_SLAYER.description',
+  },
+};
+
+export const SEED_KEYS: Record<
+  SeedId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  PROTEIN_MINT: {
+    name: 'garden.seed.PROTEIN_MINT.name',
+    desc: 'garden.seed.PROTEIN_MINT.desc',
+  },
+  IRON_BAMBOO: {
+    name: 'garden.seed.IRON_BAMBOO.name',
+    desc: 'garden.seed.IRON_BAMBOO.desc',
+  },
+  CHILI_PEPPER: {
+    name: 'garden.seed.CHILI_PEPPER.name',
+    desc: 'garden.seed.CHILI_PEPPER.desc',
+  },
+  GOLDEN_LOTUS: {
+    name: 'garden.seed.GOLDEN_LOTUS.name',
+    desc: 'garden.seed.GOLDEN_LOTUS.desc',
+  },
+};
+
+export const WATERING_CAN_KEYS: Record<
+  WateringCanTier,
+  { name: TranslationKey; perk: TranslationKey }
+> = {
+  1: { name: 'garden.can.1.name', perk: 'garden.can.1.perk' },
+  2: { name: 'garden.can.2.name', perk: 'garden.can.2.perk' },
+  3: { name: 'garden.can.3.name', perk: 'garden.can.3.perk' },
+  4: { name: 'garden.can.4.name', perk: 'garden.can.4.perk' },
 };

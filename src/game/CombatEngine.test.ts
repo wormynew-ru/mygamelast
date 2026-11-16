@@ -41,6 +41,7 @@ import {
   updateStreakForDate,
 } from './data/dailyQuests';
 import { evaluateNewAchievements } from './data/achievements';
+import { createInitialGardenState } from './data/garden';
 import type { PlayerStats, MonsterStats, GameState } from './types';
 
 describe('CombatEngine', () => {
@@ -600,9 +601,11 @@ describe('CombatEngine', () => {
           FRIES: { encounters: 1, defeats: 0, fastestVictorySec: null, weaknessDiscovered: false },
         },
         endlessStats: { bestWave: 5, totalArenaWins: 5 },
+        garden: createInitialGardenState(),
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
+          voiceControlEnabled: false,
           cameraFacingMode: 'user',
           targetPoseFps: 60,
           exerciseConfigs: {},

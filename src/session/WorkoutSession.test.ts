@@ -759,4 +759,50 @@ describe('WorkoutSession', () => {
     expect((wallSit.getConfig() as { maxKneeAngle: number }).maxKneeAngle).toBe(120);
     expect((press.getConfig() as { topAngle: number }).topAngle).toBe(165);
   });
+
+  it('clears garden weed, increments weedsDefeated, and boosts crop growth on WEED battle victory', async () => {
+    const store = useGameStore.getState();
+    store.plantSeed(0, 'PROTEIN_MINT');
+    store.triggerGardenWeed(0);
+    expect(useGameStore.getState().garden.plots[0].weedId).not.toBeNull();
+
+    const weakWeed = { ...createMonster(MONSTERS.WEED_DANDELION), hp: 5 };
+    store.startCombat(weakWeed);
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      mode: 'WEED',
+      gardenPlotId: 0,
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    tracker.triggerPose(100);
+    tracker.triggerPose(300);
+
+    const status = session.getStatus();
+    expect(status.state).toBe('VICTORY');
+    expect(status.victorySummary?.gardenPlotCleared).toBe(true);
+    expect(status.victorySummary?.gardenPlotId).toBe(0);
+
+    const updatedGarden = useGameStore.getState().garden;
+    expect(updatedGarden.plots[0].weedId).toBeNull();
+    expect(updatedGarden.weedsDefeated).toBe(1);
+    // +1 from defeatPlotWeed + 1 from applyWorkoutVictoryToGarden = 2 growth
+    expect(updatedGarden.plots[0].growth).toBeGreaterThanOrEqual(2);
+
+    session.stop();
+  });
 });

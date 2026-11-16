@@ -65,7 +65,7 @@ export type SessionState =
   | 'ERROR';
 
 export type AutoPauseReason = 'USER' | 'LOW_VISIBILITY' | 'TAB_HIDDEN' | null;
-export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT';
+export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'WEED';
 
 export interface CombatEvent {
   id: number;
@@ -109,6 +109,8 @@ export interface VictorySummary {
   circuitRoomNumber?: number;
   circuitTotalRooms?: number;
   circuitCompleted?: boolean;
+  gardenPlotId?: number;
+  gardenPlotCleared?: boolean;
 }
 
 export interface SessionStatus {
@@ -182,6 +184,7 @@ export interface WorkoutSessionConfig {
   endlessWave?: number;
   circuitId?: string;
   circuitRoomIndex?: number;
+  gardenPlotId?: number;
   loadout?: EquipmentLoadout;
   enableSound?: boolean;
   enableVoice?: boolean;
@@ -215,6 +218,7 @@ export class WorkoutSession {
   private endlessWave: number;
   private circuitId?: string;
   private circuitRoomIndex: number;
+  private gardenPlotId?: number;
   private loadoutOverride?: EquipmentLoadout;
 
   private videoElement: HTMLVideoElement;
@@ -292,6 +296,7 @@ export class WorkoutSession {
     this.endlessWave = config.endlessWave ?? 1;
     this.circuitId = config.circuitId;
     this.circuitRoomIndex = config.circuitRoomIndex ?? 0;
+    this.gardenPlotId = config.gardenPlotId;
     this.loadoutOverride = config.loadout;
     this.enableSound = config.enableSound ?? true;
     this.enableVoice = config.enableVoice ?? false;
@@ -1142,6 +1147,17 @@ export class WorkoutSession {
       }
     }
 
+    let gardenPlotCleared = false;
+    if (this.mode === 'WEED') {
+      if (typeof this.gardenPlotId === 'number') {
+        gardenPlotCleared = store.defeatPlotWeed(this.gardenPlotId);
+      }
+      droppedItemId = rollItemDrop([{ itemId: 'ENERGY_BAR', chance: 0.35 }]);
+      if (droppedItemId) {
+        store.addItem(droppedItemId, 1);
+      }
+    }
+
     store.recordMonsterBestiary({
       monsterId: defeatedEnemy.id,
       defeated: true,
@@ -1155,6 +1171,7 @@ export class WorkoutSession {
       coinsEarned,
       circuitsCompleted: circuitsDelta,
       durationSec,
+      suppressWeedSpawn: this.mode === 'WEED',
     });
 
     const unlockedOnVictory = store.syncAchievements();
@@ -1183,6 +1200,8 @@ export class WorkoutSession {
       circuitRoomNumber,
       circuitTotalRooms,
       circuitCompleted,
+      gardenPlotId: this.mode === 'WEED' ? this.gardenPlotId : undefined,
+      gardenPlotCleared,
     };
 
     if (this.enableSound) {
@@ -1372,6 +1391,7 @@ export function createWorkoutSessionForBattle(params: {
   endlessWave?: number;
   circuitId?: string;
   circuitRoomIndex?: number;
+  gardenPlotId?: number;
 }): WorkoutSession {
   const store = useGameStore.getState();
   const exerciseDef = EXERCISES[params.exerciseId];
@@ -1390,6 +1410,7 @@ export function createWorkoutSessionForBattle(params: {
     endlessWave: params.endlessWave ?? 1,
     circuitId: params.circuitId,
     circuitRoomIndex: params.circuitRoomIndex,
+    gardenPlotId: params.gardenPlotId,
     loadout: store.loadout,
     enableSound: store.settings.soundEnabled,
     enableVoice: store.settings.voiceEnabled,

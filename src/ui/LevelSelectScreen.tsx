@@ -3,7 +3,7 @@
  * with Bodyweight / Dumbbell Loadout weight configuration.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Lock,
@@ -28,8 +28,10 @@ import {
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
 } from './gameKeys';
+import { useVoiceCommandHandler } from './VoiceControl';
 
 interface LevelSelectScreenProps {
+  initialTab?: 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT';
   onBack: () => void;
   onStartEncounter: (levelId: string, exerciseId: ExerciseId) => void;
   onStartEndless: (exerciseId: ExerciseId) => void;
@@ -39,6 +41,7 @@ interface LevelSelectScreenProps {
 const WEIGHT_PRESETS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
 
 export function LevelSelectScreen({
+  initialTab = 'CAMPAIGN',
   onBack,
   onStartEncounter,
   onStartEndless,
@@ -55,11 +58,15 @@ export function LevelSelectScreen({
     LEVELS.find((lvl) => unlockedLevels.includes(lvl.id) && !completedLevels.includes(lvl.id)) ??
     LEVELS[0];
 
-  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT'>('CAMPAIGN');
+  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT'>(initialTab);
   const [selectedLevelId, setSelectedLevelId] = useState<string>(defaultLevel.id);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseId>(
     defaultLevel.recommendedExercise
   );
+
+  useEffect(() => {
+    setModeTab(initialTab);
+  }, [initialTab]);
 
   const selectedLevel: CampaignLevel =
     LEVELS.find((lvl) => lvl.id === selectedLevelId) ?? LEVELS[0];
@@ -76,6 +83,41 @@ export function LevelSelectScreen({
     setSelectedLevelId(level.id);
     setSelectedExercise(level.recommendedExercise);
   };
+
+  useVoiceCommandHandler((cmd) => {
+    switch (cmd.type) {
+      case 'NAV_CAMPAIGN':
+        setModeTab('CAMPAIGN');
+        return true;
+      case 'NAV_ENDLESS':
+        setModeTab('ENDLESS');
+        return true;
+      case 'NAV_CIRCUIT':
+        setModeTab('CIRCUIT');
+        return true;
+      case 'SELECT_EXERCISE':
+        setSelectedExercise(cmd.exerciseId);
+        return true;
+      case 'START_CIRCUIT':
+        onStartCircuit(cmd.circuitId);
+        return true;
+      case 'START_FIGHT':
+      case 'RESUME':
+        if (modeTab === 'CAMPAIGN' && isSelectedUnlocked) {
+          onStartEncounter(selectedLevel.id, selectedExercise);
+        } else if (modeTab === 'ENDLESS') {
+          onStartEndless(selectedExercise);
+        } else if (modeTab === 'CIRCUIT' && CIRCUITS[0]) {
+          onStartCircuit(CIRCUITS[0].id);
+        }
+        return true;
+      case 'EXIT':
+        onBack();
+        return true;
+      default:
+        return false;
+    }
+  });
 
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col">

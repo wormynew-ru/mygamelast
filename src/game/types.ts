@@ -192,6 +192,27 @@ export interface EndlessArenaStats {
   totalArenaWins: number;
 }
 
+export type SeedId = 'PROTEIN_MINT' | 'IRON_BAMBOO' | 'CHILI_PEPPER' | 'GOLDEN_LOTUS';
+export type WeedId = 'WEED_DANDELION' | 'WEED_THISTLE' | 'WEED_VINE';
+export type WateringCanTier = 1 | 2 | 3 | 4;
+
+export interface GardenPlotState {
+  id: number;
+  seedId: SeedId | null;
+  growth: number;
+  weedId: WeedId | null;
+}
+
+export interface GardenState {
+  unlockedPlots: number;
+  plots: GardenPlotState[];
+  seedInventory: Record<SeedId, number>;
+  wateringCanTier: WateringCanTier;
+  waterCharges: number;
+  totalHarvested: number;
+  weedsDefeated: number;
+}
+
 export interface ExerciseCalibrationSettings {
   squatBottomAngle: number;
   pushupBottomAngle: number;
@@ -226,11 +247,13 @@ export interface GameState {
   dailyQuests: DailyQuestState;
   bestiary: Record<string, BestiaryEntry>;
   endlessStats: EndlessArenaStats;
+  garden: GardenState;
 
   /** Settings and calibration */
   settings: {
     soundEnabled: boolean;
     voiceEnabled: boolean;
+    voiceControlEnabled: boolean;
     cameraFacingMode: 'user' | 'environment';
     targetPoseFps: 30 | 60;
     exerciseConfigs: Record<string, unknown>; // exerciseId -> ExerciseConfig

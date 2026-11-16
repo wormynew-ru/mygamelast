@@ -15,6 +15,7 @@ import type { ExerciseCalibrationSettings } from '../game/types';
 import { useGameStore } from '../game/store';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import { EXERCISE_NAME_KEYS } from './gameKeys';
+import { useVoiceCommandHandler } from './VoiceControl';
 
 interface CalibrationSandboxProps {
   onBack?: () => void;
@@ -257,6 +258,26 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
       void soundFXRef.current?.init();
     }
   };
+
+  useVoiceCommandHandler((cmd) => {
+    if (cmd.type === 'SELECT_EXERCISE') {
+      setSelectedExercise(cmd.exerciseId);
+      return true;
+    }
+    if (cmd.type === 'RETRY') {
+      handleReset();
+      return true;
+    }
+    if (cmd.type === 'SOUND_UNLOCK' && !soundEnabled) {
+      handleToggleSound();
+      return true;
+    }
+    if (cmd.type === 'EXIT') {
+      onBack?.();
+      return true;
+    }
+    return false;
+  });
 
   const getVisibilityHint = (visibility: VisibilityStatus): string => {
     switch (visibility) {

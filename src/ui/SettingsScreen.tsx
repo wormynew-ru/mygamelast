@@ -4,10 +4,11 @@
  */
 
 import { useState } from 'react';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { ArrowLeft, Mic, Trash2 } from 'lucide-react';
 import { useGameStore } from '../game/store';
 import { AVAILABLE_LANGUAGES } from '../i18n';
 import { useTranslation } from '../i18n/useTranslation';
+import { useVoiceControl } from './VoiceControl';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -19,6 +20,7 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
   const settings = useGameStore((state) => state.settings);
   const updateSettings = useGameStore((state) => state.updateSettings);
   const resetGame = useGameStore((state) => state.resetGame);
+  const { snapshot: voiceSnapshot, toggleVoiceControl } = useVoiceControl();
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
@@ -100,6 +102,43 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
             >
               {settings.voiceEnabled ? t('settings.audioOn') : t('settings.audioOff')}
             </button>
+          </div>
+
+          {/* Hands-Free Voice Control */}
+          <div className="p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+                  <Mic className="w-4 h-4 text-emerald-400" />
+                  <span>{t('voiceCtrl.label')}</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">{t('voiceCtrl.desc')}</p>
+              </div>
+              {voiceSnapshot.supported ? (
+                <button
+                  onClick={toggleVoiceControl}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                    settings.voiceControlEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  }`}
+                >
+                  {settings.voiceControlEnabled ? t('settings.audioOn') : t('settings.audioOff')}
+                </button>
+              ) : (
+                <span className="text-xs text-amber-400">{t('voiceCtrl.unsupported')}</span>
+              )}
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-1 text-xs text-slate-300">
+              <div className="font-semibold text-slate-200 mb-1.5">
+                {t('voiceCtrl.commandsTitle')}
+              </div>
+              <div>{t('voiceCtrl.cmdBattle')}</div>
+              <div>{t('voiceCtrl.cmdNav')}</div>
+              <div>{t('voiceCtrl.cmdExercises')}</div>
+              <div>{t('voiceCtrl.cmdLoadout')}</div>
+            </div>
           </div>
 
           {/* Camera Facing Mode */}

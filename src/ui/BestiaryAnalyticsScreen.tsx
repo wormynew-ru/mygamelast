@@ -20,6 +20,7 @@ import {
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
 } from './gameKeys';
+import { useVoiceCommandHandler } from './VoiceControl';
 
 interface BestiaryAnalyticsScreenProps {
   onBack: () => void;
@@ -54,6 +55,22 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
   const { t } = useTranslation();
   const [period, setPeriod] = useState<AnalyticsPeriod>('WEEK');
   const [chartMetric, setChartMetric] = useState<AnalyticsChartMetric>('VOLUME');
+
+  useVoiceCommandHandler((cmd) => {
+    if (cmd.type === 'ANALYTICS_PERIOD') {
+      setPeriod(cmd.period);
+      return true;
+    }
+    if (cmd.type === 'ANALYTICS_METRIC') {
+      setChartMetric(cmd.metric);
+      return true;
+    }
+    if (cmd.type === 'EXIT') {
+      onBack();
+      return true;
+    }
+    return false;
+  });
 
   const workoutStats = useGameStore((state) => state.workoutStats);
   const exerciseTotals = useGameStore((state) => state.exerciseTotals);
