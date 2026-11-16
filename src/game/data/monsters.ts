@@ -95,6 +95,23 @@ export const MONSTERS: Record<string, MonsterTemplate> = {
     description: 'Crispy ambush fries striking at double speed.',
   },
 
+  MILKSHAKE: {
+    id: 'MILKSHAKE',
+    name: 'Sugar Shake',
+    maxHp: 52,
+    attack: 9,
+    defense: 2,
+    xpReward: 28,
+    coinReward: 25,
+    isBoss: false,
+    archetype: 'FAST',
+    weakTo: 'OVERHEAD_PRESS',
+    resistantTo: 'PLANK',
+    attackIntervalMs: 5000,
+    sprite: '🍨',
+    description: 'Whipped dessert tornado vulnerable to overhead presses.',
+  },
+
   DONUT: {
     id: 'DONUT',
     name: 'Sugary Donut',
@@ -111,6 +128,24 @@ export const MONSTERS: Record<string, MonsterTemplate> = {
     maxShieldHits: 2,
     sprite: '🍩',
     description: 'A sticky donut protected by thick sugar glaze.',
+  },
+
+  NACHOS: {
+    id: 'NACHOS',
+    name: 'Crunchy Nachos',
+    maxHp: 58,
+    attack: 9,
+    defense: 3,
+    xpReward: 32,
+    coinReward: 30,
+    isBoss: false,
+    archetype: 'ARMORED',
+    weakTo: 'WALL_SIT',
+    resistantTo: 'JUMPING_JACK',
+    shieldHits: 2,
+    maxShieldHits: 2,
+    sprite: '🌮',
+    description: 'Spiky tortilla fortress cracked by isometric leg endurance.',
   },
 
   BURGER: {
@@ -139,10 +174,10 @@ export const MONSTERS: Record<string, MonsterTemplate> = {
     coinReward: 32,
     isBoss: false,
     archetype: 'TOXIC',
-    weakTo: 'PUSH_UP',
+    weakTo: 'ARM_HOLD',
     resistantTo: 'JUMPING_JACK',
     sprite: '🌶️',
-    description: 'A scorching pepper spirit that weakens unblocked heroes.',
+    description: 'A scorching pepper spirit best tamed by steady arm holds.',
   },
 
   PIZZA: {
@@ -201,7 +236,9 @@ export const MONSTERS: Record<string, MonsterTemplate> = {
 const ENDLESS_REGULAR_POOL: MonsterTemplate[] = [
   MONSTERS.SODA,
   MONSTERS.FRIES,
+  MONSTERS.MILKSHAKE,
   MONSTERS.DONUT,
+  MONSTERS.NACHOS,
   MONSTERS.BURGER,
   MONSTERS.HOT_SAUCE,
   MONSTERS.PIZZA,

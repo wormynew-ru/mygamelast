@@ -96,7 +96,7 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 
 ### 6.1 What's Already Implemented ✅
 
-#### **Vision System (100% complete, 111 tests)**
+#### **Vision System (100% complete, 122 tests)**
 - ✅ `src/vision/types.ts` — Base interfaces (`ExerciseDetector` with optional `worldLandmarks`, `ExerciseState`, `PoseLandmark` enum, rep & hold support)
 - ✅ `src/vision/angleMath.ts` — Zero-allocation 2D/3D vector math utilities (angles 2D/3D, EMA smoothing, hysteresis, distances) + 32 tests
 - ✅ `src/vision/PoseTracker.ts` — Camera capture (`frameRate: { ideal }` 30/60 FPS), MediaPipe PoseLandmarker (`pose_landmarker_lite`, up to 60 FPS target with duplicate-frame `video.currentTime` guard, vsync jitter tolerance, adaptive inference throttling, GPU→CPU delegate fallback, batched `alpha: false` canvas skeleton rendering, `worldLandmarks` forwarding, StrictMode `lifecycleToken` cancellation & `srcObject` ownership guard), local `/mediapipe/` loading with CDN fallback + 12 tests
@@ -104,44 +104,51 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 - ✅ `src/vision/exercises/PushUpDetector.ts` — Push-up detector (hysteresis side switching, 3D `worldLandmarks` angle support, frame-0 EMA init, FSM) + 13 tests
 - ✅ `src/vision/exercises/PlankDetector.ts` — Hold-based plank detector (`isHolding`, `holdDurationMs`, hysteresis side switching, frame-0 EMA init, 3D `worldLandmarks` support, grace period) + 17 tests
 - ✅ `src/vision/exercises/JumpingJackDetector.ts` — Rep-based jumping jack detector (bilateral arm abduction + normalized leg spread ratio, zero-allocation visibility checks) + 6 tests
-- ✅ `src/vision/exercises/index.ts` — Detector registry (exports all 4 detectors)
+- ✅ `src/vision/exercises/ArmHoldDetector.ts` — Hold-based T-pose / lateral dumbbell raise hold detector (front-facing bilateral shoulder abduction + straight-arm check + grace period) + 4 tests
+- ✅ `src/vision/exercises/WallSitDetector.ts` — Hold-based wall sit detector (side-view auto-selection + 3D `worldLandmarks` knee-angle validation + grace period) + 4 tests
+- ✅ `src/vision/exercises/OverheadPressDetector.ts` — Rep-based overhead shoulder press detector (bilateral elbow lockout + wrist-above-shoulder validation + FSM with hysteresis) + 3 tests
+- ✅ `src/vision/exercises/index.ts` — Detector registry (exports all 7 detectors)
 
 #### **Audio System (100% complete, 10 tests)**
 - ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (8 synthesized sounds incl. `WARNING` two-tone strike alert, NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
 
-#### **Game System (100% complete, 41 tests)**
-- ✅ `src/game/types.ts` — RPG, WorkoutStats, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, and `ExerciseCalibrationSettings` interfaces
-- ✅ `src/game/CombatEngine.ts` — Damage calculation, Tempo Combo streaks (`getComboMultiplier`, `COMBO_WINDOW_BASE_MS`), exercise matchups (`getExerciseMatchup`, `getMatchupMultiplier`), enemy shield mitigation, Boss Phase 1 Grease Shield (`applyBossPhaseTransition`), Toxic debuff (`TOXIC_DEBUFF_DAMAGE_MULTIPLIER`), Battle Rank (`calculateBattleRank`), kcal estimation (`estimateWorkoutKcal`), counter-attacks + Plank hold blocking, equipment bonuses (`comboWindowBonusMs`), consumable healing, loot drops + 41 tests
-- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 5`, backwards-compatible `v0–v5` `migrateGameState`), `targetPoseFps: 30 | 60` setting (default `60`), Fit-Coins economy (`addCoins`, `spendCoins`, `buyItem`), daily quest claims (`claimDailyQuest`), 7-day streak tracking, 30-day activity history, Bestiary tracking (`recordMonsterBestiary`), Endless Arena records (`updateEndlessProgress`), 11-achievement sync, per-exercise calibration, language hydration sync
-- ✅ `src/game/data/` — `exercises.ts` (4 exercises), `monsters.ts` (8 monsters across 4 archetypes `FAST`/`ARMORED`/`TOXIC`/`BOSS` + `createEndlessWaveMonster`), `items.ts` (10 items across `COMMON`/`RARE`/`EPIC`/`LEGENDARY` rarities + `SHOP_ITEM_IDS`), `levels.ts` (5 progressive campaign stages + drop tables), `dailyQuests.ts` (deterministic local-date Daily Quests & Streak helpers), `achievements.ts` (11 achievements + pure `evaluateNewAchievements`)
+#### **Game System (100% complete, 47 tests)**
+- ✅ `src/game/types.ts` — RPG, `EquipmentLoadout`, `WorkoutStats` (incl. `totalTonnageKg`, `circuitsCompleted`, `totalEstimatedKcal`, `totalDurationSec`, `totalCoinsEarned`), `DailyActivityEntry` (with per-exercise breakdown, `circuitsCompleted`, `durationSec`), Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, and `ExerciseCalibrationSettings` interfaces
+- ✅ `src/game/CombatEngine.ts` — Damage calculation, Dumbbell Loadout scaling (`getLoadoutDamageMultiplier` up to `×1.6`, `getLoadoutXpMultiplier` up to `×1.3`, `calculateTonnageDelta`), Ultimate Overdrive (`calculateUltimateChargeGain`, `ULTIMATE_CHARGE_MAX = 100`, `ULTIMATE_DAMAGE_MULTIPLIER = 1.8`), Tempo Combo streaks, exercise matchups, enemy shield mitigation, Boss Phase 1 Grease Shield, Toxic debuff, Battle Rank, weight-adjusted `estimateWorkoutKcal`, counter-attacks + hold blocking, equipment bonuses, consumable healing, loot drops + 45 tests
+- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 7`, backwards-compatible `v0–v7` `migrateGameState`), `loadout` state + `setLoadout`, `targetPoseFps: 30 | 60` setting, Fit-Coins economy, daily quest claims, 7-day streak tracking, 400-day activity history (incl. per-exercise volume, `tonnageKg`, `circuitsCompleted`, `durationSec`), Bestiary tracking, Endless Arena records, 14-achievement sync, 7-exercise calibration, language hydration sync
+- ✅ `src/game/data/` — `exercises.ts` (7 exercises + `supportsDumbbellWeight`), `monsters.ts` (10 monsters across 4 archetypes incl. `MILKSHAKE` & `NACHOS`), `circuits.ts` (3 presets: `UPPER_IRON`, `STATIC_GAUNTLET`, `FULL_BODY_BLITZ`), `items.ts` (10 items across 4 rarities + `SHOP_ITEM_IDS`), `levels.ts` (5 campaign stages), `dailyQuests.ts`, `achievements.ts` (14 achievements + pure `evaluateNewAchievements`), `analytics.ts` (period workout aggregation across `TODAY` / `WEEK` / `MONTH` / `YEAR` / `ALL` + 2 tests)
 
-#### **Session Layer (100% complete, 13 tests)**
-- ✅ `src/session/WorkoutSession.ts` — Coordinator (CV→Exercise→Combat→Audio→Store glue), `startToken` async cancellation on unmount/stop, tempo combo window & decay tracking, matchup & shield & Boss Phase 1 Grease Shield handling, Toxic debuff application & Plank-block cleanse, Fit-Coins & Battle Rank (`S/A/B/C`) & `~kcal` summary, Bestiary encounter/defeat tracking, Endless Arena wave reset support without tearing down camera, ~100ms steady-state HUD throttling, `worldLandmarks` forwarding, localized camera/MediaPipe error mapping, rep & 1s hold-tick damage, counter-attack timer & 1.5s warning telegraph, Screen Wake Lock, auto-pause, audio unlock API + 13 tests
+#### **Session Layer (100% complete, 16 tests)**
+- ✅ `src/session/WorkoutSession.ts` — Coordinator (`CAMPAIGN` | `ENDLESS` | `CIRCUIT`), `advanceCircuitRoom()` mid-run switching without restarting camera, Ultimate Overdrive `0..100%` charge & stun (resets enemy attack windup), universal static hold block & 3-tick Toxic debuff cleanse (`debuffCleansedId`), dumbbell tonnage/kcal/duration tracking, Circuit clear bonus coins/XP/loot chest, `startToken` async cancellation, Screen Wake Lock, auto-pause, audio unlock API + 16 tests
 
 #### **Localization Layer (100% complete)**
-- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries (type-checked `TranslationKey`) covering Junk Slayer 2.0 combat, shop, daily quests, streaks, bestiary analytics, Endless Arena, and PWA
+- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries covering all Junk Slayer 3.0 features (loadouts, tonnage, 3 new exercises, 2 new monsters, 3 circuits, Ultimate Overdrive, 3 new achievements)
 - ✅ `src/i18n/index.ts` & `src/i18n/useTranslation.ts` — Translation helpers & React hook synced with Zustand store
 
 #### **PWA & Offline Assets (100% complete)**
-- ✅ `vite.config.ts` & `src/main.tsx` — `vite-plugin-pwa` with Web App Manifest (`id: '/'`, `display: 'standalone'`), `registerSW({ immediate: true })`, `CacheFirst` Service Worker caching for `/mediapipe/`, fonts, and CDN fallbacks
+- ✅ `vite.config.ts` & `src/main.tsx` — `vite-plugin-pwa` with Web App Manifest, `registerSW({ immediate: true })`, `CacheFirst` Service Worker caching for `/mediapipe/`, fonts, and CDN fallbacks
 - ✅ `public/mediapipe/` — Locally bundled `pose_landmarker_lite.task` (5.6 MB) and all 6 `@mediapipe/tasks-vision` WASM/JS runtime files for offline execution
 - ✅ `public/icon.svg`, `public/pwa-192x192.png`, `public/pwa-512x512.png`, `public/pwa-maskable-512x512.png`, `public/apple-touch-icon.png` — Complete multi-platform PWA & iOS icon set
 - ✅ `src/ui/PWAInstallButton.tsx` — In-app Chromium install prompt (`beforeinstallprompt`), iOS Safari installation modal, and `OfflineIndicator`
 
-#### **UI Layer (Complete Junk Slayer 2.0 RPG, Shop, Modes & Metagame)**
-- ✅ `src/ui/gameKeys.ts` — Shared lookup dictionary mapping game item/monster/exercise/archetype/rarity/achievement IDs to i18n keys
-- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (Fit-Coins, effective stats, Endless record), Daily Quests & 7-day Streak calendar strip with rewards, PWA install CTA, 11-badge Achievements grid, navigation to Campaign/Endless, Inventory/Shop, Bestiary/Analytics, Calibration, Settings
-- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena` selector, monster archetypes & weaknesses preview, 4-exercise selector
+#### **UI Layer (Complete Junk Slayer 3.0 RPG, Loadouts, Circuits & Analytics)**
+- ✅ `src/ui/gameKeys.ts` — Shared lookup dictionary mapping all 7 exercises, 10 monsters, 3 circuits, 10 items, and 14 achievements to i18n keys
+- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (with Total Tonnage & Circuits Completed), Daily Quests & 7-day Streak calendar strip, PWA install CTA, 14-badge Achievements grid
+- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena | Circuit Dungeon` selector, Bodyweight vs Dumbbell (`1..15 kg` per hand) Loadout switcher, 7-exercise picker, 3 Circuit cards
 - ✅ `src/ui/InventoryScreen.tsx` — Segmented `Bag | Shop` tabs with Fit-Coins, 4-tier rarity labels, equipment equip/unequip, consumables (used strictly between battles)
-- ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — 7-day workout bar chart, `~kcal` estimate, streak summary, per-exercise totals, and 8-monster Bestiary with unlocked weaknesses/resistances
+- ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — Multi-period workout analytics (`TODAY`, `WEEK`, `MONTH`, `YEAR`, `ALL`) with KPI grid (`~kcal`, reps, hold seconds, tonnage, wins, circuits, coins, battle time), Volume/Calories/Tonnage chart metric toggle, per-exercise breakdown across 7 exercises, lifetime records, and 10-monster Bestiary
 - ✅ `src/ui/SettingsScreen.tsx` — RU/EN language switcher, Sound/Voice toggles, Front/Rear camera selector, Pose Detection FPS (`30 FPS | 60 FPS`) selector, in-app reset confirmation modal
-- ✅ `src/ui/BattleScreen.tsx` — Live CV battle HUD with Tempo Combo meter/decay bar, Matchup indicator, Enemy Shield counter, Toxic debuff indicator, 1.5s counter-attack wind-up warning, Plank block/damage popups, boss phase alerts, Victory Rank `S/A/B/C` + Fit-Coins + `~kcal` summary, and seamless multi-wave Endless Arena progression (`Next Wave` vs `Bank Loot & Exit`)
-- ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 4 detectors) with persistent live angle-threshold sliders and localized camera error handling
-- ✅ `src/App.tsx` — Root screen router (`MENU`, `LEVEL_SELECT`, `INVENTORY`, `BESTIARY`, `SETTINGS`, `CALIBRATION`, `BATTLE`) + global `OfflineIndicator`
+- ✅ `src/ui/BattleScreen.tsx` — Live CV battle HUD with Tempo Combo meter, Ultimate Overdrive bar (`0..100%`), Dumbbell Loadout badge, universal static hold block & 3s Toxic cleanse indicator, Circuit room rest countdown (`advanceCircuitRoom()` keeping camera alive), Victory Rank `S/A/B/C` + Fit-Coins + Tonnage + `~kcal` summary
+- ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 7 detectors) with persistent live angle-threshold sliders
+- ✅ `src/App.tsx` — Root screen router + global `OfflineIndicator`
+
+#### **Documentation**
+- ✅ `README.md` — Comprehensive Russian technical & user guide
+- ✅ `ROADMAP.md` — Persistent feature roadmap (v1.0–v3.0 complete, post-v3.0 backlog)
 
 ### 6.2 Test Coverage Summary
 
-**Total: 175/175 tests passing across 9 test files (100% ✅)**
+**Total: 195/195 tests passing across 13 test files (100% ✅)**
 
 | File | Tests | Status |
 |------|-------|--------|
@@ -150,19 +157,27 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 | `PushUpDetector.test.ts` | 13 | ✅ Pass |
 | `PlankDetector.test.ts` | 17 | ✅ Pass |
 | `JumpingJackDetector.test.ts` | 6 | ✅ Pass |
+| `ArmHoldDetector.test.ts` | 4 | ✅ Pass |
+| `WallSitDetector.test.ts` | 4 | ✅ Pass |
+| `OverheadPressDetector.test.ts` | 3 | ✅ Pass |
 | `PoseTracker.test.ts` | 12 | ✅ Pass |
 | `SoundFX.test.ts` | 10 | ✅ Pass |
-| `CombatEngine.test.ts` | 41 | ✅ Pass |
-| `WorkoutSession.test.ts` | 13 | ✅ Pass |
+| `CombatEngine.test.ts` | 45 | ✅ Pass |
+| `analytics.test.ts` | 2 | ✅ Pass |
+| `WorkoutSession.test.ts` | 16 | ✅ Pass |
 
 ### 6.3 What's NOT Implemented Yet ❌
 
-#### **Future Polish / Optional Enhancements:**
+#### **Future Polish / Post-v3.0 Roadmap (see `ROADMAP.md`):**
 - ⏳ Automated E2E synthetic webcam stream tests (real-time MediaPipe pose injection in Playwright CI)
+- ⏳ Multi-set Workout Programs / Personal Records / Training Log Export (JSON/CSV)
 
 ### 6.4 File Structure Snapshot
 
 ```
+README.md                            ✅ User & developer guide (RU)
+ROADMAP.md                           ✅ Persistent project roadmap
+
 public/
 ├── apple-touch-icon.png             ✅ 180x180 iOS home screen icon
 ├── icon.svg                         ✅ Brand vector icon
@@ -174,34 +189,37 @@ public/
     └── wasm/                        ✅ 6 local WASM/JS runtime files
 
 src/
-├── vision/                          ✅ Complete (111 tests)
+├── vision/                          ✅ Complete (122 tests)
 │   ├── types.ts                    ✅ Interfaces (ExerciseDetector, rep/hold types)
-│   ├── angleMath.ts                ✅ Math utils (32 tests)
-│   ├── angleMath.test.ts           ✅
-│   ├── PoseTracker.ts              ✅ Camera + local MediaPipe + CDN fallback + 30/60 FPS + StrictMode safety (12 tests)
-│   ├── PoseTracker.test.ts         ✅
+│   ├── angleMath.ts / .test.ts     ✅ Math utils (32 tests)
+│   ├── PoseTracker.ts / .test.ts   ✅ Camera + local MediaPipe + CDN fallback + 30/60 FPS + StrictMode safety (12 tests)
 │   └── exercises/
-│       ├── index.ts                ✅ Registry (4 detectors)
-│       ├── SquatDetector.ts / .test.ts       ✅ (31 tests)
-│       ├── PushUpDetector.ts / .test.ts      ✅ (13 tests)
-│       ├── PlankDetector.ts / .test.ts       ✅ (17 tests)
-│       └── JumpingJackDetector.ts / .test.ts ✅ (6 tests)
+│       ├── index.ts                ✅ Registry (7 detectors)
+│       ├── SquatDetector.ts / .test.ts         ✅ (31 tests)
+│       ├── PushUpDetector.ts / .test.ts        ✅ (13 tests)
+│       ├── PlankDetector.ts / .test.ts         ✅ (17 tests)
+│       ├── JumpingJackDetector.ts / .test.ts   ✅ (6 tests)
+│       ├── ArmHoldDetector.ts / .test.ts       ✅ (4 tests)
+│       ├── WallSitDetector.ts / .test.ts       ✅ (4 tests)
+│       └── OverheadPressDetector.ts / .test.ts ✅ (3 tests)
 │
-├── session/                         ✅ Complete (13 tests)
-│   ├── WorkoutSession.ts           ✅ Coordinator, startToken cancel, combos/matchups/shields/debuffs, Endless waves, counter-attacks
+├── session/                         ✅ Complete (16 tests)
+│   ├── WorkoutSession.ts           ✅ Coordinator (Campaign/Endless/Circuit), Overdrive stun, Toxic cleanse, tonnage, counter-attacks
 │   └── WorkoutSession.test.ts      ✅
 │
-├── game/                            ✅ Complete (41 tests)
-│   ├── types.ts                    ✅ RPG, Combo, Rank, Economy, DailyQuests, Streaks, Bestiary, Endless, Calibration & Achievement interfaces
-│   ├── CombatEngine.ts / .test.ts  ✅ Combat, combos, matchups, shields, boss transitions, toxic debuff, ranks, kcal, counter-attacks, gear, consumables (41 tests)
-│   ├── store.ts                    ✅ Zustand v5 persist + backwards-compatible v0–v5 migration + Map serializer
+├── game/                            ✅ Complete (47 tests)
+│   ├── types.ts                    ✅ RPG, Loadout, Tonnage, Combo, Rank, Economy, DailyQuests, Streaks, Bestiary, Endless, Calibration & Achievement interfaces
+│   ├── CombatEngine.ts / .test.ts  ✅ Combat, loadouts, tonnage, Overdrive, combos, matchups, shields, boss transitions, toxic debuff, ranks, kcal, counter-attacks, gear, consumables (45 tests)
+│   ├── store.ts                    ✅ Zustand v7 persist + backwards-compatible v0–v7 migration + 400-day dailyHistory + Map serializer
 │   └── data/
-│       ├── exercises.ts            ✅ 4 exercises (rep/hold)
-│       ├── monsters.ts             ✅ 8 monsters (4 archetypes) + createEndlessWaveMonster
+│       ├── exercises.ts            ✅ 7 exercises (rep/hold + dumbbell support)
+│       ├── monsters.ts             ✅ 10 monsters (4 archetypes) + createEndlessWaveMonster
+│       ├── circuits.ts             ✅ 3 Circuit Dungeon presets
 │       ├── items.ts                ✅ 10 items (4 rarities) + SHOP_ITEM_IDS
 │       ├── levels.ts               ✅ 5 campaign stages + drop tables
 │       ├── dailyQuests.ts          ✅ Deterministic Daily Quests & 7-day Streak calendar helpers
-│       └── achievements.ts         ✅ 11 achievements + pure evaluator
+│       ├── achievements.ts         ✅ 14 achievements + pure evaluator
+│       └── analytics.ts / .test.ts ✅ Multi-period workout analytics aggregator (Today/7d/Month/Year/All) (2 tests)
 │
 ├── audio/                           ✅ Complete (10 tests)
 │   ├── SoundFX.ts                  ✅ 8 synthesized sounds (incl. WARNING) + unlock check + speak()
@@ -213,15 +231,15 @@ src/
 │   ├── ru.ts                       ✅ Primary Russian translations
 │   └── en.ts                       ✅ Secondary English translations
 │
-└── ui/                              ✅ Complete Junk Slayer 2.0 RPG & PWA UI Flow
-    ├── gameKeys.ts                 ✅ Shared entity/archetype/rarity i18n lookup dictionary
-    ├── MainMenu.tsx                ✅ Hero profile, Fit-Coins, Daily Quests & 7-day Streak strip, 11-item Achievements, PWA CTA
-    ├── LevelSelectScreen.tsx       ✅ Segmented Campaign & Endless Arena selector + archetype/weakness badges
+└── ui/                              ✅ Complete Junk Slayer 3.0 RPG & PWA UI Flow
+    ├── gameKeys.ts                 ✅ Shared entity/circuit/archetype/rarity i18n lookup dictionary
+    ├── MainMenu.tsx                ✅ Hero profile (Tonnage & Circuits), Fit-Coins, Daily Quests & Streak strip, 14-item Achievements
+    ├── LevelSelectScreen.tsx       ✅ Campaign / Endless Arena / Circuit Dungeons + Bodyweight/Dumbbell Loadout bar + 7 exercises
     ├── InventoryScreen.tsx         ✅ Segmented Bag & Fit-Coins Shop (4 rarities, consumables, gear)
-    ├── BestiaryAnalyticsScreen.tsx ✅ 7-day workout bar chart, ~kcal, exercise totals & 8-monster Bestiary
+    ├── BestiaryAnalyticsScreen.tsx ✅ Multi-period workout analytics (Today/7d/Month/Year/All), KPI grid, metric chart toggle & 10-monster Bestiary
     ├── SettingsScreen.tsx          ✅ Language, audio, camera, 30/60 FPS selector, reset modal
-    ├── BattleScreen.tsx            ✅ Live CV arena, Combo meter, Matchups, Shields, Toxic debuff, Rank S/A/B/C & multi-wave Endless flow
-    ├── CalibrationSandbox.tsx      ✅ Multi-exercise calibration + angle threshold sliders
+    ├── BattleScreen.tsx            ✅ Live CV arena, Combo + Ultimate Overdrive bars, Dumbbell tag, Hold block/cleanse, Circuit room rest countdown
+    ├── CalibrationSandbox.tsx      ✅ 7-exercise calibration + angle threshold sliders
     └── PWAInstallButton.tsx        ✅ Chromium/iOS install prompt + OfflineIndicator
 ```
 
@@ -230,7 +248,7 @@ src/
 ```bash
 ✅ npm run typecheck  — Strict TypeScript, 0 errors
 ✅ npm run lint       — ESLint strict boundaries & no-any, 0 errors / 0 warnings
-✅ npm test           — 175/175 tests passing (9/9 files)
+✅ npm test           — 195/195 tests passing (13/13 files)
 ✅ npm run build      — Clean Vite production build + PWA manifest & Service Worker
 ```
 
@@ -262,19 +280,14 @@ npm run dev
 
 ### 6.9 Session History & Timestamps
 
-**Latest update:** 2026-11-16 09:53 UTC
+**Latest update:** 2026-11-16 11:02 UTC
 
 **Recent work:**
-- ✅ 2026-11-16: Fixed intermittent `Video load timeout` race condition in React StrictMode/camera startup (`WorkoutSession` `startToken` async cancellation, `PoseTracker` `lifecycleToken` + `srcObject` ownership check + `loadedmetadata`/`loadeddata`/`canplay` event listeners, `BattleScreen` disposed guard) and silenced `vite-plugin-pwa` unmatched `dev-dist` glob warning (`devOptions.enabled: false`; `175/175` tests)
-- ✅ 2026-11-16: Upgraded pose inference ceiling to **30 / 60 FPS** (`PoseTracker` requests `frameRate: { ideal }`, defaults to `60 FPS`, checks `video.currentTime` to skip duplicate frames from 30Hz webcams, applies 2ms vsync jitter tolerance with adaptive backoff; `SettingsScreen` adds `30 FPS | 60 FPS` toggle; `store.ts` `v5` persists `targetPoseFps`; 173/173 tests)
-- ✅ 2026-11-16: Implemented **Junk Slayer 2.0** expansion:
-  - **Combat Depth**: Tempo Combo streaks (`x1.0 → x1.25 → x1.5 → x2.0`) with item-extendable combo decay window, exercise matchups (`weakTo` 1.5x / `resistantTo` 0.75x), 4 monster archetypes (`FAST`, `ARMORED`, `TOXIC`, `BOSS`), enemy shields & Boss Phase 1 Grease Shield (`applyBossPhaseTransition`), Toxic debuff (`-25%` damage when unblocked, cleared by Plank block), and Battle Rank (`S/A/B/C`) + `~kcal` calculation.
-  - **Game Modes**: Endless Arena (`ENDLESS`) with scaling waves, Boss every 5th wave, seamless `Next Wave` vs `Bank Loot & Exit` without restarting camera, and deterministic local-date Daily Quests.
-  - **RPG Economy & Gear**: Fit-Coins rewards & `Bag | Shop` in `InventoryScreen`, `COMMON`/`RARE`/`EPIC`/`LEGENDARY` rarities, and 5 new items (`ISOTONIC_FLASK`, `MEGA_RECOVERY_SMOOTHIE`, `FITNESS_WRISTBANDS`, `TITANIUM_DUMBBELLS`, `CHAMPION_BELT`) with Zustand `v4` backwards-compatible migration.
-  - **Metagame & Analytics**: 7-day Workout Streaks + calendar strip, 8-monster Bestiary & 7-day bar chart + per-exercise breakdown (`BestiaryAnalyticsScreen`), 3 new monsters (`FRIES`, `HOT_SAUCE`, `BOSS_PIZZA_EMPEROR`), and 4 new achievements (11 total).
-  - Verified cleanly via `typecheck`, `lint`, `vitest` (172/172), `vite build`, and live headless Chromium inspection across desktop (`1440x900`) and mobile (`390x844`).
-- ✅ 2026-11-15: Optimized pose recognition and game runtime (`PoseTracker` batched skeleton rendering, adaptive throttling, GPU→CPU fallback, `worldLandmarks` 3D pipeline; detector bilateral/hysteresis improvements; zero-alloc `angle3D`/`JumpingJackDetector`; `WorkoutSession` throttled HUD; 164/164 tests)
-- ✅ 2026-11-15: Implemented 1.5s enemy/boss attack wind-up telegraph (`ATTACK_WARNING_WINDOW_MS`, `SoundFX` `'WARNING'`, `BattleScreen` warning HUD) and integrated offline PWA + local MediaPipe assets
+- ✅ 2026-11-16: Added full **Time-Period Workout Analytics** (`Сегодня` / `7 дней` / `Месяц` / `Год` / `Всё время`):
+  - **Analytics Engine (`src/game/data/analytics.ts`)**: Pure aggregation across `TODAY`, `WEEK` (7d), `MONTH` (30d), `YEAR` (12m), and `ALL` (lifetime totals + monthly timeline) covering reps, hold seconds, `~kcal`, tonnage, wins, circuits, Fit-Coins, battle duration, active days, and per-exercise breakdowns across all 7 exercises.
+  - **Store v7 Persistence (`src/game/store.ts` & `src/session/WorkoutSession.ts`)**: Extended `dailyHistory` retention to 400 days with per-day `exercises`, `circuitsCompleted`, and `durationSec` logging; added `totalEstimatedKcal`, `totalDurationSec`, and `totalCoinsEarned` to `workoutStats` (`v0–v7` migration).
+  - **UI (`src/ui/BestiaryAnalyticsScreen.tsx`)**: Added period switcher tabs, 8-tile KPI grid, Volume/Calories/Tonnage chart metric toggle, Today per-exercise horizontal bars, 7d/30d/12m/All-Time charts with responsive X-axis ticks, period-scoped 7-exercise breakdown, and lifetime records. Verified visually across desktop `1440x900` & mobile `390x844` with `195/195` tests passing.
+- ✅ 2026-11-16: Saved persistent project roadmap in `ROADMAP.md` and implemented full **Junk Slayer 3.0** expansion (`193/193` tests).
 
 **Next session priorities:**
 1. Consider E2E Playwright mock-stream harness for automated CV battle regression testing

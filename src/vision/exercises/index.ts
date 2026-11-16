@@ -16,3 +16,12 @@ export type { PlankConfig } from './PlankDetector';
 
 export { JumpingJackDetector } from './JumpingJackDetector';
 export type { JumpingJackConfig } from './JumpingJackDetector';
+
+export { ArmHoldDetector } from './ArmHoldDetector';
+export type { ArmHoldConfig } from './ArmHoldDetector';
+
+export { WallSitDetector } from './WallSitDetector';
+export type { WallSitConfig } from './WallSitDetector';
+
+export { OverheadPressDetector } from './OverheadPressDetector';
+export type { OverheadPressConfig } from './OverheadPressDetector';

@@ -1,5 +1,5 @@
 /**
- * CalibrationSandbox - Test & calibration screen for all 4 exercise detectors.
+ * CalibrationSandbox - Test & calibration screen for all 7 exercise detectors.
  * Supports live angle threshold tuning persisted in Zustand store
  * and applied across both calibration and live battles.
  */
@@ -14,6 +14,7 @@ import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import type { ExerciseCalibrationSettings } from '../game/types';
 import { useGameStore } from '../game/store';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
+import { EXERCISE_NAME_KEYS } from './gameKeys';
 
 interface CalibrationSandboxProps {
   onBack?: () => void;
@@ -56,13 +57,27 @@ const EXERCISE_THRESHOLD_DESCRIPTORS: Record<ExerciseId, ThresholdDescriptor> = 
     max: 155,
     step: 5,
   },
-};
-
-const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
-  SQUAT: 'exercise.SQUAT.name',
-  PUSH_UP: 'exercise.PUSH_UP.name',
-  PLANK: 'exercise.PLANK.name',
-  JUMPING_JACK: 'exercise.JUMPING_JACK.name',
+  ARM_HOLD: {
+    field: 'armHoldMinShoulderAngle',
+    labelKey: 'calibration.armHoldMinShoulderAngle',
+    min: 50,
+    max: 85,
+    step: 5,
+  },
+  WALL_SIT: {
+    field: 'wallSitMaxKneeAngle',
+    labelKey: 'calibration.wallSitMaxKneeAngle',
+    min: 95,
+    max: 135,
+    step: 5,
+  },
+  OVERHEAD_PRESS: {
+    field: 'overheadPressTopAngle',
+    labelKey: 'calibration.overheadPressTopAngle',
+    min: 140,
+    max: 170,
+    step: 5,
+  },
 };
 
 const EXERCISE_FORM_KEYS: Record<ExerciseId, TranslationKey> = {
@@ -70,6 +85,9 @@ const EXERCISE_FORM_KEYS: Record<ExerciseId, TranslationKey> = {
   PUSH_UP: 'calibration.formPushup',
   PLANK: 'calibration.formPlank',
   JUMPING_JACK: 'calibration.formJumpingJack',
+  ARM_HOLD: 'calibration.formArmHold',
+  WALL_SIT: 'calibration.formWallSit',
+  OVERHEAD_PRESS: 'calibration.formOverheadPress',
 };
 
 const PHASE_KEYS: Record<string, TranslationKey> = {
@@ -255,12 +273,12 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const primaryAngle =
     typeof detectorState?.debug?.kneeAngle === 'number'
       ? detectorState.debug.kneeAngle
+      : typeof detectorState?.debug?.armAngle === 'number'
+      ? detectorState.debug.armAngle
       : typeof detectorState?.debug?.elbowAngle === 'number'
       ? detectorState.debug.elbowAngle
       : typeof detectorState?.debug?.bodyAngle === 'number'
       ? detectorState.debug.bodyAngle
-      : typeof detectorState?.debug?.armAngle === 'number'
-      ? detectorState.debug.armAngle
       : 0;
 
   const progress = Math.round((detectorState?.progress ?? 0) * 100);
@@ -308,7 +326,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
               <button
                 key={exId}
                 onClick={() => setSelectedExercise(exId)}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                   selectedExercise === exId
                     ? 'bg-amber-500 text-slate-950'
                     : 'text-slate-400 hover:text-white'
@@ -340,7 +358,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
                   ) : (
                     <div className="text-center space-y-3">
                       <div className="w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
-                      <p className="text-sm text-slate-200 font-numeric">{trackerStatus}</p>
+                      <p className="text-sm text-slate-200">{t('battle.starting')}</p>
                     </div>
                   )}
                 </div>

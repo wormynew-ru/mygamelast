@@ -239,7 +239,7 @@ export const ru = {
 
   // Junk Slayer 2.0 Navigation & Stats
   'menu.bestiary': 'Бестиарий и отчёт',
-  'menu.bestiaryDesc': 'Слабости врагов, рекорды и графики за 7 дней',
+  'menu.bestiaryDesc': 'Статистика: сегодня, 7 дней, месяц, год, всё время',
   'menu.shopAndGear': 'Инвентарь и Магазин',
   'stats.coins': 'Фит-монеты',
   'stats.bestWave': 'Рекорд арены',
@@ -318,7 +318,7 @@ export const ru = {
 
   // Bestiary & Fitness Analytics
   'bestiary.title': 'Бестиарий и статистика',
-  'bestiary.analyticsTitle': 'Активность за 7 дней',
+  'bestiary.analyticsTitle': 'Статистика тренировок',
   'bestiary.kcalApprox': 'Прибл. ккал',
   'bestiary.activeWins': 'Побед',
   'bestiary.exerciseBreakdown': 'Нагрузка по упражнениям',
@@ -327,6 +327,18 @@ export const ru = {
   'bestiary.defeats': 'Побед',
   'bestiary.bestTime': 'Лучшее время',
   'bestiary.unknownWeakness': 'Победите врага, чтобы открыть уязвимость',
+  'bestiary.period.TODAY': 'Сегодня',
+  'bestiary.period.WEEK': '7 дней',
+  'bestiary.period.MONTH': 'Месяц',
+  'bestiary.period.YEAR': 'Год',
+  'bestiary.period.ALL': 'Всё время',
+  'bestiary.metric.VOLUME': 'Объём',
+  'bestiary.metric.KCAL': 'Калории',
+  'bestiary.metric.TONNAGE': 'Тоннаж',
+  'bestiary.activeDays': 'Активных дней',
+  'bestiary.workoutTime': 'Время в бою',
+  'bestiary.recordsTitle': 'Рекорды за всё время',
+  'bestiary.noActivity': 'За этот период пока нет записей тренировок',
 
   // New Achievements
   'achievement.COMBO_MASTER.name': 'Ритм-мастер',
@@ -337,6 +349,68 @@ export const ru = {
   'achievement.STREAK_WARRIOR.description': 'Тренируйтесь 3 дня подряд',
   'achievement.BESTIARY_SCHOLAR.name': 'Охотник',
   'achievement.BESTIARY_SCHOLAR.description': 'Встретьте 5 разных видов монстров',
+  'achievement.IRON_TONNAGE.name': 'Железный тоннаж',
+  'achievement.IRON_TONNAGE.description': 'Поднимите суммарно 500 кг с гантелями',
+  'achievement.STATIC_MASTER.name': 'Монолит',
+  'achievement.STATIC_MASTER.description': 'Наберите 60 секунд в статических удержаниях',
+  'achievement.CIRCUIT_CHAMPION.name': 'Покоритель круга',
+  'achievement.CIRCUIT_CHAMPION.description': 'Пройдите любой Круговой данж до конца',
+
+  // New Monsters & Exercises (Junk Slayer 3.0)
+  'monster.MILKSHAKE.name': 'Сахарный Шейк',
+  'monster.MILKSHAKE.description': 'Взбитый десертный вихрь, уязвимый к жиму над головой.',
+  'monster.NACHOS.name': 'Хрустящие Начос',
+  'monster.NACHOS.description': 'Бронированная тортилья, сдающаяся под статикой ног.',
+  'exercise.ARM_HOLD.name': 'Удержание рук',
+  'exercise.ARM_HOLD.description': 'Разведите прямые руки в стороны (пустые или с гантелями) лицом к камере.',
+  'exercise.WALL_SIT.name': 'Стульчик у стены',
+  'exercise.WALL_SIT.description': 'Статический присед ~90° в коленях (встаньте боком к камере).',
+  'exercise.OVERHEAD_PRESS.name': 'Жим над головой',
+  'exercise.OVERHEAD_PRESS.description': 'Жим гантелей или рук от плеч строго вверх лицом к камере.',
+  'calibration.formArmHold': 'Встаньте лицом к камере, разведите прямые руки на уровень плеч (~90°).',
+  'calibration.formWallSit': 'Встаньте боком и удерживайте угол в колене ~90° с прямой спиной.',
+  'calibration.formOverheadPress': 'Встаньте лицом к камере, выжимайте кисти от плеч высоко над головой.',
+  'calibration.armHoldMinShoulderAngle': 'Мин. угол подъёма рук в удержании',
+  'calibration.wallSitMaxKneeAngle': 'Макс. угол колена в стульчике',
+  'calibration.overheadPressTopAngle': 'Мин. угол локтя в верхней точке',
+
+  // Equipment Loadout & Tonnage
+  'loadout.title': 'Отягощение',
+  'loadout.bodyweight': 'Свой вес (0 кг)',
+  'loadout.dumbbells': 'Гантели',
+  'loadout.weightPerHand': 'Вес на руку',
+  'loadout.kgUnit': 'кг',
+  'loadout.bonusHint': 'На поддерживаемых упражнениях усиливает урон, XP, калории и тоннаж.',
+  'loadout.bodyweightHint': 'Классический режим без дополнительного инвентаря.',
+  'stats.tonnage': 'Тоннаж',
+  'stats.circuits': 'Кругов',
+
+  // Circuit Dungeons
+  'levels.circuitTab': 'Круговой данж',
+  'circuits.title': 'Круговые тренировки',
+  'circuits.subtitle': 'Серия из 3–4 сменных упражнений подряд без остановки камеры. Бонус монет и сундук в финале!',
+  'circuits.roomsCount': 'Комнат',
+  'circuits.startCircuit': 'Начать круг',
+  'circuits.UPPER_IRON.name': 'Стальной верх',
+  'circuits.UPPER_IRON.description': 'Жим над головой → Удержание рук → Отжимания',
+  'circuits.STATIC_GAUNTLET.name': 'Испытание статики',
+  'circuits.STATIC_GAUNTLET.description': 'Стульчик → Удержание рук → Планка',
+  'circuits.FULL_BODY_BLITZ.name': 'Полный круг: Босс-раш',
+  'circuits.FULL_BODY_BLITZ.description': 'Jumping Jacks → Приседания → Жим → Стульчик против Босса',
+
+  // Ultimate Overdrive, Static Synergy & Circuit HUD
+  'battle.ultimate': 'Ульта',
+  'battle.ultimateOverdrive': 'OVERDRIVE! Оглушение',
+  'battle.holdBlockHint': 'Удерживайте стойку для блока',
+  'battle.holdCleanseHint': 'Держите 3 сек — снимет Токсин',
+  'battle.toxicCleansed': 'Токсин очищен статикой!',
+  'battle.roomLabel': 'Комната',
+  'battle.nextRoomReady': 'Комната зачищена!',
+  'battle.nextRoomExercise': 'Следующее упражнение',
+  'battle.nextRoomIn': 'Передышка',
+  'battle.nextRoomNow': 'Дальше сейчас',
+  'battle.circuitCleared': 'КРУГОВОЙ ДАНЖ ПРОЙДЕН!',
+  'battle.tonnageEarned': 'Тоннаж боя',
 } as const;
 
 export type TranslationKey = keyof typeof ru;

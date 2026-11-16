@@ -620,4 +620,143 @@ describe('WorkoutSession', () => {
     expect(tracker.start).not.toHaveBeenCalled();
     expect(session.getStatus().state).toBe('IDLE');
   });
+
+  it('tracks dumbbell tonnage, charges Ultimate Overdrive to 100%, and stuns the enemy', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      const store = useGameStore.getState();
+      store.setLoadout({ mode: 'DUMBBELLS', weightKg: 5 });
+      store.startCombat({ ...createMonster(MONSTERS.MILKSHAKE), hp: 200 });
+
+      const detector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 3, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 4, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 5, progress: 0, visibility: 'VISIBLE' },
+      ]);
+
+      const tracker = createMockTracker();
+      const sound = createMockSoundFX();
+
+      const session = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: detector,
+        exerciseDamageMultiplier: 1.25,
+        exerciseId: 'OVERHEAD_PRESS',
+        poseTracker: tracker,
+        soundFX: sound,
+      });
+
+      await session.start();
+      tracker.triggerPose(1000);
+      tracker.triggerPose(1500);
+      tracker.triggerPose(2000);
+      tracker.triggerPose(2500);
+      tracker.triggerPose(3000);
+      // 4 reps charged meter below 100, enemy attack progress should have built up
+      expect(session.getStatus().ultimateCharge).toBeGreaterThan(0);
+      expect(session.getStatus().nextAttackProgress).toBeGreaterThan(0);
+
+      // 5th rep crosses 100 -> Ultimate Overdrive triggers and resets attack progress (stun)
+      tracker.triggerPose(3500);
+      const status = session.getStatus();
+      expect(status.ultimateCharge).toBe(0);
+      expect(status.ultimateTriggeredCount).toBe(1);
+      expect(status.lastCombatEvent?.wasUltimate).toBe(true);
+      expect(status.nextAttackProgress).toBe(0);
+
+      // 5 reps * (2 * 5kg) = 50 kg total tonnage
+      expect(useGameStore.getState().workoutStats.totalTonnageKg).toBe(50);
+
+      session.stop();
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('cleanses Toxic debuff after 3 consecutive static hold seconds and advances Circuit rooms cleanly', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.HOT_SAUCE), hp: 200 });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE', isHolding: false, holdDurationMs: 0 },
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE', isHolding: false, holdDurationMs: 0 },
+      { phase: 'DOWN', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 1100 },
+      { phase: 'DOWN', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 2100 },
+      { phase: 'DOWN', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 3100 },
+    ]);
+
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 0.9,
+      exerciseId: 'ARM_HOLD',
+      mode: 'CIRCUIT',
+      circuitId: 'UPPER_IRON',
+      circuitRoomIndex: 0,
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    tracker.triggerPose(1000);
+    // Unblocked hit from TOXIC monster applies debuff
+    tracker.triggerPose(8100);
+    expect(session.getStatus().isPlayerDebuffed).toBe(true);
+
+    // Hold 1s, 2s, 3s -> 3rd consecutive hold second cleanses Toxic debuff
+    tracker.triggerPose(9100);
+    expect(session.getStatus().isPlayerDebuffed).toBe(true);
+    tracker.triggerPose(10100);
+    expect(session.getStatus().isPlayerDebuffed).toBe(true);
+    tracker.triggerPose(11100);
+    expect(session.getStatus().isPlayerDebuffed).toBe(false);
+    expect(session.getStatus().debuffCleansedId).toBe(1);
+
+    // Advance circuit directly to final room & finish boss for circuit completion reward
+    const finalEnemy = { ...createMonster(MONSTERS.BURGER), hp: 5 };
+    const finalDetector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    session.advanceCircuitRoom({
+      nextEnemy: finalEnemy,
+      exerciseId: 'PUSH_UP',
+      roomIndex: 2,
+      detector: finalDetector,
+    });
+
+    tracker.triggerPose(12000);
+    tracker.triggerPose(12500);
+    expect(session.getStatus().state).toBe('VICTORY');
+    expect(session.getStatus().victorySummary?.circuitCompleted).toBe(true);
+    expect(useGameStore.getState().workoutStats.circuitsCompleted).toBe(1);
+    expect(useGameStore.getState().unlockedAchievements).toContain('CIRCUIT_CHAMPION');
+
+    session.stop();
+  });
+
+  it('constructs detectors for ARM_HOLD, WALL_SIT, and OVERHEAD_PRESS with custom calibration', () => {
+    const custom = {
+      ...DEFAULT_EXERCISE_CALIBRATION,
+      armHoldMinShoulderAngle: 75,
+      wallSitMaxKneeAngle: 120,
+      overheadPressTopAngle: 165,
+    };
+
+    const armHold = createExerciseDetector('ARM_HOLD', custom);
+    const wallSit = createExerciseDetector('WALL_SIT', custom);
+    const press = createExerciseDetector('OVERHEAD_PRESS', custom);
+
+    expect((armHold.getConfig() as { minShoulderAngle: number }).minShoulderAngle).toBe(75);
+    expect((wallSit.getConfig() as { maxKneeAngle: number }).maxKneeAngle).toBe(120);
+    expect((press.getConfig() as { topAngle: number }).topAngle).toBe(165);
+  });
 });

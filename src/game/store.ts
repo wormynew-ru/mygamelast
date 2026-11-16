@@ -1,7 +1,7 @@
 /**
- * Zustand store for game state with persistence (v4).
- * Handles player stats, inventory, coins, shop, daily quests, streaks,
- * 7/30-day activity history, monster bestiary, endless arena, calibration, and settings.
+ * Zustand store for game state with persistence (v6).
+ * Handles player stats, loadout weight, inventory, coins, shop, daily quests, streaks,
+ * 7/30-day activity history, monster bestiary, endless arena, circuits, calibration, and settings.
  */
 
 import { create } from 'zustand';
@@ -11,6 +11,7 @@ import type {
   DailyActivityEntry,
   DailyQuestState,
   EndlessArenaStats,
+  EquipmentLoadout,
   ExerciseCalibrationSettings,
   ExerciseTotals,
   GameState,
@@ -37,6 +38,9 @@ export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
   pushupBottomAngle: 90,
   plankMinBodyAngle: 160,
   jumpingJackPeakArmAngle: 135,
+  armHoldMinShoulderAngle: 65,
+  wallSitMaxKneeAngle: 115,
+  overheadPressTopAngle: 155,
 };
 
 function createInitialInventory(): Inventory {
@@ -46,12 +50,24 @@ function createInitialInventory(): Inventory {
   };
 }
 
+function createInitialLoadout(): EquipmentLoadout {
+  return {
+    mode: 'BODYWEIGHT',
+    weightKg: 0,
+  };
+}
+
 function createInitialWorkoutStats(): WorkoutStats {
   return {
     totalReps: 0,
     totalHoldSeconds: 0,
     monstersDefeated: 0,
     maxCombo: 0,
+    totalTonnageKg: 0,
+    circuitsCompleted: 0,
+    totalEstimatedKcal: 0,
+    totalDurationSec: 0,
+    totalCoinsEarned: 0,
   };
 }
 
@@ -61,6 +77,9 @@ function createInitialExerciseTotals(): Record<ExerciseId, ExerciseTotals> {
     PUSH_UP: { reps: 0, holdSeconds: 0 },
     PLANK: { reps: 0, holdSeconds: 0 },
     JUMPING_JACK: { reps: 0, holdSeconds: 0 },
+    ARM_HOLD: { reps: 0, holdSeconds: 0 },
+    WALL_SIT: { reps: 0, holdSeconds: 0 },
+    OVERHEAD_PRESS: { reps: 0, holdSeconds: 0 },
   };
 }
 
@@ -94,6 +113,7 @@ function createInitialState(): GameState {
     player: createPlayer(),
     inventory: createInitialInventory(),
     coins: 0,
+    loadout: createInitialLoadout(),
     currentLevel: null,
     unlockedLevels: ['LEVEL_1'],
     completedLevels: [],
@@ -127,7 +147,7 @@ function normalizeDailyQuests(quests: DailyQuestState, todayKey: string): DailyQ
 
 function pruneDailyHistory(
   history: Record<string, DailyActivityEntry>,
-  maxDays: number = 30
+  maxDays: number = 400
 ): Record<string, DailyActivityEntry> {
   const keys = Object.keys(history).sort();
   if (keys.length <= maxDays) {
@@ -159,6 +179,7 @@ interface GameStore extends GameState {
   addCoins: (amount: number) => void;
   spendCoins: (amount: number) => boolean;
   buyItem: (itemId: string) => boolean;
+  setLoadout: (loadout: Partial<EquipmentLoadout>) => void;
 
   unlockLevel: (levelId: string) => void;
   completeLevel: (levelId: string) => void;
@@ -172,6 +193,9 @@ interface GameStore extends GameState {
     exerciseId?: ExerciseId;
     estimatedKcal?: number;
     coinsEarned?: number;
+    tonnageKg?: number;
+    circuitsCompleted?: number;
+    durationSec?: number;
     dateKey?: string;
   }) => void;
   recordMonsterBestiary: (params: {
@@ -207,7 +231,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 5) {
+  if (version >= 0 && version <= 7) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -227,11 +251,16 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
     }
 
     const base = createInitialState();
+    const migratedLoadout: EquipmentLoadout =
+      state.loadout?.mode === 'DUMBBELLS'
+        ? { mode: 'DUMBBELLS', weightKg: Math.max(1, state.loadout.weightKg ?? 2) }
+        : { mode: 'BODYWEIGHT', weightKg: 0 };
 
     return {
       ...base,
       ...state,
       coins: typeof state.coins === 'number' ? state.coins : 0,
+      loadout: migratedLoadout,
       player: {
         ...base.player,
         ...(state.player ?? {}),
@@ -464,6 +493,21 @@ export const useGameStore = create<GameStore>()(
         return true;
       },
 
+      setLoadout: (loadoutUpdate) =>
+        set((state) => {
+          const nextMode = loadoutUpdate.mode ?? state.loadout.mode;
+          if (nextMode === 'BODYWEIGHT') {
+            return {
+              loadout: { mode: 'BODYWEIGHT', weightKg: 0 },
+            };
+          }
+          const rawWeight = loadoutUpdate.weightKg ?? state.loadout.weightKg;
+          const nextWeight = rawWeight > 0 ? rawWeight : 2;
+          return {
+            loadout: { mode: 'DUMBBELLS', weightKg: nextWeight },
+          };
+        }),
+
       unlockLevel: (levelId) =>
         set((state) => {
           if (state.unlockedLevels.includes(levelId)) {
@@ -497,6 +541,9 @@ export const useGameStore = create<GameStore>()(
           const winsDelta = delta.monstersDefeated ?? 0;
           const coinsDelta = delta.coinsEarned ?? 0;
           const kcalDelta = delta.estimatedKcal ?? 0;
+          const tonnageDelta = delta.tonnageKg ?? 0;
+          const circuitsDelta = delta.circuitsCompleted ?? 0;
+          const durationDelta = delta.durationSec ?? 0;
 
           const nextQuests = normalizeDailyQuests(state.dailyQuests, todayKey);
           const updatedDailyQuests: DailyQuestState = {
@@ -513,7 +560,20 @@ export const useGameStore = create<GameStore>()(
             battlesWon: 0,
             coinsEarned: 0,
             estimatedKcal: 0,
+            tonnageKg: 0,
+            circuitsCompleted: 0,
+            durationSec: 0,
+            exercises: {},
           };
+
+          const nextDayExercises = { ...(existingDay.exercises ?? {}) };
+          if (delta.exerciseId && (repsDelta > 0 || holdDelta > 0)) {
+            const prevDayEx = nextDayExercises[delta.exerciseId] ?? { reps: 0, holdSeconds: 0 };
+            nextDayExercises[delta.exerciseId] = {
+              reps: prevDayEx.reps + repsDelta,
+              holdSeconds: prevDayEx.holdSeconds + holdDelta,
+            };
+          }
 
           const updatedDay: DailyActivityEntry = {
             date: todayKey,
@@ -522,6 +582,10 @@ export const useGameStore = create<GameStore>()(
             battlesWon: existingDay.battlesWon + winsDelta,
             coinsEarned: existingDay.coinsEarned + coinsDelta,
             estimatedKcal: Math.round((existingDay.estimatedKcal + kcalDelta) * 10) / 10,
+            tonnageKg: Math.round(((existingDay.tonnageKg ?? 0) + tonnageDelta) * 10) / 10,
+            circuitsCompleted: (existingDay.circuitsCompleted ?? 0) + circuitsDelta,
+            durationSec: (existingDay.durationSec ?? 0) + durationDelta,
+            exercises: nextDayExercises,
           };
 
           const nextExerciseTotals = { ...state.exerciseTotals };
@@ -545,6 +609,13 @@ export const useGameStore = create<GameStore>()(
               totalHoldSeconds: state.workoutStats.totalHoldSeconds + holdDelta,
               monstersDefeated: state.workoutStats.monstersDefeated + winsDelta,
               maxCombo: Math.max(state.workoutStats.maxCombo ?? 0, delta.maxCombo ?? 0),
+              totalTonnageKg:
+                Math.round(((state.workoutStats.totalTonnageKg ?? 0) + tonnageDelta) * 10) / 10,
+              circuitsCompleted: (state.workoutStats.circuitsCompleted ?? 0) + circuitsDelta,
+              totalEstimatedKcal:
+                Math.round(((state.workoutStats.totalEstimatedKcal ?? 0) + kcalDelta) * 10) / 10,
+              totalDurationSec: (state.workoutStats.totalDurationSec ?? 0) + durationDelta,
+              totalCoinsEarned: (state.workoutStats.totalCoinsEarned ?? 0) + coinsDelta,
             },
             exerciseTotals: nextExerciseTotals,
             dailyQuests: updatedDailyQuests,
@@ -681,7 +752,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 5,
+      version: 7,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {

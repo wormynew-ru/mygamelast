@@ -230,7 +230,7 @@ export function MainMenu({
             </div>
 
             {/* Combat & Workout Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-800">
               <div>
                 <div className="text-xs text-slate-400">{t('stats.attack')}</div>
                 <div className="font-numeric text-xl font-bold text-white mt-0.5">
@@ -259,6 +259,13 @@ export function MainMenu({
               </div>
 
               <div>
+                <div className="text-xs text-slate-400">{t('stats.tonnage')}</div>
+                <div className="font-numeric text-lg font-semibold text-amber-300 mt-0.5">
+                  {workoutStats.totalTonnageKg ?? 0} {t('loadout.kgUnit')}
+                </div>
+              </div>
+
+              <div>
                 <div className="text-xs text-slate-400">{t('stats.totalReps')}</div>
                 <div className="font-numeric text-lg font-semibold text-slate-200 mt-0.5">
                   {workoutStats.totalReps}
@@ -269,6 +276,13 @@ export function MainMenu({
                 <div className="text-xs text-slate-400">{t('stats.bestWave')}</div>
                 <div className="font-numeric text-lg font-semibold text-emerald-400 mt-0.5">
                   {endlessStats.bestWave}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs text-slate-400">{t('stats.circuits')}</div>
+                <div className="font-numeric text-lg font-semibold text-sky-400 mt-0.5">
+                  {workoutStats.circuitsCompleted ?? 0}
                 </div>
               </div>
 

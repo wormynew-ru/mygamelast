@@ -1,18 +1,28 @@
 /**
- * LevelSelectScreen - Campaign level & Endless Arena survival mode selector.
- * Shows enemy archetypes, exercise weaknesses/resistances, and lets the player
- * start either a campaign stage or Endless Arena Wave 1.
+ * LevelSelectScreen - Campaign, Endless Arena, and Circuit Dungeon selector
+ * with Bodyweight / Dumbbell Loadout weight configuration.
  */
 
 import { useState } from 'react';
-import { ArrowLeft, Lock, Check, Swords, Infinity as InfinityIcon, Shield } from 'lucide-react';
+import {
+  ArrowLeft,
+  Lock,
+  Check,
+  Swords,
+  Infinity as InfinityIcon,
+  Shield,
+  Dumbbell,
+  Repeat,
+} from 'lucide-react';
 import { LEVELS, type CampaignLevel } from '../game/data/levels';
 import { MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
+import { CIRCUITS, type CircuitId } from '../game/data/circuits';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
   ARCHETYPE_KEYS,
+  CIRCUIT_KEYS,
   EXERCISE_DESC_KEYS,
   EXERCISE_NAME_KEYS,
   MONSTER_DESC_KEYS,
@@ -23,23 +33,29 @@ interface LevelSelectScreenProps {
   onBack: () => void;
   onStartEncounter: (levelId: string, exerciseId: ExerciseId) => void;
   onStartEndless: (exerciseId: ExerciseId) => void;
+  onStartCircuit: (circuitId: CircuitId) => void;
 }
+
+const WEIGHT_PRESETS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
 
 export function LevelSelectScreen({
   onBack,
   onStartEncounter,
   onStartEndless,
+  onStartCircuit,
 }: LevelSelectScreenProps) {
   const { t } = useTranslation();
   const unlockedLevels = useGameStore((state) => state.unlockedLevels);
   const completedLevels = useGameStore((state) => state.completedLevels);
   const endlessStats = useGameStore((state) => state.endlessStats);
+  const loadout = useGameStore((state) => state.loadout);
+  const setLoadout = useGameStore((state) => state.setLoadout);
 
   const defaultLevel =
     LEVELS.find((lvl) => unlockedLevels.includes(lvl.id) && !completedLevels.includes(lvl.id)) ??
     LEVELS[0];
 
-  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS'>('CAMPAIGN');
+  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT'>('CAMPAIGN');
   const [selectedLevelId, setSelectedLevelId] = useState<string>(defaultLevel.id);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseId>(
     defaultLevel.recommendedExercise
@@ -49,6 +65,9 @@ export function LevelSelectScreen({
     LEVELS.find((lvl) => lvl.id === selectedLevelId) ?? LEVELS[0];
   const selectedMonster = MONSTERS[selectedLevel.monsterId];
   const isSelectedUnlocked = unlockedLevels.includes(selectedLevel.id);
+
+  const dmgBonusPct =
+    loadout.mode === 'DUMBBELLS' ? Math.round(Math.min(60, loadout.weightKg * 4)) : 0;
 
   const handleSelectLevel = (level: CampaignLevel) => {
     if (!unlockedLevels.includes(level.id)) {
@@ -62,7 +81,7 @@ export function LevelSelectScreen({
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col">
       {/* Header */}
       <header className="border-b border-slate-800">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
+        <div className="max-w-5xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <button
             onClick={onBack}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-300 hover:text-white rounded-lg hover:bg-slate-900 transition-colors whitespace-nowrap shrink-0"
@@ -71,10 +90,10 @@ export function LevelSelectScreen({
             <span>{t('menu.back')}</span>
           </button>
 
-          <div className="inline-flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
+          <div className="flex flex-wrap items-center justify-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg max-w-full">
             <button
               onClick={() => setModeTab('CAMPAIGN')}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 modeTab === 'CAMPAIGN'
                   ? 'bg-amber-500 text-slate-950'
                   : 'text-slate-300 hover:text-white'
@@ -84,7 +103,7 @@ export function LevelSelectScreen({
             </button>
             <button
               onClick={() => setModeTab('ENDLESS')}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 modeTab === 'ENDLESS'
                   ? 'bg-emerald-500 text-slate-950'
                   : 'text-slate-300 hover:text-white'
@@ -93,11 +112,93 @@ export function LevelSelectScreen({
               <InfinityIcon className="w-3.5 h-3.5" />
               <span>{t('levels.endlessTab')}</span>
             </button>
+            <button
+              onClick={() => setModeTab('CIRCUIT')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                modeTab === 'CIRCUIT'
+                  ? 'bg-sky-400 text-slate-950'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Repeat className="w-3.5 h-3.5" />
+              <span>{t('levels.circuitTab')}</span>
+            </button>
           </div>
 
-          <div className="w-24" aria-hidden="true" />
+          <div className="hidden sm:block w-24" aria-hidden="true" />
         </div>
       </header>
+
+      {/* Equipment Loadout Bar (Bodyweight vs Dumbbells kg) */}
+      <div className="border-b border-slate-800/80 bg-slate-900/50">
+        <div className="max-w-5xl mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+              <Dumbbell className="w-4 h-4 text-amber-400" />
+              <span>{t('loadout.title')}:</span>
+            </span>
+
+            <div className="inline-flex items-center p-0.5 bg-slate-950 border border-slate-800 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setLoadout({ mode: 'BODYWEIGHT', weightKg: 0 })}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  loadout.mode === 'BODYWEIGHT'
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('loadout.bodyweight')}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setLoadout({
+                    mode: 'DUMBBELLS',
+                    weightKg: loadout.weightKg > 0 ? loadout.weightKg : 2,
+                  })
+                }
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                  loadout.mode === 'DUMBBELLS'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {t('loadout.dumbbells')}
+              </button>
+            </div>
+
+            {loadout.mode === 'DUMBBELLS' && (
+              <div className="flex flex-wrap items-center gap-1">
+                {WEIGHT_PRESETS.map((kg) => (
+                  <button
+                    key={kg}
+                    type="button"
+                    onClick={() => setLoadout({ mode: 'DUMBBELLS', weightKg: kg })}
+                    className={`px-2 py-1 text-xs font-numeric font-semibold rounded border transition-colors whitespace-nowrap ${
+                      loadout.weightKg === kg
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {kg} {t('loadout.kgUnit')}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="text-xs text-slate-400 font-numeric">
+            {loadout.mode === 'DUMBBELLS' ? (
+              <span className="text-amber-300 font-semibold">
+                ×2 · +{dmgBonusPct}% {t('levels.damageLabel')}
+              </span>
+            ) : (
+              <span>{t('loadout.bodyweightHint')}</span>
+            )}
+          </div>
+        </div>
+      </div>
 
       {modeTab === 'CAMPAIGN' ? (
         <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -201,20 +302,21 @@ export function LevelSelectScreen({
                     <span className="inline-flex items-center gap-1 text-slate-400">
                       <Shield className="w-3.5 h-3.5" />
                       <span>
-                        {t('levels.resistantTo')}: {t(EXERCISE_NAME_KEYS[selectedMonster.resistantTo])}
+                        {t('levels.resistantTo')}:{' '}
+                        {t(EXERCISE_NAME_KEYS[selectedMonster.resistantTo])}
                       </span>
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Exercise Selection */}
+              {/* Exercise Selection (7 exercises) */}
               <div>
                 <h3 className="text-sm font-semibold text-slate-200 mb-3">
                   {t('levels.chooseExercise')}
                 </h3>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {(Object.keys(EXERCISES) as ExerciseId[]).map((exerciseId) => {
                     const def = EXERCISES[exerciseId];
                     const isActive = selectedExercise === exerciseId;
@@ -225,27 +327,37 @@ export function LevelSelectScreen({
                       <button
                         key={exerciseId}
                         onClick={() => setSelectedExercise(exerciseId)}
-                        className={`p-3.5 rounded-lg border text-left transition-colors ${
+                        className={`p-3 rounded-lg border text-left transition-colors ${
                           isActive
                             ? 'bg-slate-800 border-emerald-500'
                             : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-sm text-white">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-semibold text-sm text-white leading-snug">
                             {def.icon} {t(EXERCISE_NAME_KEYS[exerciseId])}
                           </span>
-                          <span className="text-xs font-numeric text-amber-400">
+                          <span className="text-xs font-numeric text-amber-400 shrink-0 pt-0.5">
                             ×{def.damageMultiplier}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">
-                          {def.trackingType === 'hold' ? t('levels.holdType') : t('levels.repType')}
-                          {isWeakness ? (
-                            <span className="text-emerald-400 font-medium"> · ×1.5</span>
-                          ) : isResistant ? (
-                            <span className="text-slate-500"> · ×0.75</span>
-                          ) : null}
+                        <div className="text-xs text-slate-400 mt-1 flex items-center justify-between gap-1">
+                          <span>
+                            {def.trackingType === 'hold'
+                              ? t('levels.holdType')
+                              : t('levels.repType')}
+                            {isWeakness ? (
+                              <span className="text-emerald-400 font-medium"> · ×1.5</span>
+                            ) : isResistant ? (
+                              <span className="text-slate-500"> · ×0.75</span>
+                            ) : null}
+                          </span>
+                          {def.supportsDumbbellWeight && loadout.mode === 'DUMBBELLS' && (
+                            <span className="text-amber-300 font-numeric text-[11px]">
+                              +{loadout.weightKg}
+                              {t('loadout.kgUnit')}
+                            </span>
+                          )}
                         </div>
                       </button>
                     );
@@ -268,7 +380,7 @@ export function LevelSelectScreen({
             </button>
           </section>
         </main>
-      ) : (
+      ) : modeTab === 'ENDLESS' ? (
         /* Endless Arena Setup */
         <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-10">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 space-y-6">
@@ -319,8 +431,16 @@ export function LevelSelectScreen({
                           ×{def.damageMultiplier}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        {def.trackingType === 'hold' ? t('levels.holdType') : t('levels.repType')}
+                      <div className="text-xs text-slate-400 mt-1 flex items-center justify-between">
+                        <span>
+                          {def.trackingType === 'hold' ? t('levels.holdType') : t('levels.repType')}
+                        </span>
+                        {def.supportsDumbbellWeight && loadout.mode === 'DUMBBELLS' && (
+                          <span className="text-amber-300 font-numeric text-[11px]">
+                            +{loadout.weightKg}
+                            {t('loadout.kgUnit')}
+                          </span>
+                        )}
                       </div>
                     </button>
                   );
@@ -335,6 +455,78 @@ export function LevelSelectScreen({
               <InfinityIcon className="w-5 h-5" />
               <span>{t('levels.endlessStart')}</span>
             </button>
+          </div>
+        </main>
+      ) : (
+        /* Circuit Training Dungeons */
+        <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
+          <div>
+            <h2 className="font-display text-3xl font-bold text-white">{t('circuits.title')}</h2>
+            <p className="text-sm text-slate-400 mt-1">{t('circuits.subtitle')}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {CIRCUITS.map((circuit) => {
+              const keys = CIRCUIT_KEYS[circuit.id];
+              return (
+                <div
+                  key={circuit.id}
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between gap-5"
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-4xl" aria-hidden="true">
+                        {circuit.icon}
+                      </span>
+                      <span className="text-xs font-numeric text-sky-400 font-semibold">
+                        {circuit.rooms.length} {t('circuits.roomsCount')}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-bold text-white">{t(keys.name)}</h3>
+                      <p className="text-xs text-slate-400 mt-1">{t(keys.description)}</p>
+                    </div>
+
+                    <div className="space-y-1.5 pt-3 border-t border-slate-800 text-xs">
+                      {circuit.rooms.map((room, idx) => {
+                        const monster = MONSTERS[room.monsterId];
+                        const ex = EXERCISES[room.exerciseId];
+                        return (
+                          <div
+                            key={`${circuit.id}-${idx}`}
+                            className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-slate-300"
+                          >
+                            <span className="font-medium text-slate-200">
+                              {idx + 1}. {ex.icon} {t(EXERCISE_NAME_KEYS[room.exerciseId])}
+                            </span>
+                            <span className="text-slate-400">
+                              vs {monster?.sprite}{' '}
+                              {MONSTER_NAME_KEYS[room.monsterId]
+                                ? t(MONSTER_NAME_KEYS[room.monsterId])
+                                : monster?.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-2 border-t border-slate-800">
+                    <div className="text-xs font-numeric text-amber-400 font-semibold">
+                      +{circuit.bonusCoins} {t('stats.coins')} · +{circuit.bonusXp} XP
+                    </div>
+                    <button
+                      onClick={() => onStartCircuit(circuit.id)}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      <Repeat className="w-4 h-4" />
+                      <span>{t('circuits.startCircuit')}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </main>
       )}

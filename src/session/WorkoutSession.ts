@@ -10,6 +10,7 @@ import type { Landmark, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { ExerciseDetector, ExerciseState } from '../vision/types';
 import type {
   BattleRank,
+  EquipmentLoadout,
   ExerciseCalibrationSettings,
   ExerciseMatchup,
   MonsterStats,
@@ -20,14 +21,20 @@ import {
   PushUpDetector,
   PlankDetector,
   JumpingJackDetector,
+  ArmHoldDetector,
+  WallSitDetector,
+  OverheadPressDetector,
 } from '../vision/exercises';
 import {
   COMBO_WINDOW_BASE_MS,
   TOXIC_DEBUFF_DURATION_MS,
+  ULTIMATE_CHARGE_MAX,
   applyBossPhaseTransition,
   applyDamageToMonster,
   calculateBattleRank,
   calculateMonsterCounterAttack,
+  calculateTonnageDelta,
+  calculateUltimateChargeGain,
   estimateWorkoutKcal,
   getBossPhase,
   getComboMultiplier,
@@ -37,8 +44,10 @@ import {
   isMonsterAttackWarningActive,
   isMonsterDead,
   isPlayerDead,
+  levelUp,
   rollItemDrop,
 } from '../game/CombatEngine';
+import { getCircuitById } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { ITEMS } from '../game/data/items';
 import { getLevelById } from '../game/data/levels';
@@ -56,12 +65,13 @@ export type SessionState =
   | 'ERROR';
 
 export type AutoPauseReason = 'USER' | 'LOW_VISIBILITY' | 'TAB_HIDDEN' | null;
-export type BattleMode = 'CAMPAIGN' | 'ENDLESS';
+export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT';
 
 export interface CombatEvent {
   id: number;
   damage: number;
   wasCritical: boolean;
+  wasUltimate: boolean;
   bossPhase: number;
   bossPhaseChanged: boolean;
   matchup: ExerciseMatchup;
@@ -87,12 +97,18 @@ export interface VictorySummary {
   maxCombo: number;
   durationSec: number;
   estimatedKcal: number;
+  tonnageKg: number;
+  ultimateCount: number;
   leveledUp: boolean;
   droppedItemId: string | null;
   unlockedLevelId: string | null;
   newlyUnlockedAchievements: string[];
   mode: BattleMode;
   wave?: number;
+  circuitId?: string;
+  circuitRoomNumber?: number;
+  circuitTotalRooms?: number;
+  circuitCompleted?: boolean;
 }
 
 export interface SessionStatus {
@@ -109,9 +125,12 @@ export interface SessionStatus {
   comboCount: number;
   comboMultiplier: number;
   comboRemainingRatio: number;
+  ultimateCharge: number;
+  ultimateTriggeredCount: number;
   matchup: ExerciseMatchup;
   isPlayerDebuffed: boolean;
   debuffRemainingSec: number;
+  debuffCleansedId: number;
   lastCombatEvent: CombatEvent | null;
   lastMonsterAttackEvent: MonsterAttackEvent | null;
   victorySummary: VictorySummary | null;
@@ -161,6 +180,9 @@ export interface WorkoutSessionConfig {
   levelId?: string;
   mode?: BattleMode;
   endlessWave?: number;
+  circuitId?: string;
+  circuitRoomIndex?: number;
+  loadout?: EquipmentLoadout;
   enableSound?: boolean;
   enableVoice?: boolean;
   cameraFacingMode?: 'user' | 'environment';
@@ -173,6 +195,7 @@ export interface WorkoutSessionConfig {
 const LOW_VISIBILITY_TIMEOUT_MS = 5000;
 const HOLD_TICK_MS = 1000;
 const HUD_UPDATE_INTERVAL_MS = 100;
+const TOXIC_CLEANSE_HOLD_TICKS = 3;
 
 const ENDLESS_DROP_TABLE = [
   { itemId: 'MEGA_RECOVERY_SMOOTHIE', chance: 0.25 },
@@ -190,6 +213,9 @@ export class WorkoutSession {
   private levelId?: string;
   private mode: BattleMode;
   private endlessWave: number;
+  private circuitId?: string;
+  private circuitRoomIndex: number;
+  private loadoutOverride?: EquipmentLoadout;
 
   private videoElement: HTMLVideoElement;
   private canvasElement: HTMLCanvasElement;
@@ -199,6 +225,7 @@ export class WorkoutSession {
   private lastExerciseState: ExerciseState | null = null;
   private lastRepCount = 0;
   private lastHoldTickSeconds = 0;
+  private consecutiveHoldTicks = 0;
   private lastBossPhase = 0;
   private lastPhaseForAudio: string = 'IDLE';
   private lowVisibilityStartTime: number | null = null;
@@ -214,13 +241,17 @@ export class WorkoutSession {
   private maxComboInBattle = 0;
   private lastComboTimestamp: number | null = null;
   private comboRemainingRatio = 0;
+  private ultimateCharge = 0;
+  private ultimateTriggeredCount = 0;
   private debuffExpiresAt: number | null = null;
   private debuffRemainingSec = 0;
+  private debuffCleansedId = 0;
   private battleActiveStartTs: number | null = null;
   private battleAccumulatedMs = 0;
   private totalDamageTakenInBattle = 0;
   private battleReps = 0;
   private battleHoldSeconds = 0;
+  private battleTonnageKg = 0;
   private lastRecordedTimestamp = 0;
 
   private lastCombatEvent: CombatEvent | null = null;
@@ -245,6 +276,7 @@ export class WorkoutSession {
   private lastNotifiedCombatId = 0;
   private lastNotifiedAttackId = 0;
   private lastNotifiedCombo = 0;
+  private lastNotifiedUltimate = 0;
   private lastNotifiedDebuffed = false;
 
   private wakeLock: WakeLockSentinel | null = null;
@@ -258,6 +290,9 @@ export class WorkoutSession {
     this.levelId = config.levelId;
     this.mode = config.mode ?? 'CAMPAIGN';
     this.endlessWave = config.endlessWave ?? 1;
+    this.circuitId = config.circuitId;
+    this.circuitRoomIndex = config.circuitRoomIndex ?? 0;
+    this.loadoutOverride = config.loadout;
     this.enableSound = config.enableSound ?? true;
     this.enableVoice = config.enableVoice ?? false;
     this.videoElement = config.videoElement;
@@ -427,6 +462,42 @@ export class WorkoutSession {
     }
   }
 
+  /**
+   * Switch enemy and exercise detector mid-run for Circuit Training Dungeons
+   * without tearing down the active camera/MediaPipe stream.
+   */
+  advanceCircuitRoom(params: {
+    nextEnemy: MonsterStats;
+    exerciseId: ExerciseId;
+    roomIndex: number;
+    detector?: ExerciseDetector;
+  }): void {
+    const store = useGameStore.getState();
+    const savedUlt = this.ultimateCharge;
+
+    this.exerciseId = params.exerciseId;
+    this.exerciseDamageMultiplier = EXERCISES[params.exerciseId].damageMultiplier;
+    this.exerciseDetector =
+      params.detector ??
+      createExerciseDetector(params.exerciseId, store.settings.exerciseCalibration);
+    this.circuitRoomIndex = params.roomIndex;
+
+    this.resetTrackingCounters();
+    this.ultimateCharge = savedUlt;
+
+    store.startCombat(params.nextEnemy);
+    store.recordMonsterBestiary({
+      monsterId: params.nextEnemy.id,
+      defeated: false,
+      weaknessDiscovered: params.nextEnemy.weakTo === params.exerciseId,
+    });
+
+    if (this.state === 'VICTORY' || this.state === 'DEFEAT' || this.state === 'PAUSED') {
+      void this.requestWakeLock();
+      this.setState('ACTIVE');
+    }
+  }
+
   async unlockAudio(): Promise<boolean> {
     await this.soundFX.init();
     const unlocked = this.soundFX.isUnlocked();
@@ -465,9 +536,12 @@ export class WorkoutSession {
       comboCount: this.comboCount,
       comboMultiplier: getComboMultiplier(this.comboCount),
       comboRemainingRatio: this.comboRemainingRatio,
+      ultimateCharge: this.ultimateCharge,
+      ultimateTriggeredCount: this.ultimateTriggeredCount,
       matchup,
       isPlayerDebuffed: this.debuffExpiresAt !== null && this.debuffRemainingSec > 0,
       debuffRemainingSec: this.debuffRemainingSec,
+      debuffCleansedId: this.debuffCleansedId,
       lastCombatEvent: this.lastCombatEvent,
       lastMonsterAttackEvent: this.lastMonsterAttackEvent,
       victorySummary: this.victorySummary,
@@ -486,10 +560,15 @@ export class WorkoutSession {
     this.handlePoseDetected(landmarks, timestamp, worldLandmarks);
   }
 
+  private getActiveLoadout(): EquipmentLoadout {
+    return this.loadoutOverride ?? useGameStore.getState().loadout;
+  }
+
   private resetTrackingCounters(): void {
     this.exerciseDetector.reset();
     this.lastRepCount = 0;
     this.lastHoldTickSeconds = 0;
+    this.consecutiveHoldTicks = 0;
     this.lastBossPhase = 0;
     this.lastPhaseForAudio = 'IDLE';
     this.lowVisibilityStartTime = null;
@@ -507,13 +586,17 @@ export class WorkoutSession {
     this.maxComboInBattle = 0;
     this.lastComboTimestamp = null;
     this.comboRemainingRatio = 0;
+    this.ultimateCharge = 0;
+    this.ultimateTriggeredCount = 0;
     this.debuffExpiresAt = null;
     this.debuffRemainingSec = 0;
+    this.debuffCleansedId = 0;
     this.battleActiveStartTs = null;
     this.battleAccumulatedMs = 0;
     this.totalDamageTakenInBattle = 0;
     this.battleReps = 0;
     this.battleHoldSeconds = 0;
+    this.battleTonnageKg = 0;
     this.lastRecordedTimestamp = 0;
 
     this.lastHudNotifyTime = -Infinity;
@@ -526,6 +609,7 @@ export class WorkoutSession {
     this.lastNotifiedCombatId = 0;
     this.lastNotifiedAttackId = 0;
     this.lastNotifiedCombo = 0;
+    this.lastNotifiedUltimate = 0;
     this.lastNotifiedDebuffed = false;
   }
 
@@ -561,6 +645,10 @@ export class WorkoutSession {
       this.lowVisibilityStartTime = null;
     }
 
+    if (!exerciseState.isHolding) {
+      this.consecutiveHoldTicks = 0;
+    }
+
     // Play subtle audio cue when hitting bottom/peak phase on rep exercises
     if (
       this.enableSound &&
@@ -571,6 +659,9 @@ export class WorkoutSession {
     }
     this.lastPhaseForAudio = exerciseState.phase;
 
+    const activeLoadout = this.getActiveLoadout();
+    const loadoutWeightKg = activeLoadout.mode === 'DUMBBELLS' ? activeLoadout.weightKg : 0;
+
     // Rep-based damage
     const newReps = exerciseState.repCount - this.lastRepCount;
     if (newReps > 0) {
@@ -579,16 +670,19 @@ export class WorkoutSession {
 
       const store = useGameStore.getState();
       const repKcal = this.exerciseId
-        ? estimateWorkoutKcal({ [this.exerciseId]: { reps: newReps } })
+        ? estimateWorkoutKcal({ [this.exerciseId]: { reps: newReps } }, loadoutWeightKg)
         : 0;
+      const repTonnage = calculateTonnageDelta(this.exerciseId, newReps, 0, activeLoadout);
+      this.battleTonnageKg = Math.round((this.battleTonnageKg + repTonnage) * 10) / 10;
 
       store.recordWorkoutProgress({
         reps: newReps,
         exerciseId: this.exerciseId,
         estimatedKcal: repKcal,
+        tonnageKg: repTonnage,
       });
 
-      this.applyCombatHits(newReps, timestamp);
+      this.applyCombatHits(newReps, timestamp, false);
       if (this.state !== 'ACTIVE') {
         return;
       }
@@ -606,19 +700,36 @@ export class WorkoutSession {
       if (newHoldTicks > 0) {
         this.lastHoldTickSeconds = totalHoldSeconds;
         this.battleHoldSeconds += newHoldTicks;
+        this.consecutiveHoldTicks += newHoldTicks;
+
+        // 3 consecutive static hold seconds cleanse active Toxic debuff
+        if (this.debuffExpiresAt !== null && this.consecutiveHoldTicks >= TOXIC_CLEANSE_HOLD_TICKS) {
+          this.debuffExpiresAt = null;
+          this.debuffRemainingSec = 0;
+          this.debuffCleansedId++;
+          if (this.enableSound) {
+            this.soundFX.play('POWER_UP');
+          }
+        }
 
         const store = useGameStore.getState();
         const holdKcal = this.exerciseId
-          ? estimateWorkoutKcal({ [this.exerciseId]: { holdSeconds: newHoldTicks } })
+          ? estimateWorkoutKcal(
+              { [this.exerciseId]: { holdSeconds: newHoldTicks } },
+              loadoutWeightKg
+            )
           : 0;
+        const holdTonnage = calculateTonnageDelta(this.exerciseId, 0, newHoldTicks, activeLoadout);
+        this.battleTonnageKg = Math.round((this.battleTonnageKg + holdTonnage) * 10) / 10;
 
         store.recordWorkoutProgress({
           holdSeconds: newHoldTicks,
           exerciseId: this.exerciseId,
           estimatedKcal: holdKcal,
+          tonnageKg: holdTonnage,
         });
 
-        this.applyCombatHits(newHoldTicks, timestamp);
+        this.applyCombatHits(newHoldTicks, timestamp, true);
         if (this.state !== 'ACTIVE') {
           return;
         }
@@ -630,7 +741,7 @@ export class WorkoutSession {
       }
     }
 
-    // Monster counter-attack timer (Plank holds act as a defensive block)
+    // Monster counter-attack timer (Static holds act as a defensive block)
     this.processMonsterCounterAttack(timestamp, Boolean(exerciseState.isHolding));
     if (this.state !== 'ACTIVE') {
       return;
@@ -647,6 +758,7 @@ export class WorkoutSession {
       this.combatEventCounter !== this.lastNotifiedCombatId ||
       this.monsterAttackCounter !== this.lastNotifiedAttackId ||
       this.comboCount !== this.lastNotifiedCombo ||
+      this.ultimateCharge !== this.lastNotifiedUltimate ||
       isDebuffedNow !== this.lastNotifiedDebuffed;
 
     if (discreteChanged || timestamp - this.lastHudNotifyTime >= HUD_UPDATE_INTERVAL_MS) {
@@ -660,6 +772,7 @@ export class WorkoutSession {
       this.lastNotifiedCombatId = this.combatEventCounter;
       this.lastNotifiedAttackId = this.monsterAttackCounter;
       this.lastNotifiedCombo = this.comboCount;
+      this.lastNotifiedUltimate = this.ultimateCharge;
       this.lastNotifiedDebuffed = isDebuffedNow;
       this.notifyStateChange();
     }
@@ -802,7 +915,7 @@ export class WorkoutSession {
     }
   }
 
-  private applyCombatHits(hits: number, timestamp: number): void {
+  private applyCombatHits(hits: number, timestamp: number, isHoldTick: boolean): void {
     const store = useGameStore.getState();
     let enemy = store.currentEnemy;
 
@@ -813,12 +926,30 @@ export class WorkoutSession {
       return;
     }
 
+    const activeLoadout = this.getActiveLoadout();
+
     for (let i = 0; i < hits; i++) {
       this.comboCount += 1;
       this.lastComboTimestamp = timestamp;
       this.comboRemainingRatio = 1;
       if (this.comboCount > this.maxComboInBattle) {
         this.maxComboInBattle = this.comboCount;
+      }
+
+      const chargeGain = calculateUltimateChargeGain({
+        isHoldTick,
+        comboCount: this.comboCount,
+      });
+      this.ultimateCharge = Math.min(ULTIMATE_CHARGE_MAX, this.ultimateCharge + chargeGain);
+      const isUltimate = this.ultimateCharge >= ULTIMATE_CHARGE_MAX;
+      if (isUltimate) {
+        this.ultimateCharge = 0;
+        this.ultimateTriggeredCount += 1;
+        // Overdrive strike stuns monster: reset counter-attack windup
+        this.lastMonsterAttackTime = timestamp;
+        this.nextAttackProgress = 0;
+        this.isAttackWarning = false;
+        this.attackWarningTriggered = false;
       }
 
       const latestStore = useGameStore.getState();
@@ -839,6 +970,8 @@ export class WorkoutSession {
           comboCount: this.comboCount,
           exerciseId: this.exerciseId,
           isDebuffed,
+          loadout: activeLoadout,
+          isUltimate,
         }
       );
 
@@ -875,6 +1008,7 @@ export class WorkoutSession {
         id: this.combatEventCounter,
         damage: result.damageDealt,
         wasCritical: result.wasCritical,
+        wasUltimate: result.wasUltimate,
         bossPhase: currentBossPhase,
         bossPhaseChanged,
         matchup: result.matchup,
@@ -886,16 +1020,15 @@ export class WorkoutSession {
       };
 
       if (this.enableSound) {
-        if (result.shieldBroken || result.wasCritical) {
+        if (result.wasUltimate || result.playerLeveledUp) {
+          this.soundFX.play('POWER_UP');
+        } else if (result.shieldBroken || result.wasCritical) {
           this.soundFX.play('COMBO');
         } else {
           this.soundFX.play('REP_COMPLETE');
         }
         if (bossPhaseChanged) {
           this.soundFX.play('DAMAGE');
-        }
-        if (result.playerLeveledUp) {
-          this.soundFX.play('POWER_UP');
         }
       }
 
@@ -913,6 +1046,8 @@ export class WorkoutSession {
     timestamp: number
   ): void {
     const store = useGameStore.getState();
+    const activeLoadout = this.getActiveLoadout();
+    const loadoutWeightKg = activeLoadout.mode === 'DUMBBELLS' ? activeLoadout.weightKg : 0;
 
     const activeElapsedMs =
       this.battleAccumulatedMs +
@@ -933,19 +1068,28 @@ export class WorkoutSession {
     });
 
     const baseCoins = defeatedEnemy.coinReward ?? 20;
-    const coinsEarned = Math.round(baseCoins * rewardMultiplier);
+    let coinsEarned = Math.round(baseCoins * rewardMultiplier);
+    let totalXpGained = xpGained;
+    let finalLeveledUp = leveledUp;
 
     const estimatedKcal = this.exerciseId
-      ? estimateWorkoutKcal({
-          [this.exerciseId]: {
-            reps: this.battleReps,
-            holdSeconds: this.battleHoldSeconds,
+      ? estimateWorkoutKcal(
+          {
+            [this.exerciseId]: {
+              reps: this.battleReps,
+              holdSeconds: this.battleHoldSeconds,
+            },
           },
-        })
+          loadoutWeightKg
+        )
       : 0;
 
     let droppedItemId: string | null = null;
     let unlockedLevelId: string | null = null;
+    let circuitRoomNumber: number | undefined;
+    let circuitTotalRooms: number | undefined;
+    let circuitCompleted = false;
+    let circuitsDelta = 0;
 
     if (this.mode === 'CAMPAIGN' && this.levelId) {
       const level = getLevelById(this.levelId);
@@ -969,6 +1113,33 @@ export class WorkoutSession {
       if (droppedItemId) {
         store.addItem(droppedItemId, 1);
       }
+    } else if (this.mode === 'CIRCUIT' && this.circuitId) {
+      const circuit = getCircuitById(this.circuitId);
+      if (circuit) {
+        circuitTotalRooms = circuit.rooms.length;
+        circuitRoomNumber = this.circuitRoomIndex + 1;
+        if (this.circuitRoomIndex >= circuit.rooms.length - 1) {
+          circuitCompleted = true;
+          circuitsDelta = 1;
+          coinsEarned += circuit.bonusCoins;
+          totalXpGained += circuit.bonusXp;
+
+          let updatedPlayer = { ...store.player, xp: store.player.xp + circuit.bonusXp };
+          while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+            updatedPlayer = levelUp(updatedPlayer);
+            finalLeveledUp = true;
+          }
+          store.updatePlayer(updatedPlayer);
+
+          if (circuit.guaranteedLootPool.length > 0) {
+            const idx = Math.floor(Math.random() * circuit.guaranteedLootPool.length);
+            droppedItemId = circuit.guaranteedLootPool[idx];
+            if (droppedItemId) {
+              store.addItem(droppedItemId, 1);
+            }
+          }
+        }
+      }
     }
 
     store.recordMonsterBestiary({
@@ -982,6 +1153,8 @@ export class WorkoutSession {
       monstersDefeated: 1,
       maxCombo: this.maxComboInBattle,
       coinsEarned,
+      circuitsCompleted: circuitsDelta,
+      durationSec,
     });
 
     const unlockedOnVictory = store.syncAchievements();
@@ -992,18 +1165,24 @@ export class WorkoutSession {
     const uniqueAchievements = Array.from(new Set(this.sessionAchievements));
 
     this.victorySummary = {
-      xpGained,
+      xpGained: totalXpGained,
       coinsEarned,
       rank,
       maxCombo: this.maxComboInBattle,
       durationSec,
       estimatedKcal,
-      leveledUp,
+      tonnageKg: this.battleTonnageKg,
+      ultimateCount: this.ultimateTriggeredCount,
+      leveledUp: finalLeveledUp,
       droppedItemId,
       unlockedLevelId,
       newlyUnlockedAchievements: uniqueAchievements,
       mode: this.mode,
       wave: this.mode === 'ENDLESS' ? this.endlessWave : undefined,
+      circuitId: this.mode === 'CIRCUIT' ? this.circuitId : undefined,
+      circuitRoomNumber,
+      circuitTotalRooms,
+      circuitCompleted,
     };
 
     if (this.enableSound) {
@@ -1017,6 +1196,16 @@ export class WorkoutSession {
 
   private onDefeat(): void {
     const store = useGameStore.getState();
+
+    const activeElapsedMs =
+      this.battleAccumulatedMs +
+      (this.battleActiveStartTs !== null && this.lastRecordedTimestamp >= this.battleActiveStartTs
+        ? this.lastRecordedTimestamp - this.battleActiveStartTs
+        : 0);
+    const durationSec = Math.max(0, Math.round(activeElapsedMs / 1000));
+    if (durationSec > 0) {
+      store.recordWorkoutProgress({ durationSec });
+    }
 
     if (this.mode === 'ENDLESS') {
       store.updateEndlessProgress(Math.max(1, this.endlessWave - 1), false);
@@ -1121,6 +1310,12 @@ export function createExerciseDetector(
       return new PlankDetector({ minBodyAngle: calibration.plankMinBodyAngle });
     case 'JUMPING_JACK':
       return new JumpingJackDetector({ peakArmAngle: calibration.jumpingJackPeakArmAngle });
+    case 'ARM_HOLD':
+      return new ArmHoldDetector({ minShoulderAngle: calibration.armHoldMinShoulderAngle });
+    case 'WALL_SIT':
+      return new WallSitDetector({ maxKneeAngle: calibration.wallSitMaxKneeAngle });
+    case 'OVERHEAD_PRESS':
+      return new OverheadPressDetector({ topAngle: calibration.overheadPressTopAngle });
   }
 }
 
@@ -1150,6 +1345,21 @@ export function applyExerciseCalibration(
         detector.configure({ peakArmAngle: calibration.jumpingJackPeakArmAngle });
       }
       break;
+    case 'ARM_HOLD':
+      if (detector instanceof ArmHoldDetector) {
+        detector.configure({ minShoulderAngle: calibration.armHoldMinShoulderAngle });
+      }
+      break;
+    case 'WALL_SIT':
+      if (detector instanceof WallSitDetector) {
+        detector.configure({ maxKneeAngle: calibration.wallSitMaxKneeAngle });
+      }
+      break;
+    case 'OVERHEAD_PRESS':
+      if (detector instanceof OverheadPressDetector) {
+        detector.configure({ topAngle: calibration.overheadPressTopAngle });
+      }
+      break;
   }
 }
 
@@ -1160,6 +1370,8 @@ export function createWorkoutSessionForBattle(params: {
   levelId?: string;
   mode?: BattleMode;
   endlessWave?: number;
+  circuitId?: string;
+  circuitRoomIndex?: number;
 }): WorkoutSession {
   const store = useGameStore.getState();
   const exerciseDef = EXERCISES[params.exerciseId];
@@ -1176,6 +1388,9 @@ export function createWorkoutSessionForBattle(params: {
     levelId: params.levelId,
     mode: params.mode ?? 'CAMPAIGN',
     endlessWave: params.endlessWave ?? 1,
+    circuitId: params.circuitId,
+    circuitRoomIndex: params.circuitRoomIndex,
+    loadout: store.loadout,
     enableSound: store.settings.soundEnabled,
     enableVoice: store.settings.voiceEnabled,
     cameraFacingMode: store.settings.cameraFacingMode,

@@ -1,7 +1,8 @@
 /**
  * App - Root component with screen navigation.
- * Connects MainMenu, LevelSelectScreen (Campaign + Endless Arena), InventoryScreen (+ Shop),
- * BestiaryAnalyticsScreen, BattleScreen, CalibrationSandbox, SettingsScreen, and OfflineIndicator.
+ * Connects MainMenu, LevelSelectScreen (Campaign, Endless Arena, Circuits),
+ * InventoryScreen (+ Shop), BestiaryAnalyticsScreen, BattleScreen, CalibrationSandbox,
+ * SettingsScreen, and OfflineIndicator.
  */
 
 import { useState, useEffect } from 'react';
@@ -15,6 +16,7 @@ import { SettingsScreen } from './ui/SettingsScreen';
 import { OfflineIndicator } from './ui/PWAInstallButton';
 import { useGameStore } from './game/store';
 import { createEndlessWaveMonster, createMonster, MONSTERS } from './game/data/monsters';
+import { getCircuitById, type CircuitId } from './game/data/circuits';
 import { getLevelById } from './game/data/levels';
 import type { ExerciseId } from './game/data/exercises';
 import type { BattleMode } from './session/WorkoutSession';
@@ -34,6 +36,7 @@ interface ActiveEncounter {
   exerciseId: ExerciseId;
   mode: BattleMode;
   wave: number;
+  circuitId?: CircuitId;
 }
 
 function App() {
@@ -74,6 +77,24 @@ function App() {
     setCurrentScreen('BATTLE');
   };
 
+  const handleStartCircuit = (circuitId: CircuitId) => {
+    const circuit = getCircuitById(circuitId);
+    if (!circuit || circuit.rooms.length === 0) return;
+    const firstRoom = circuit.rooms[0];
+    const monsterTemplate = MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER;
+    const monster = createMonster(monsterTemplate);
+
+    setCurrentLevel(null);
+    startCombat(monster);
+    setActiveEncounter({
+      exerciseId: firstRoom.exerciseId,
+      mode: 'CIRCUIT',
+      wave: 1,
+      circuitId,
+    });
+    setCurrentScreen('BATTLE');
+  };
+
   const handleQuickBattle = () => {
     const unlocked = useGameStore.getState().unlockedLevels;
     const completed = useGameStore.getState().completedLevels;
@@ -106,6 +127,7 @@ function App() {
           onBack={() => setCurrentScreen('MENU')}
           onStartEncounter={handleStartEncounter}
           onStartEndless={handleStartEndless}
+          onStartCircuit={handleStartCircuit}
         />
       )}
 
@@ -123,6 +145,7 @@ function App() {
           exerciseId={activeEncounter.exerciseId}
           mode={activeEncounter.mode}
           initialWave={activeEncounter.wave}
+          circuitId={activeEncounter.circuitId}
           onExit={handleExitBattle}
           onStartNextLevel={handleStartEncounter}
         />

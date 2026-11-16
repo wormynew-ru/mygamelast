@@ -1,8 +1,9 @@
 /**
- * Shared typed i18n lookup dictionaries for monsters, exercises, items, rarities, and achievements.
+ * Shared typed i18n lookup dictionaries for monsters, exercises, circuits, items, rarities, and achievements.
  */
 
 import type { AchievementId } from '../game/data/achievements';
+import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
 import type { ItemRarity, MonsterArchetype } from '../game/types';
 import type { TranslationKey } from '../i18n/useTranslation';
@@ -10,7 +11,9 @@ import type { TranslationKey } from '../i18n/useTranslation';
 export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
   SODA: 'monster.SODA.name',
   FRIES: 'monster.FRIES.name',
+  MILKSHAKE: 'monster.MILKSHAKE.name',
   DONUT: 'monster.DONUT.name',
+  NACHOS: 'monster.NACHOS.name',
   BURGER: 'monster.BURGER.name',
   HOT_SAUCE: 'monster.HOT_SAUCE.name',
   PIZZA: 'monster.PIZZA.name',
@@ -21,7 +24,9 @@ export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
 export const MONSTER_DESC_KEYS: Record<string, TranslationKey> = {
   SODA: 'monster.SODA.description',
   FRIES: 'monster.FRIES.description',
+  MILKSHAKE: 'monster.MILKSHAKE.description',
   DONUT: 'monster.DONUT.description',
+  NACHOS: 'monster.NACHOS.description',
   BURGER: 'monster.BURGER.description',
   HOT_SAUCE: 'monster.HOT_SAUCE.description',
   PIZZA: 'monster.PIZZA.description',
@@ -41,6 +46,9 @@ export const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
   PUSH_UP: 'exercise.PUSH_UP.name',
   PLANK: 'exercise.PLANK.name',
   JUMPING_JACK: 'exercise.JUMPING_JACK.name',
+  ARM_HOLD: 'exercise.ARM_HOLD.name',
+  WALL_SIT: 'exercise.WALL_SIT.name',
+  OVERHEAD_PRESS: 'exercise.OVERHEAD_PRESS.name',
 };
 
 export const EXERCISE_DESC_KEYS: Record<ExerciseId, TranslationKey> = {
@@ -48,6 +56,27 @@ export const EXERCISE_DESC_KEYS: Record<ExerciseId, TranslationKey> = {
   PUSH_UP: 'exercise.PUSH_UP.description',
   PLANK: 'exercise.PLANK.description',
   JUMPING_JACK: 'exercise.JUMPING_JACK.description',
+  ARM_HOLD: 'exercise.ARM_HOLD.description',
+  WALL_SIT: 'exercise.WALL_SIT.description',
+  OVERHEAD_PRESS: 'exercise.OVERHEAD_PRESS.description',
+};
+
+export const CIRCUIT_KEYS: Record<
+  CircuitId,
+  { name: TranslationKey; description: TranslationKey }
+> = {
+  UPPER_IRON: {
+    name: 'circuits.UPPER_IRON.name',
+    description: 'circuits.UPPER_IRON.description',
+  },
+  STATIC_GAUNTLET: {
+    name: 'circuits.STATIC_GAUNTLET.name',
+    description: 'circuits.STATIC_GAUNTLET.description',
+  },
+  FULL_BODY_BLITZ: {
+    name: 'circuits.FULL_BODY_BLITZ.name',
+    description: 'circuits.FULL_BODY_BLITZ.description',
+  },
 };
 
 export const ITEM_NAME_KEYS: Record<string, TranslationKey> = {
@@ -137,5 +166,17 @@ export const ACHIEVEMENT_KEYS: Record<
   BESTIARY_SCHOLAR: {
     name: 'achievement.BESTIARY_SCHOLAR.name',
     description: 'achievement.BESTIARY_SCHOLAR.description',
+  },
+  IRON_TONNAGE: {
+    name: 'achievement.IRON_TONNAGE.name',
+    description: 'achievement.IRON_TONNAGE.description',
+  },
+  STATIC_MASTER: {
+    name: 'achievement.STATIC_MASTER.name',
+    description: 'achievement.STATIC_MASTER.description',
+  },
+  CIRCUIT_CHAMPION: {
+    name: 'achievement.CIRCUIT_CHAMPION.name',
+    description: 'achievement.CIRCUIT_CHAMPION.description',
   },
 };

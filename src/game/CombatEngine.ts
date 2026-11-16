@@ -1,23 +1,27 @@
 /**
  * Combat Engine - Pure RPG logic for damage calculation, combos, matchups,
- * shields, crits, XP, leveling, battle ranks, and calorie estimation.
+ * equipment loadouts, ultimate overdrive, shields, crits, XP, leveling, battle ranks, and kcal.
  * ZERO dependencies on React, DOM, or CV logic.
  */
 
 import type {
   BattleRank,
   CombatResult,
+  EquipmentLoadout,
   ExerciseMatchup,
   ExerciseTotals,
   Item,
   MonsterStats,
   PlayerStats,
 } from './types';
-import type { ExerciseId } from './data/exercises';
+import { EXERCISES, type ExerciseId } from './data/exercises';
 
 export const COMBO_WINDOW_BASE_MS = 3800;
 export const TOXIC_DEBUFF_DURATION_MS = 6000;
 export const TOXIC_DEBUFF_DAMAGE_MULTIPLIER = 0.75;
+export const ULTIMATE_CHARGE_MAX = 100;
+export const ULTIMATE_DAMAGE_MULTIPLIER = 1.8;
+export const DUMBBELL_WEIGHT_OPTIONS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
 
 /**
  * XP curve: exponential growth.
@@ -25,6 +29,79 @@ export const TOXIC_DEBUFF_DAMAGE_MULTIPLIER = 0.75;
  */
 export function calculateXPForLevel(level: number): number {
   return Math.floor(100 * Math.pow(level, 1.5));
+}
+
+/**
+ * Calculate balanced damage bonus from optional real-world dumbbell weight per hand.
+ * Applies only when dumbbell mode is active and the exercise supports dumbbells.
+ * Capped at 1.60x to preserve campaign challenge.
+ */
+export function getLoadoutDamageMultiplier(
+  loadout?: EquipmentLoadout,
+  exerciseId?: ExerciseId
+): number {
+  if (!loadout || loadout.mode !== 'DUMBBELLS' || loadout.weightKg <= 0) {
+    return 1.0;
+  }
+  if (exerciseId && !EXERCISES[exerciseId]?.supportsDumbbellWeight) {
+    return 1.0;
+  }
+  const bonus = Math.min(0.6, loadout.weightKg * 0.04);
+  return Math.round((1 + bonus) * 100) / 100;
+}
+
+/**
+ * Calculate balanced XP bonus from dumbbell loadout (capped at 1.35x).
+ */
+export function getLoadoutXpMultiplier(
+  loadout?: EquipmentLoadout,
+  exerciseId?: ExerciseId
+): number {
+  if (!loadout || loadout.mode !== 'DUMBBELLS' || loadout.weightKg <= 0) {
+    return 1.0;
+  }
+  if (exerciseId && !EXERCISES[exerciseId]?.supportsDumbbellWeight) {
+    return 1.0;
+  }
+  const bonus = Math.min(0.35, loadout.weightKg * 0.025);
+  return Math.round((1 + bonus) * 100) / 100;
+}
+
+/**
+ * Calculate lifted/held tonnage in kg (2 dumbbells = weightKg * 2).
+ * Isometric holds contribute at 0.5x weight factor per second.
+ */
+export function calculateTonnageDelta(
+  exerciseId: ExerciseId | undefined,
+  reps: number,
+  holdSeconds: number,
+  loadout?: EquipmentLoadout
+): number {
+  if (!exerciseId || !loadout || loadout.mode !== 'DUMBBELLS' || loadout.weightKg <= 0) {
+    return 0;
+  }
+  const def = EXERCISES[exerciseId];
+  if (!def?.supportsDumbbellWeight) {
+    return 0;
+  }
+  const pairWeightKg = loadout.weightKg * 2;
+  const raw =
+    def.trackingType === 'hold'
+      ? holdSeconds * pairWeightKg * 0.5
+      : reps * pairWeightKg;
+  return Math.round(raw * 10) / 10;
+}
+
+/**
+ * Calculate Ultimate Overdrive meter charge delta from an exercise hit/tick.
+ */
+export function calculateUltimateChargeGain(params: {
+  isHoldTick: boolean;
+  comboCount: number;
+}): number {
+  const base = params.isHoldTick ? 12 : 18;
+  const comboBonus = Math.min(10, Math.floor(Math.max(0, params.comboCount) / 2) * 2);
+  return base + comboBonus;
 }
 
 /**
@@ -82,12 +159,15 @@ export interface CombatAttackOptions {
   comboCount?: number;
   exerciseId?: ExerciseId;
   isDebuffed?: boolean;
+  loadout?: EquipmentLoadout;
+  isUltimate?: boolean;
 }
 
 /**
  * Apply damage to monster, return updated monster and combat result.
- * Handles base damage, combo multiplier, exercise affinity, toxic debuff,
- * active armor/boss shields, critical hits, monster death, XP gain, and level up.
+ * Handles base damage, combo multiplier, exercise affinity, equipment loadout,
+ * toxic debuff, Ultimate Overdrive strike, active armor/boss shields, critical hits,
+ * monster death, XP gain, and level up.
  */
 export function applyDamageToMonster(
   player: PlayerStats,
@@ -99,10 +179,23 @@ export function applyDamageToMonster(
   const matchup = getExerciseMatchup(monster, options.exerciseId);
   const matchupMultiplier = getMatchupMultiplier(matchup);
   const debuffMultiplier = options.isDebuffed ? TOXIC_DEBUFF_DAMAGE_MULTIPLIER : 1.0;
+  const loadoutMultiplier = getLoadoutDamageMultiplier(options.loadout, options.exerciseId);
+  const wasUltimate = Boolean(options.isUltimate);
+  const ultimateMultiplier = wasUltimate ? ULTIMATE_DAMAGE_MULTIPLIER : 1.0;
 
   // Calculate base + tactical damage
   let damage = calculateBaseDamage(player.attack, monster.defense, exerciseMultiplier);
-  damage = Math.max(1, Math.floor(damage * comboMultiplier * matchupMultiplier * debuffMultiplier));
+  damage = Math.max(
+    1,
+    Math.floor(
+      damage *
+        comboMultiplier *
+        matchupMultiplier *
+        debuffMultiplier *
+        loadoutMultiplier *
+        ultimateMultiplier
+    )
+  );
 
   // Roll for crit
   const isCrit = rollCritical(player.critChance);
@@ -117,10 +210,16 @@ export function applyDamageToMonster(
 
   if (currentShieldHits > 0) {
     shieldHit = true;
-    const shieldBreakPower = matchup === 'WEAK' || isCrit ? 2 : 1;
+    const isStaticHold = options.exerciseId
+      ? EXERCISES[options.exerciseId]?.trackingType === 'hold'
+      : false;
+    let shieldBreakPower = matchup === 'WEAK' || isCrit ? 2 : 1;
+    if (wasUltimate || (isStaticHold && loadoutMultiplier > 1)) {
+      shieldBreakPower += 1;
+    }
     currentShieldHits = Math.max(0, currentShieldHits - shieldBreakPower);
     shieldBroken = currentShieldHits === 0;
-    damage = Math.max(1, Math.floor(damage * 0.25));
+    damage = Math.max(1, Math.floor(damage * (wasUltimate ? 0.5 : 0.25)));
   }
 
   // Apply damage to monster
@@ -133,7 +232,8 @@ export function applyDamageToMonster(
   let updatedPlayer = { ...player };
 
   if (isKilled) {
-    xpGained = monster.xpReward;
+    const xpMult = getLoadoutXpMultiplier(options.loadout, options.exerciseId);
+    xpGained = Math.round(monster.xpReward * xpMult);
     updatedPlayer.xp += xpGained;
 
     while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
@@ -145,11 +245,13 @@ export function applyDamageToMonster(
   const result: CombatResult = {
     damageDealt: damage,
     wasCritical: isCrit,
+    wasUltimate,
     targetKilled: isKilled,
     playerLeveledUp: leveledUp,
     xpGained,
     matchup,
     comboMultiplier,
+    loadoutMultiplier,
     shieldHit,
     shieldBroken,
   };
@@ -344,7 +446,7 @@ export function rollItemDrop(
 
 /**
  * Calculate incoming damage from a monster counter-attack.
- * Active plank hold (isBlocking = true) mitigates 70% of monster attack power.
+ * Active static hold (isBlocking = true) mitigates 70% of monster attack power.
  */
 export function calculateMonsterCounterAttack(
   player: PlayerStats,
@@ -438,14 +540,21 @@ export function calculateBattleRank(params: {
 }
 
 /**
- * Approximate kcal expenditure from tracked reps and hold seconds.
+ * Approximate kcal expenditure from tracked reps, hold seconds, and optional dumbbell weight.
  */
 export function estimateWorkoutKcal(
-  totals: Partial<Record<ExerciseId, Partial<ExerciseTotals>>>
+  totals: Partial<Record<ExerciseId, Partial<ExerciseTotals>>>,
+  loadoutWeightKg: number = 0
 ): number {
-  const squats = (totals.SQUAT?.reps ?? 0) * 0.35;
+  const weightFactor = loadoutWeightKg > 0 ? 1 + Math.min(0.45, loadoutWeightKg * 0.03) : 1.0;
+
+  const squats = (totals.SQUAT?.reps ?? 0) * 0.35 * weightFactor;
   const pushups = (totals.PUSH_UP?.reps ?? 0) * 0.45;
   const jacks = (totals.JUMPING_JACK?.reps ?? 0) * 0.25;
+  const overhead = (totals.OVERHEAD_PRESS?.reps ?? 0) * 0.4 * weightFactor;
   const plank = (totals.PLANK?.holdSeconds ?? 0) * 0.08;
-  return Math.round((squats + pushups + jacks + plank) * 10) / 10;
+  const armHold = (totals.ARM_HOLD?.holdSeconds ?? 0) * 0.09 * weightFactor;
+  const wallSit = (totals.WALL_SIT?.holdSeconds ?? 0) * 0.11;
+
+  return Math.round((squats + pushups + jacks + overhead + plank + armHold + wallSit) * 10) / 10;
 }

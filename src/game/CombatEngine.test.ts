@@ -18,6 +18,11 @@ import {
   getExerciseMatchup,
   calculateBattleRank,
   estimateWorkoutKcal,
+  getLoadoutDamageMultiplier,
+  getLoadoutXpMultiplier,
+  calculateTonnageDelta,
+  calculateUltimateChargeGain,
+  ULTIMATE_DAMAGE_MULTIPLIER,
   createPlayer,
   getEffectivePlayerStats,
   useConsumableItem,
@@ -27,6 +32,7 @@ import {
   ATTACK_WARNING_WINDOW_MS,
   isMonsterAttackWarningActive,
 } from './CombatEngine';
+import { getCircuitById } from './data/circuits';
 import { ITEMS } from './data/items';
 import { createEndlessWaveMonster } from './data/monsters';
 import {
@@ -549,22 +555,33 @@ describe('CombatEngine', () => {
   });
 
   describe('evaluateNewAchievements', () => {
-    it('unlocks achievements matching workout, combo, endless, streak, and bestiary milestones without duplicates', () => {
+    it('unlocks achievements matching workout, combo, endless, streak, bestiary, tonnage, static & circuit milestones without duplicates', () => {
       const state: GameState = {
         player: { ...createPlayer(), level: 5 },
         inventory: { items: new Map(), equippedItems: [] },
         coins: 120,
+        loadout: { mode: 'DUMBBELLS', weightKg: 5 },
         currentLevel: null,
         unlockedLevels: ['LEVEL_1'],
         completedLevels: ['LEVEL_5'],
         unlockedAchievements: ['FIRST_REP'],
         currentEnemy: null,
-        workoutStats: { totalReps: 55, totalHoldSeconds: 35, monstersDefeated: 2, maxCombo: 12 },
+        workoutStats: {
+          totalReps: 55,
+          totalHoldSeconds: 65,
+          monstersDefeated: 2,
+          maxCombo: 12,
+          totalTonnageKg: 600,
+          circuitsCompleted: 1,
+        },
         exerciseTotals: {
           SQUAT: { reps: 30, holdSeconds: 0 },
           PUSH_UP: { reps: 15, holdSeconds: 0 },
           PLANK: { reps: 0, holdSeconds: 35 },
           JUMPING_JACK: { reps: 10, holdSeconds: 0 },
+          ARM_HOLD: { reps: 0, holdSeconds: 20 },
+          WALL_SIT: { reps: 0, holdSeconds: 10 },
+          OVERHEAD_PRESS: { reps: 0, holdSeconds: 0 },
         },
         streak: { current: 3, best: 3, lastActiveDate: '2026-11-15' },
         dailyHistory: {},
@@ -594,6 +611,9 @@ describe('CombatEngine', () => {
             pushupBottomAngle: 90,
             plankMinBodyAngle: 160,
             jumpingJackPeakArmAngle: 135,
+            armHoldMinShoulderAngle: 65,
+            wallSitMaxKneeAngle: 115,
+            overheadPressTopAngle: 155,
           },
           language: 'ru',
         },
@@ -610,6 +630,64 @@ describe('CombatEngine', () => {
       expect(unlocked).toContain('ARENA_SURVIVOR');
       expect(unlocked).toContain('STREAK_WARRIOR');
       expect(unlocked).toContain('BESTIARY_SCHOLAR');
+      expect(unlocked).toContain('IRON_TONNAGE');
+      expect(unlocked).toContain('STATIC_MASTER');
+      expect(unlocked).toContain('CIRCUIT_CHAMPION');
+    });
+  });
+
+  describe('Loadouts, Tonnage, Ultimate Overdrive & Circuits', () => {
+    it('calculates capped dumbbell damage/XP multipliers and ignores unsupported exercises', () => {
+      expect(getLoadoutDamageMultiplier({ mode: 'BODYWEIGHT', weightKg: 0 }, 'OVERHEAD_PRESS')).toBe(1.0);
+      expect(getLoadoutDamageMultiplier({ mode: 'DUMBBELLS', weightKg: 5 }, 'OVERHEAD_PRESS')).toBe(1.2);
+      expect(getLoadoutDamageMultiplier({ mode: 'DUMBBELLS', weightKg: 50 }, 'OVERHEAD_PRESS')).toBe(1.6);
+      expect(getLoadoutDamageMultiplier({ mode: 'DUMBBELLS', weightKg: 5 }, 'PUSH_UP')).toBe(1.0);
+      expect(getLoadoutXpMultiplier({ mode: 'DUMBBELLS', weightKg: 10 }, 'SQUAT')).toBe(1.25);
+    });
+
+    it('tracks tonnage in kg for both dumbbell reps and isometric dumbbell holds', () => {
+      const loadout5kg = { mode: 'DUMBBELLS' as const, weightKg: 5 };
+      expect(calculateTonnageDelta('OVERHEAD_PRESS', 10, 0, loadout5kg)).toBe(100);
+      expect(calculateTonnageDelta('ARM_HOLD', 0, 10, loadout5kg)).toBe(50);
+      expect(calculateTonnageDelta('PUSH_UP', 10, 0, loadout5kg)).toBe(0);
+      expect(calculateTonnageDelta('OVERHEAD_PRESS', 10, 0, { mode: 'BODYWEIGHT', weightKg: 0 })).toBe(0);
+    });
+
+    it('scales ultimate charge & delivers heavy overdrive damage with shield break bonus', () => {
+      expect(calculateUltimateChargeGain({ isHoldTick: false, comboCount: 4 })).toBe(22);
+      expect(calculateUltimateChargeGain({ isHoldTick: true, comboCount: 0 })).toBe(12);
+
+      const player = { ...createPlayer(), critChance: 0 };
+      const enemy: MonsterStats = {
+        id: 'NACHOS',
+        name: 'Nachos',
+        hp: 60,
+        maxHp: 60,
+        attack: 8,
+        defense: 2,
+        xpReward: 30,
+        isBoss: false,
+        shieldHits: 2,
+        maxShieldHits: 2,
+      };
+
+      const { monster, result } = applyDamageToMonster(player, enemy, 1.0, {
+        isUltimate: true,
+      });
+      expect(result.wasUltimate).toBe(true);
+      expect(result.shieldBroken).toBe(true);
+      expect(monster.shieldHits).toBe(0);
+      expect(result.damageDealt).toBe(Math.floor(Math.floor(8 * ULTIMATE_DAMAGE_MULTIPLIER) * 0.5));
+    });
+
+    it('scales workout kcal with dumbbell weight and exposes circuit presets', () => {
+      const baseKcal = estimateWorkoutKcal({ OVERHEAD_PRESS: { reps: 10 } }, 0);
+      const weightedKcal = estimateWorkoutKcal({ OVERHEAD_PRESS: { reps: 10 } }, 10);
+      expect(baseKcal).toBe(4);
+      expect(weightedKcal).toBeGreaterThan(baseKcal);
+
+      const blitz = getCircuitById('FULL_BODY_BLITZ');
+      expect(blitz?.rooms.length).toBeGreaterThanOrEqual(3);
     });
   });
 });

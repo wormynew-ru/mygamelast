@@ -10,6 +10,12 @@ export type BattleRank = 'S' | 'A' | 'B' | 'C';
 export type ItemRarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
 export type ExerciseMatchup = 'WEAK' | 'NEUTRAL' | 'RESISTANT';
 
+export interface EquipmentLoadout {
+  mode: 'BODYWEIGHT' | 'DUMBBELLS';
+  /** Weight per hand in kg (0 when BODYWEIGHT) */
+  weightKg: number;
+}
+
 /**
  * Player character stats.
  */
@@ -58,11 +64,13 @@ export interface MonsterStats {
 export interface CombatResult {
   damageDealt: number;
   wasCritical: boolean;
+  wasUltimate: boolean;
   targetKilled: boolean;
   playerLeveledUp: boolean;
   xpGained: number;
   matchup: ExerciseMatchup;
   comboMultiplier: number;
+  loadoutMultiplier: number;
   shieldHit: boolean;
   shieldBroken: boolean;
 }
@@ -133,6 +141,11 @@ export interface WorkoutStats {
   totalHoldSeconds: number;
   monstersDefeated: number;
   maxCombo: number;
+  totalTonnageKg: number;
+  circuitsCompleted: number;
+  totalEstimatedKcal?: number;
+  totalDurationSec?: number;
+  totalCoinsEarned?: number;
 }
 
 export interface ExerciseTotals {
@@ -147,6 +160,10 @@ export interface DailyActivityEntry {
   battlesWon: number;
   coinsEarned: number;
   estimatedKcal: number;
+  tonnageKg?: number;
+  circuitsCompleted?: number;
+  durationSec?: number;
+  exercises?: Partial<Record<ExerciseId, ExerciseTotals>>;
 }
 
 export interface DailyQuestState {
@@ -180,6 +197,9 @@ export interface ExerciseCalibrationSettings {
   pushupBottomAngle: number;
   plankMinBodyAngle: number;
   jumpingJackPeakArmAngle: number;
+  armHoldMinShoulderAngle: number;
+  wallSitMaxKneeAngle: number;
+  overheadPressTopAngle: number;
 }
 
 /**
@@ -189,6 +209,7 @@ export interface GameState {
   player: PlayerStats;
   inventory: Inventory;
   coins: number;
+  loadout: EquipmentLoadout;
   currentLevel: string | null;
   unlockedLevels: string[];
   completedLevels: string[];

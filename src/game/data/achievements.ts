@@ -16,7 +16,10 @@ export type AchievementId =
   | 'COMBO_MASTER'
   | 'ARENA_SURVIVOR'
   | 'STREAK_WARRIOR'
-  | 'BESTIARY_SCHOLAR';
+  | 'BESTIARY_SCHOLAR'
+  | 'IRON_TONNAGE'
+  | 'STATIC_MASTER'
+  | 'CIRCUIT_CHAMPION';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -79,6 +82,25 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'BESTIARY_SCHOLAR',
     icon: '📖',
     check: (state) => Object.keys(state.bestiary ?? {}).length >= 5,
+  },
+  {
+    id: 'IRON_TONNAGE',
+    icon: '🏋️',
+    check: (state) => (state.workoutStats.totalTonnageKg ?? 0) >= 500,
+  },
+  {
+    id: 'STATIC_MASTER',
+    icon: '🧘',
+    check: (state) =>
+      (state.exerciseTotals.PLANK?.holdSeconds ?? 0) +
+        (state.exerciseTotals.ARM_HOLD?.holdSeconds ?? 0) +
+        (state.exerciseTotals.WALL_SIT?.holdSeconds ?? 0) >=
+      60,
+  },
+  {
+    id: 'CIRCUIT_CHAMPION',
+    icon: '🔁',
+    check: (state) => (state.workoutStats.circuitsCompleted ?? 0) >= 1,
   },
 ];
 
