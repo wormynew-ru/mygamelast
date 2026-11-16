@@ -21,7 +21,8 @@ export type AchievementId =
   | 'STATIC_MASTER'
   | 'CIRCUIT_CHAMPION'
   | 'GARDENER'
-  | 'WEED_SLAYER';
+  | 'WEED_SLAYER'
+  | 'BOTANICAL_ALCHEMIST';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -113,6 +114,11 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'WEED_SLAYER',
     icon: '🌿',
     check: (state) => (state.garden?.weedsDefeated ?? 0) >= 3,
+  },
+  {
+    id: 'BOTANICAL_ALCHEMIST',
+    icon: '⚗️',
+    check: (state) => (state.sanctuary?.totalCrafted ?? 0) >= 3,
   },
 ];
 

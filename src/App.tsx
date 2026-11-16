@@ -13,6 +13,7 @@ import { BestiaryAnalyticsScreen } from './ui/BestiaryAnalyticsScreen';
 import { BattleScreen } from './ui/BattleScreen';
 import { CalibrationSandbox } from './ui/CalibrationSandbox';
 import { GardenScreen } from './ui/GardenScreen';
+import { SanctuaryScreen } from './ui/SanctuaryScreen';
 import { SettingsScreen } from './ui/SettingsScreen';
 import { OfflineIndicator } from './ui/PWAInstallButton';
 import { VoiceControlProvider, useVoiceCommandHandler } from './ui/VoiceControl';
@@ -29,6 +30,7 @@ type Screen =
   | 'MENU'
   | 'CAMPAIGN'
   | 'GARDEN'
+  | 'SANCTUARY'
   | 'INVENTORY'
   | 'BESTIARY'
   | 'BATTLE'
@@ -181,6 +183,9 @@ function AppContent() {
       case 'NAV_GARDEN':
         setCurrentScreen('GARDEN');
         return true;
+      case 'NAV_SANCTUARY':
+        setCurrentScreen('SANCTUARY');
+        return true;
       case 'NAV_CALIBRATION':
         setCurrentScreen('CALIBRATION');
         return true;
@@ -221,6 +226,7 @@ function AppContent() {
           }}
           onQuickBattle={handleQuickBattle}
           onGarden={() => setCurrentScreen('GARDEN')}
+          onSanctuary={() => setCurrentScreen('SANCTUARY')}
           onInventory={() => setCurrentScreen('INVENTORY')}
           onBestiary={() => setCurrentScreen('BESTIARY')}
           onCalibration={() => setCurrentScreen('CALIBRATION')}
@@ -232,6 +238,18 @@ function AppContent() {
         <GardenScreen
           onBack={() => setCurrentScreen('MENU')}
           onStartWeedBattle={handleStartWeedBattle}
+          onOpenSanctuary={() => setCurrentScreen('SANCTUARY')}
+        />
+      )}
+
+      {currentScreen === 'SANCTUARY' && (
+        <SanctuaryScreen
+          onBack={() => setCurrentScreen('MENU')}
+          onOpenGarden={() => setCurrentScreen('GARDEN')}
+          onOpenBattle={() => {
+            setLevelSelectTab('CAMPAIGN');
+            setCurrentScreen('CAMPAIGN');
+          }}
         />
       )}
 
@@ -242,6 +260,7 @@ function AppContent() {
           onStartEncounter={handleStartEncounter}
           onStartEndless={handleStartEndless}
           onStartCircuit={handleStartCircuit}
+          onOpenSanctuary={() => setCurrentScreen('SANCTUARY')}
         />
       )}
 

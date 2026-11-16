@@ -92,6 +92,9 @@ describe('VoiceCommandEngine parser', () => {
       metric: 'VOLUME',
     });
     expect(parseVoiceCommand('личный сад')?.command).toEqual({ type: 'NAV_GARDEN' });
+    expect(parseVoiceCommand('убежище')?.command).toEqual({ type: 'NAV_SANCTUARY' });
+    expect(parseVoiceCommand('фито лаборатория')?.command).toEqual({ type: 'NAV_SANCTUARY' });
+    expect(parseVoiceCommand('sanctuary')?.command).toEqual({ type: 'NAV_SANCTUARY' });
     expect(parseVoiceCommand('полить все')?.command).toEqual({ type: 'GARDEN_WATER' });
     expect(parseVoiceCommand('собрать урожай')?.command).toEqual({ type: 'GARDEN_HARVEST' });
     expect(parseVoiceCommand('битва с сорняками')?.command).toEqual({ type: 'GARDEN_WEED' });

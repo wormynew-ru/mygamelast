@@ -15,8 +15,10 @@ import {
   BookOpen,
   CalendarCheck,
   Sprout,
+  FlaskConical,
 } from 'lucide-react';
 import { isPlotReadyToHarvest } from '../game/data/garden';
+import { getTotalMixCount } from '../game/data/sanctuary';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { ACHIEVEMENTS } from '../game/data/achievements';
 import {
@@ -35,6 +37,7 @@ interface MainMenuProps {
   onOpenCampaign: () => void;
   onQuickBattle: () => void;
   onGarden: () => void;
+  onSanctuary: () => void;
   onInventory: () => void;
   onBestiary: () => void;
   onCalibration: () => void;
@@ -51,6 +54,7 @@ export function MainMenu({
   onOpenCampaign,
   onQuickBattle,
   onGarden,
+  onSanctuary,
   onInventory,
   onBestiary,
   onCalibration,
@@ -69,6 +73,7 @@ export function MainMenu({
   const dailyHistory = useGameStore((state) => state.dailyHistory);
   const endlessStats = useGameStore((state) => state.endlessStats);
   const garden = useGameStore((state) => state.garden);
+  const sanctuary = useGameStore((state) => state.sanctuary);
   const claimDailyQuest = useGameStore((state) => state.claimDailyQuest);
   const syncAchievements = useGameStore((state) => state.syncAchievements);
 
@@ -78,6 +83,7 @@ export function MainMenu({
   const activeWeedCount = garden.plots
     .slice(0, garden.unlockedPlots)
     .filter((p) => p.weedId !== null).length;
+  const totalMixes = getTotalMixCount(sanctuary.mixInventory);
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const attackBonus = effectivePlayer.attack - basePlayer.attack;
@@ -130,6 +136,12 @@ export function MainMenu({
               {t('menu.garden')}
             </button>
             <button
+              onClick={onSanctuary}
+              className="hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
+            >
+              {t('menu.sanctuary')}
+            </button>
+            <button
               onClick={onInventory}
               className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
             >
@@ -140,12 +152,6 @@ export function MainMenu({
               className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
             >
               {t('menu.bestiary')}
-            </button>
-            <button
-              onClick={onSettings}
-              className="hover:text-slate-100 transition-colors whitespace-nowrap shrink-0"
-            >
-              {t('menu.settings')}
             </button>
           </nav>
 
@@ -326,6 +332,26 @@ export function MainMenu({
                 </div>
               </div>
               <Sprout className="w-5 h-5 text-emerald-400 shrink-0" />
+            </button>
+
+            <button
+              onClick={onSanctuary}
+              className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-600/60 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            >
+              <div>
+                <div className="text-base font-semibold text-white">{t('menu.sanctuary')}</div>
+                <div className="text-xs text-slate-400 mt-0.5 font-numeric">
+                  {sanctuary.activeBuffs.length > 0 ? (
+                    <span className="text-emerald-400 font-semibold">
+                      {t('sanctuary.alreadyArmed')}: {sanctuary.activeBuffs.length} ·{' '}
+                    </span>
+                  ) : null}
+                  {totalMixes > 0
+                    ? `${t('sanctuary.inStock')}: ${totalMixes}`
+                    : t('menu.sanctuaryDesc')}
+                </div>
+              </div>
+              <FlaskConical className="w-5 h-5 text-emerald-400 shrink-0" />
             </button>
 
             <button

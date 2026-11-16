@@ -42,6 +42,7 @@ import {
 } from './data/dailyQuests';
 import { evaluateNewAchievements } from './data/achievements';
 import { createInitialGardenState } from './data/garden';
+import { createInitialSanctuaryState } from './data/sanctuary';
 import type { PlayerStats, MonsterStats, GameState } from './types';
 
 describe('CombatEngine', () => {
@@ -602,6 +603,7 @@ describe('CombatEngine', () => {
         },
         endlessStats: { bestWave: 5, totalArenaWins: 5 },
         garden: createInitialGardenState(),
+        sanctuary: createInitialSanctuaryState(),
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
@@ -692,6 +694,43 @@ describe('CombatEngine', () => {
 
       const blitz = getCircuitById('FULL_BODY_BLITZ');
       expect(blitz?.rooms.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('applies Sanctuary botanical buffs to stats, Ult charge, XP gain, and incoming damage mitigation', () => {
+      const base = createPlayer();
+      const effective = getEffectivePlayerStats(
+        base,
+        [],
+        ITEMS,
+        ['MINT_ISOTONIC', 'BAMBOO_FORTIFIER', 'LOTUS_NECTAR'],
+        3
+      );
+
+      expect(effective.attack).toBe(base.attack + 5);
+      expect(effective.defense).toBe(base.defense + 7);
+      expect(effective.critChance).toBeCloseTo(base.critChance + 0.1, 4);
+      expect(effective.comboWindowBonusMs).toBe(1000);
+
+      expect(
+        calculateUltimateChargeGain({ isHoldTick: false, comboCount: 0, chargeMultiplier: 1.4 })
+      ).toBe(25);
+
+      const enemy: MonsterStats = {
+        id: 'SODA',
+        name: 'Soda',
+        hp: 10,
+        maxHp: 30,
+        attack: 5,
+        defense: 0,
+        xpReward: 100,
+        isBoss: false,
+      };
+      const { result } = applyDamageToMonster(base, enemy, 1.0, { xpMultiplier: 1.3 });
+      expect(result.xpGained).toBe(130);
+
+      const mitigated = calculateMonsterCounterAttack(base, 25, false, 0.75);
+      // raw = 25 - 5 = 20 -> 20 * 0.75 = 15
+      expect(mitigated.damageTaken).toBe(15);
     });
   });
 });

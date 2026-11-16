@@ -27,6 +27,7 @@ export type VoiceCommand =
   | { type: 'NAV_CALIBRATION' }
   | { type: 'NAV_SETTINGS' }
   | { type: 'NAV_GARDEN' }
+  | { type: 'NAV_SANCTUARY' }
   | { type: 'GARDEN_WATER' }
   | { type: 'GARDEN_HARVEST' }
   | { type: 'GARDEN_WEED' }
@@ -257,6 +258,10 @@ const PHRASE_RULES: readonly PhraseRule[] = [
   {
     phrases: ['личный сад', 'мой сад', 'огород', 'сад', 'грядки', 'грядка', 'my garden', 'garden'],
     build: () => ({ type: 'NAV_GARDEN' }),
+  },
+  {
+    phrases: ['убежище', 'фито лаборатория', 'миксы', 'mix lab', 'sanctuary', 'hideout'],
+    build: () => ({ type: 'NAV_SANCTUARY' }),
   },
   {
     phrases: ['полить все', 'полить сад', 'полить', 'полив', 'лейка', 'water garden', 'water all', 'water'],

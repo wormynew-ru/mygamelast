@@ -111,16 +111,16 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 
 #### **Audio System (100% complete, 15 tests)**
 - ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (8 synthesized sounds incl. `WARNING` two-tone strike alert, NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
-- ✅ `src/audio/VoiceCommandEngine.ts` — Pure client-side Web Speech API (`SpeechRecognition`) hands-free command parser & continuous recognizer (`parseVoiceCommand` for RU/EN battle controls, navigation incl. `NAV_GARDEN`, garden actions `GARDEN_WATER`/`GARDEN_HARVEST`/`GARDEN_WEED`, all 7 exercises, dumbbell weights, circuits, analytics periods/metrics + cooldown deduplication + auto-restart) + 5 tests
+- ✅ `src/audio/VoiceCommandEngine.ts` — Pure client-side Web Speech API (`SpeechRecognition`) hands-free command parser & continuous recognizer (`parseVoiceCommand` for RU/EN battle controls, navigation incl. `NAV_GARDEN` & `NAV_SANCTUARY`, garden actions `GARDEN_WATER`/`GARDEN_HARVEST`/`GARDEN_WEED`, all 7 exercises, dumbbell weights, circuits, analytics periods/metrics + cooldown deduplication + auto-restart) + 5 tests
 
-#### **Game System (100% complete, 56 tests)**
-- ✅ `src/game/types.ts` — RPG, `EquipmentLoadout`, `PoseComputeDelegate` (`'GPU' | 'CPU'`), `WorkoutStats` (incl. `totalTonnageKg`, `circuitsCompleted`, `totalEstimatedKcal`, `totalDurationSec`, `totalCoinsEarned`), `DailyActivityEntry` (with per-exercise breakdown, `circuitsCompleted`, `durationSec`), `GardenState` (with `seedInventory` & `cropInventory`), `GardenPlotState`, `SeedId`, `WeedId`, `WateringCanTier`, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, `ExerciseCalibrationSettings`, and `settings.voiceControlEnabled` interfaces
-- ✅ `src/game/CombatEngine.ts` — Damage calculation, Dumbbell Loadout scaling (`getLoadoutDamageMultiplier` up to `×1.6`, `getLoadoutXpMultiplier` up to `×1.3`, `calculateTonnageDelta`), Ultimate Overdrive (`calculateUltimateChargeGain`, `ULTIMATE_CHARGE_MAX = 100`, `ULTIMATE_DAMAGE_MULTIPLIER = 1.8`), Tempo Combo streaks, exercise matchups, enemy shield mitigation, Boss Phase 1 Grease Shield, Toxic debuff, Battle Rank, weight-adjusted `estimateWorkoutKcal`, counter-attacks + hold blocking, equipment bonuses, consumable healing, loot drops + 45 tests
-- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 11`, backwards-compatible `v0–v11` `migrateGameState`), `garden` state (`normalizeGardenState` incl. `cropInventory`) & full garden actions (`harvestPlot` yields XP + raw harvested crops into `cropInventory` instead of Fit-Coins), `voiceControlEnabled` setting, `poseDelegate: 'GPU' | 'CPU'` setting (defaults to `'GPU'`), `loadout` state + `setLoadout`, `targetPoseFps: 15 | 30 | 60` setting, Fit-Coins economy, daily quest claims, 7-day streak tracking, 400-day activity history, Bestiary tracking, Endless Arena records, 16-achievement sync, 7-exercise calibration, language hydration sync
-- ✅ `src/game/data/` — `exercises.ts` (7 exercises + `supportsDumbbellWeight`), `monsters.ts` (13 monsters across 4 archetypes: 10 fast-food enemies + 3 garden weeds `WEED_DANDELION`/`WEED_THISTLE`/`WEED_VINE`), `circuits.ts` (3 presets), `items.ts` (10 items across 4 rarities + `SHOP_ITEM_IDS`), `levels.ts` (5 campaign stages), `dailyQuests.ts`, `achievements.ts` (16 achievements incl. `GARDENER` & `WEED_SLAYER`), `garden.ts` (Personal Fitness Garden engine: 4 seed tiers yielding XP + raw plants `harvestCropYield`, 4 watering cans, 6 plots, workout auto-growth/water refill/weed spawns, normalization + 7 tests), `sanctuary.ts` (Sanctuary / Hideout foundation: 4 planned botanical mix blueprints `SANCTUARY_MIX_BLUEPRINTS` & ingredient readiness helpers + 2 tests), `analytics.ts` (+ 2 tests)
+#### **Game System (100% complete, 60 tests)**
+- ✅ `src/game/types.ts` — RPG, `EquipmentLoadout`, `PoseComputeDelegate` (`'GPU' | 'CPU'`), `WorkoutStats`, `DailyActivityEntry`, `GardenState` (`seedInventory` & `cropInventory`), `SanctuaryState` (`SanctuaryLabTier` `1..3`, `SanctuaryMixId`, `mixInventory`, `activeBuffs`, `totalCrafted`), `GardenPlotState`, `SeedId`, `WeedId`, `WateringCanTier`, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, `ExerciseCalibrationSettings`
+- ✅ `src/game/CombatEngine.ts` — Damage calculation, Dumbbell Loadout scaling (`getLoadoutDamageMultiplier` up to `×1.6`, `getLoadoutXpMultiplier` up to `×1.3`, `calculateTonnageDelta`), Sanctuary buff integration (`getEffectivePlayerStats`, `calculateUltimateChargeGain` `chargeMultiplier`, `applyDamageToMonster` `xpMultiplier`, `calculateMonsterCounterAttack` `incomingDamageMultiplier`), Ultimate Overdrive, Tempo Combo streaks, exercise matchups, enemy shield mitigation, Boss Phase 1 Grease Shield, Toxic debuff, Battle Rank, weight-adjusted `estimateWorkoutKcal`, counter-attacks + hold blocking, equipment bonuses, consumable healing, loot drops + 46 tests
+- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`version: 12`, backwards-compatible `v0–v12` `migrateGameState`), Sanctuary state & actions (`craftMix`, `activateMixBuff`, `upgradeSanctuaryLab`, `consumeActiveSanctuaryBuffs`), `garden` state & actions, `voiceControlEnabled`, `poseDelegate: 'GPU' | 'CPU'`, `loadout`, `targetPoseFps: 15 | 30 | 60`, Fit-Coins economy, daily quests, 7-day streak, 400-day activity history, Bestiary, Endless Arena, 17 achievements sync, calibration, language sync
+- ✅ `src/game/data/` — `exercises.ts` (7 exercises), `monsters.ts` (13 monsters across 4 archetypes), `circuits.ts` (3 presets), `items.ts` (10 items), `levels.ts` (5 stages), `dailyQuests.ts`, `achievements.ts` (17 achievements incl. `GARDENER`, `WEED_SLAYER`, `BOTANICAL_ALCHEMIST`), `garden.ts` (+ 7 tests), `sanctuary.ts` (3 lab tiers, 4 botanical mixes, heal scaling, normalization & buff aggregation + 5 tests), `analytics.ts` (+ 2 tests)
 
-#### **Session Layer (100% complete, 18 tests)**
-- ✅ `src/session/WorkoutSession.ts` — Coordinator (`CAMPAIGN` | `ENDLESS` | `CIRCUIT` | `WEED`), passes `poseDelegate` (`'GPU' | 'CPU'`) and tracks runtime `poseDelegate` / `poseDelegateFallback` in `SessionStatus`, `advanceCircuitRoom()` mid-run switching without restarting camera, `WEED` garden battle victory clearing infested plots via `defeatPlotWeed()` while suppressing duplicate spawns (`suppressWeedSpawn: true`), Ultimate Overdrive `0..100%` charge & stun (resets enemy attack windup), universal static hold block & 3-tick Toxic debuff cleanse (`debuffCleansedId`), dumbbell tonnage/kcal/duration tracking, Circuit clear bonus coins/XP/loot chest, `startToken` async cancellation, Screen Wake Lock, auto-pause, audio unlock API + 18 tests
+#### **Session Layer (100% complete, 19 tests)**
+- ✅ `src/session/WorkoutSession.ts` — Coordinator (`CAMPAIGN` | `ENDLESS` | `CIRCUIT` | `WEED`), Sanctuary pre-battle buffs (starting Ultimate charge, charge/XP multipliers, incoming damage mitigation & automatic post-battle/circuit-completion/defeat buff consumption), `poseDelegate` (`'GPU' | 'CPU'`) tracking, `advanceCircuitRoom()`, `WEED` victory handling, Ultimate Overdrive, static hold block & 3-tick Toxic cleanse, tonnage/kcal tracking, `startToken` async cancellation, Screen Wake Lock, auto-pause + 19 tests
 
 #### **Localization Layer (100% complete)**
 - ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Full RU/EN translation dictionaries covering all Junk Slayer 3.0 features, Personal Fitness Garden (crops, XP rewards, Botanical Stash, Sanctuary Mix Lab previews, watering cans, weeds), and voice commands
@@ -134,24 +134,25 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 
 #### **UI Layer (Complete Junk Slayer 3.0 RPG, Garden, Botanical Stash, Loadouts, Circuits & Analytics)**
 - ✅ `src/ui/gameKeys.ts` — Shared lookup dictionary mapping all 7 exercises, 13 monsters, 3 circuits, 10 items, 4 seeds, 4 watering cans, 4 planned Sanctuary mixes, and 16 achievements to i18n keys
-- ✅ `src/ui/MainMenu.tsx` — Hero RPG card (with Total Tonnage & Circuits Completed), Personal Garden entry card with live ready-to-harvest / weed alerts, Daily Quests & 7-day Streak calendar strip, PWA install CTA, 16-badge Achievements grid
-- ✅ `src/ui/GardenScreen.tsx` — Personal Fitness Garden hub: watering can status & refill/upgrade, "Water All" / "Harvest All" / "Weed Patrol" controls, 6 unlockable plots harvesting XP + raw plants, Botanical Stash ("Склад растений") panel, Seed/Tool/Sanctuary Mix Lab (`Убежище`) tabs, herbicide quick-clear, and Weed Battle setup modal
-- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena | Circuit Dungeon` selector, Bodyweight vs Dumbbell (`1..15 kg` per hand) Loadout switcher, 7-exercise picker, 3 Circuit cards
+- ✅ `src/ui/MainMenu.tsx` — Hero RPG card, Sanctuary Hub card (active buffs & mix count) + top nav Sanctuary button, Personal Garden entry card with live alerts, Daily Quests & 7-day Streak strip, PWA install CTA, 17-badge Achievements grid
+- ✅ `src/ui/GardenScreen.tsx` — Personal Fitness Garden hub: watering can upgrades/refills, "Water All" / "Harvest All" / "Weed Patrol", 6 plots harvesting XP + raw plants, Botanical Stash panel with Sanctuary shortcut, Seed/Tool/Sanctuary Mix Lab tabs, herbicide quick-clear, and Weed Battle modal
+- ✅ `src/ui/SanctuaryScreen.tsx` — Hero's Hideout & Botanical Mix Lab: active pre-battle buff slots (`1..3`), Lab tier upgrades (`1→2→3`), 4 craftable mixes from Garden crops (`MINT_ISOTONIC`, `BAMBOO_FORTIFIER`, `CHILI_OVERDRIVE_SHOT`, `LOTUS_NECTAR`) with instant healing + combat buffs, Botanical Stash summary, and voice shortcuts
+- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena | Circuit Dungeon` selector, Bodyweight vs Dumbbell (`1..15 kg` per hand) Loadout switcher, active Sanctuary buff status / quick shortcut, 7-exercise picker, 3 Circuit cards
 - ✅ `src/ui/InventoryScreen.tsx` — Segmented `Bag | Shop` tabs with Fit-Coins, 4-tier rarity labels, equipment equip/unequip, consumables (used strictly between battles), and Botanical Stash crop inventory section
 - ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — Multi-period workout analytics (`TODAY`, `WEEK`, `MONTH`, `YEAR`, `ALL`) with KPI grid (`~kcal`, reps, hold seconds, tonnage, wins, circuits, coins, battle time), Volume/Calories/Tonnage chart metric toggle, per-exercise breakdown across 7 exercises, lifetime records, and detailed 13-monster Bestiary (category filters `All / Fast Food / Bosses / Weeds`, base `HP/ATK/DEF`, attack interval, shield charges, XP/Coin rewards, boss phase thresholds, archetype mechanics, habitats, Endless scaling info & personal records)
-- ✅ `src/ui/SettingsScreen.tsx` — RU/EN language switcher, Sound/Voice cues/Hands-Free Voice Control toggles (+ command cheatsheet incl. garden commands), Front/Rear camera selector, Pose Detection FPS (`15 FPS | 30 FPS | 60 FPS`) selector, Neural Compute Engine (`GPU (WebGL) | CPU (WASM)`) selector, in-app reset confirmation modal
-- ✅ `src/ui/BattleScreen.tsx` — Live CV arena supporting `CAMPAIGN`, `ENDLESS`, `CIRCUIT`, and `WEED` battles (preserving `weedId` across victory/defeat/retry & routing back to Garden), Tempo Combo meter, Ultimate Overdrive bar (`0..100%`), Dumbbell Loadout badge, live `GPU` / `CPU` delegate badge, universal static hold block & 3s Toxic cleanse indicator, Circuit room rest countdown (`advanceCircuitRoom()` keeping camera alive), Victory Rank `S/A/B/C` + Fit-Coins + Tonnage + `~kcal` summary, and voice command toggle/controls
+- ✅ `src/ui/SettingsScreen.tsx` — RU/EN language switcher, Sound/Voice cues/Hands-Free Voice Control toggles (+ command cheatsheet incl. garden & sanctuary commands), Front/Rear camera selector, Pose Detection FPS (`15 FPS | 30 FPS | 60 FPS`) selector, Neural Compute Engine (`GPU (WebGL) | CPU (WASM)`) selector, in-app reset confirmation modal
+- ✅ `src/ui/BattleScreen.tsx` — Live CV arena supporting `CAMPAIGN`, `ENDLESS`, `CIRCUIT`, and `WEED` battles, Tempo Combo meter, Ultimate Overdrive bar (`0..100%`), Dumbbell Loadout badge, live `GPU` / `CPU` delegate badge, active Sanctuary buffs indicator + Endless exit buff consumption, universal static hold block & 3s Toxic cleanse indicator, Circuit room rest countdown, Victory Rank `S/A/B/C`, and voice command controls
 - ✅ `src/ui/VoiceControl.tsx` — `VoiceControlProvider`, LIFO `useVoiceCommandHandler` hook, `<VoiceToggleButton />`, and floating command feedback toast
 - ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 7 detectors) respecting `poseDelegate` (`GPU`/`CPU`) with live backend badge, persistent live angle-threshold sliders & voice exercise switching
-- ✅ `src/App.tsx` — Root screen router (`MENU | CAMPAIGN | GARDEN | INVENTORY | BESTIARY | BATTLE | CALIBRATION | SETTINGS`) wrapped in `VoiceControlProvider` + global `OfflineIndicator`
+- ✅ `src/App.tsx` — Root screen router (`MENU | CAMPAIGN | GARDEN | SANCTUARY | INVENTORY | BESTIARY | BATTLE | CALIBRATION | SETTINGS`) wrapped in `VoiceControlProvider` + global `OfflineIndicator`
 
 #### **Documentation**
 - ✅ `README.md` — Comprehensive Russian technical & user guide
-- ✅ `ROADMAP.md` — Persistent feature roadmap (v1.0–v3.0 + Personal Garden & Voice Control complete, post-v3.0 backlog)
+- ✅ `ROADMAP.md` — Persistent feature roadmap (v1.0–v3.0 incl. Garden & Sanctuary Mix Lab complete, post-v3.0 backlog)
 
 ### 6.2 Test Coverage Summary
 
-**Total: 214/214 tests passing across 16 test files (100% ✅)**
+**Total: 219/219 tests passing across 16 test files (100% ✅)**
 
 | File | Tests | Status |
 |------|-------|--------|
@@ -166,16 +167,13 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 | `PoseTracker.test.ts` | 15 | ✅ Pass |
 | `SoundFX.test.ts` | 10 | ✅ Pass |
 | `VoiceCommandEngine.test.ts` | 5 | ✅ Pass |
-| `CombatEngine.test.ts` | 45 | ✅ Pass |
+| `CombatEngine.test.ts` | 46 | ✅ Pass |
 | `analytics.test.ts` | 2 | ✅ Pass |
 | `garden.test.ts` | 7 | ✅ Pass |
-| `sanctuary.test.ts` | 2 | ✅ Pass |
-| `WorkoutSession.test.ts` | 18 | ✅ Pass |
+| `sanctuary.test.ts` | 5 | ✅ Pass |
+| `WorkoutSession.test.ts` | 19 | ✅ Pass |
 
 ### 6.3 What's NOT Implemented Yet ❌
-
-#### **Next Major Milestone — Sanctuary & Botanical Mix Crafting (see `ROADMAP.md`):**
-- ⏳ **Sanctuary Screen (`Убежище`) & Mix Lab**: Interactive crafting of harvested crops (`cropInventory`) into tonics, isotonics, and pre-battle buffs (`MINT_ISOTONIC`, `BAMBOO_FORTIFIER`, `CHILI_OVERDRIVE_SHOT`, `LOTUS_NECTAR`), plus combat buff integration in `WorkoutSession` / `CombatEngine` and Sanctuary upgrades
 
 #### **Future Polish / Post-v3.0 Roadmap (see `ROADMAP.md`):**
 - ⏳ Automated E2E synthetic webcam stream tests (real-time MediaPipe pose injection in Playwright CI)
@@ -212,14 +210,14 @@ src/
 │       ├── WallSitDetector.ts / .test.ts       ✅ (4 tests)
 │       └── OverheadPressDetector.ts / .test.ts ✅ (3 tests)
 │
-├── session/                         ✅ Complete (18 tests)
-│   ├── WorkoutSession.ts           ✅ Coordinator (Campaign/Endless/Circuit/Weed), GPU/CPU delegate, Overdrive stun, Toxic cleanse, tonnage, counter-attacks
+├── session/                         ✅ Complete (19 tests)
+│   ├── WorkoutSession.ts           ✅ Coordinator (Campaign/Endless/Circuit/Weed), Sanctuary combat buffs, GPU/CPU delegate, Overdrive stun, Toxic cleanse, tonnage
 │   └── WorkoutSession.test.ts      ✅
 │
-├── game/                            ✅ Complete (56 tests)
-│   ├── types.ts                    ✅ RPG, Garden (incl. cropInventory), Loadout, PoseComputeDelegate, Tonnage, Combo, Rank, Economy, DailyQuests, Streaks, Bestiary, Endless, Calibration & Achievement interfaces
-│   ├── CombatEngine.ts / .test.ts  ✅ Combat, loadouts, tonnage, Overdrive, combos, matchups, shields, boss transitions, toxic debuff, ranks, kcal, counter-attacks, gear, consumables (45 tests)
-│   ├── store.ts                    ✅ Zustand v11 persist + backwards-compatible v0–v11 migration + poseDelegate ('GPU'|'CPU') + garden crop harvests + 400-day dailyHistory + Map serializer
+├── game/                            ✅ Complete (60 tests)
+│   ├── types.ts                    ✅ RPG, Garden, Sanctuary (`SanctuaryState`), Loadout, PoseComputeDelegate, Tonnage, Combo, Rank, Economy, DailyQuests, Streaks, Bestiary, Endless, Calibration & Achievement interfaces
+│   ├── CombatEngine.ts / .test.ts  ✅ Combat, Sanctuary stat/charge/XP/damage multipliers, loadouts, tonnage, Overdrive, combos, matchups, shields, boss transitions, toxic debuff, ranks, kcal, counter-attacks, gear, consumables (46 tests)
+│   ├── store.ts                    ✅ Zustand v12 persist + backwards-compatible v0–v12 migration + Sanctuary crafting/buffs/lab upgrades + garden crop harvests + 400-day dailyHistory + Map serializer
 │   └── data/
 │       ├── exercises.ts            ✅ 7 exercises (rep/hold + dumbbell support)
 │       ├── monsters.ts             ✅ 13 monsters (4 archetypes; 10 enemies + 3 garden weeds) + createEndlessWaveMonster
@@ -227,9 +225,9 @@ src/
 │       ├── items.ts                ✅ 10 items (4 rarities) + SHOP_ITEM_IDS
 │       ├── levels.ts               ✅ 5 campaign stages + drop tables
 │       ├── dailyQuests.ts          ✅ Deterministic Daily Quests & 7-day Streak calendar helpers
-│       ├── achievements.ts         ✅ 16 achievements + pure evaluator
+│       ├── achievements.ts         ✅ 17 achievements + pure evaluator
 │       ├── garden.ts / .test.ts    ✅ Personal Fitness Garden (4 seeds yielding XP + crops, 4 cans, 6 plots, weeds & drops) (7 tests)
-│       ├── sanctuary.ts / .test.ts ✅ Sanctuary mix blueprints & ingredient readiness helpers (2 tests)
+│       ├── sanctuary.ts / .test.ts ✅ Sanctuary Lab tiers (`1..3`), 4 craftable mixes, heal scaling, normalization & aggregated buff math (5 tests)
 │       └── analytics.ts / .test.ts ✅ Multi-period workout analytics aggregator (Today/7d/Month/Year/All) (2 tests)
 │
 ├── audio/                           ✅ Complete (15 tests)
@@ -242,16 +240,17 @@ src/
 │   ├── ru.ts                       ✅ Primary Russian translations
 │   └── en.ts                       ✅ Secondary English translations
 │
-└── ui/                              ✅ Complete Junk Slayer 3.0 RPG, Garden, Botanical Stash & PWA UI Flow
-    ├── gameKeys.ts                 ✅ Shared entity/seed/can/sanctuaryMix/circuit/archetype/rarity i18n lookup dictionary
+└── ui/                              ✅ Complete Junk Slayer 3.0 RPG, Garden, Sanctuary Mix Lab & PWA UI Flow
+    ├── gameKeys.ts                 ✅ Shared entity/seed/can/sanctuaryMix/sanctuaryLab/circuit/archetype/rarity i18n lookup dictionary
     ├── VoiceControl.tsx            ✅ VoiceControlProvider, useVoiceCommandHandler, VoiceToggleButton & toast
-    ├── MainMenu.tsx                ✅ Hero profile (Tonnage & Circuits), Garden alerts, Fit-Coins, Daily Quests & Streak strip, 16-item Achievements
-    ├── GardenScreen.tsx            ✅ Personal Fitness Garden UI (6 plots harvesting crops + XP, Botanical Stash, Sanctuary Mix Lab preview tab, Weed Patrol)
-    ├── LevelSelectScreen.tsx       ✅ Campaign / Endless Arena / Circuit Dungeons + Bodyweight/Dumbbell Loadout bar + 7 exercises
+    ├── MainMenu.tsx                ✅ Hero profile, Sanctuary hub card, Garden alerts, Fit-Coins, Daily Quests & Streak strip, 17-item Achievements
+    ├── GardenScreen.tsx            ✅ Personal Fitness Garden UI (6 plots harvesting crops + XP, Botanical Stash, Sanctuary shortcuts, Weed Patrol)
+    ├── SanctuaryScreen.tsx         ✅ Hero Hideout & Mix Lab UI (Lab tier upgrades 1..3, 1..3 buff slots, 4 craftable mixes, Botanical Stash link)
+    ├── LevelSelectScreen.tsx       ✅ Campaign / Endless Arena / Circuit Dungeons + Bodyweight/Dumbbell Loadout bar + Sanctuary buff link + 7 exercises
     ├── InventoryScreen.tsx         ✅ Segmented Bag (incl. Botanical Stash) & Fit-Coins Shop (4 rarities, consumables, gear)
     ├── BestiaryAnalyticsScreen.tsx ✅ Multi-period workout analytics (Today/7d/Month/Year/All), KPI grid, metric chart toggle & detailed 13-monster Bestiary (filters, full combat stats, traits, habitats)
     ├── SettingsScreen.tsx          ✅ Language, audio, voice commands, camera, 15/30/60 FPS, GPU/CPU neural delegate selector, reset modal
-    ├── BattleScreen.tsx            ✅ Live CV arena (incl. WEED mode), GPU/CPU badge, Combo + Ultimate Overdrive bars, Dumbbell tag, Hold block/cleanse, Circuit room rest countdown
+    ├── BattleScreen.tsx            ✅ Live CV arena (incl. WEED mode), GPU/CPU badge, active Sanctuary buffs bar, Combo + Ultimate Overdrive bars, Dumbbell tag, Hold block/cleanse, Circuit room rest countdown
     ├── CalibrationSandbox.tsx      ✅ 7-exercise calibration + GPU/CPU delegate status + angle threshold sliders
     └── PWAInstallButton.tsx        ✅ Chromium/iOS install prompt + OfflineIndicator
 ```
@@ -261,7 +260,7 @@ src/
 ```bash
 ✅ npm run typecheck  — Strict TypeScript, 0 errors
 ✅ npm run lint       — ESLint strict boundaries & no-any, 0 errors / 0 warnings
-✅ npm test           — 214/214 tests passing (16/16 files)
+✅ npm test           — 219/219 tests passing (16/16 files)
 ✅ npm run build      — Clean Vite production build + PWA manifest & Service Worker
 ```
 
@@ -293,9 +292,12 @@ npm run dev
 
 ### 6.9 Session History & Timestamps
 
-**Latest update:** 2026-11-16 15:40 UTC
+**Latest update:** 2026-11-16 15:45 UTC
 
 **Recent work:**
+- ✅ 2026-11-16: **Sanctuary (`Убежище`) & Botanical Mix Lab (`SanctuaryScreen.tsx`, `sanctuary.ts`, `store.ts` v12, `CombatEngine.ts`, `WorkoutSession.ts`, `App.tsx`, `MainMenu.tsx`, `GardenScreen.tsx`, `LevelSelectScreen.tsx`, `BattleScreen.tsx`, `VoiceCommandEngine.ts`, `achievements.ts`)**:
+  - Built standalone `SanctuaryScreen` with Lab tier upgrades (`1→2→3` unlocking `1–3` buff slots, `1.0x→1.25x→1.5x` heal scaling, `+15%` start Ult on Tier 3), 4 craftable mixes from `garden.cropInventory` (`MINT_ISOTONIC`, `BAMBOO_FORTIFIER`, `CHILI_OVERDRIVE_SHOT`, `LOTUS_NECTAR`), and `BOTANICAL_ALCHEMIST` achievement.
+  - Integrated active Sanctuary buffs into `CombatEngine` & `WorkoutSession` (stats, combo window, incoming damage mitigation `×0.75`, starting/boosted Ult charge, `+30% XP`, post-battle consumption) plus `NAV_SANCTUARY` voice command & fixed `GardenScreen` Tools/Sanctuary tab overlap (`219/219` tests passing).
 - ✅ 2026-11-16: **Added 15 FPS Option + GPU-Default Pose Neural Network + Settings CPU Toggle (`PoseTracker.ts`, `WorkoutSession.ts`, `store.ts` v11, `SettingsScreen.tsx`, `CalibrationSandbox.tsx`, `BattleScreen.tsx`, `ru.ts`, `en.ts`)**:
   - Added `15 FPS` alongside `30 FPS` and `60 FPS` (`targetPoseFps: 15 | 30 | 60`) in Settings while keeping webcam capture at `>= 30 FPS` for smooth preview rendering.
   - Set `settings.poseDelegate` to `'GPU'` by default (`version: 11` migration) with a segmented `GPU (WebGL) | CPU (WASM)` selector in `SettingsScreen.tsx`.
@@ -303,15 +305,12 @@ npm run dev
 - ✅ 2026-11-16: **Detailed Monster Bestiary Cards & Category Filtering (`BestiaryAnalyticsScreen.tsx`, `gameKeys.ts`, `ru.ts`, `en.ts`)**:
   - Upgraded Bestiary monster cards to display complete combat parameters (`HP`, `ATK`, `DEF`, attack interval / boss phase speed `6.0→5.0→4.0s`, shield hit charges, `XP` & `Fit-Coins` rewards), boss enrage HP thresholds, archetype tactical mechanic hints (`FAST / ARMORED / TOXIC / BOSS`), habitats (Campaign stages, Endless Arena, Circuit Dungeons, Garden), Endless Arena wave scaling formula note, and category filter tabs (`Все / Фастфуд / Боссы / Сорняки`).
 - ✅ 2026-11-16: **Reworked Garden Harvest Rewards & Laid Sanctuary Foundation (`Убежище`)**:
-  - **Garden Crop Economy (`types.ts`, `garden.ts`, `store.ts` v10)**: Removed Fit-Coin payouts from crop harvesting; kept Hero XP (`harvestXp`), HP heal, and bonus gear drops while rewarding the harvested plants themselves (`harvestCropYield` stored in `garden.cropInventory` with seamless `v0–v10` persistence migration).
-  - **Sanctuary Foundation & UI (`sanctuary.ts`, `GardenScreen.tsx`, `InventoryScreen.tsx`, `gameKeys.ts`, `ru.ts`, `en.ts`, `ROADMAP.md`)**: Added `SANCTUARY_MIX_BLUEPRINTS` + ingredient readiness helpers, Botanical Stash (`Склад растений`) display in both Garden and Inventory Bag, and a dedicated "Sanctuary (Mixes)" preview tab in `GardenScreen.tsx`. Documented the full upcoming Sanctuary & Mix Crafting system in `ROADMAP.md` (`210/210` Vitest tests across 16 files).
-- ✅ 2026-11-16: Audited, fixed, and completed **Personal Fitness Garden & Weed Battle integration** (`208/208` tests).
-- ✅ 2026-11-16: Implemented **Hands-Free Voice Command Control (`Управление голосом`)** (`200/200` tests across 14 files).
-- ✅ 2026-11-16: Added full **Time-Period Workout Analytics** (`Сегодня` / `7 дней` / `Месяц` / `Год` / `Всё время`) (`195/195` tests).
+  - Removed Fit-Coin payouts from crop harvesting; kept Hero XP, HP heal, and bonus gear drops while storing harvested plants in `garden.cropInventory` (`210/210` tests).
+- ✅ 2026-11-16: Audited & completed **Personal Fitness Garden & Weed Battle integration** (`208/208`), **Hands-Free Voice Command Control** (`200/200`), and **Time-Period Workout Analytics** (`195/195`).
 
 **Next session priorities:**
-1. Implement **Sanctuary (`Убежище`)** interactive Mix Crafting & pre-battle combat buffs once design details are confirmed with user
-2. Consider E2E Playwright mock-stream harness for automated CV battle regression testing
+1. Add **JSON/CSV save export & import** and optional **Tabata (`20s/10s`) / superset timer mode**
+2. Consider Playwright E2E synthetic webcam stream harness for automated CV battle regression testing
 
 ---
 

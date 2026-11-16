@@ -13,11 +13,13 @@ import {
   Shield,
   Dumbbell,
   Repeat,
+  FlaskConical,
 } from 'lucide-react';
 import { LEVELS, type CampaignLevel } from '../game/data/levels';
 import { MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { CIRCUITS, type CircuitId } from '../game/data/circuits';
+import { SANCTUARY_MIX_MAP } from '../game/data/sanctuary';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
@@ -27,6 +29,7 @@ import {
   EXERCISE_NAME_KEYS,
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
+  SANCTUARY_MIX_KEYS,
 } from './gameKeys';
 import { useVoiceCommandHandler } from './VoiceControl';
 
@@ -36,6 +39,7 @@ interface LevelSelectScreenProps {
   onStartEncounter: (levelId: string, exerciseId: ExerciseId) => void;
   onStartEndless: (exerciseId: ExerciseId) => void;
   onStartCircuit: (circuitId: CircuitId) => void;
+  onOpenSanctuary?: () => void;
 }
 
 const WEIGHT_PRESETS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
@@ -46,12 +50,14 @@ export function LevelSelectScreen({
   onStartEncounter,
   onStartEndless,
   onStartCircuit,
+  onOpenSanctuary,
 }: LevelSelectScreenProps) {
   const { t } = useTranslation();
   const unlockedLevels = useGameStore((state) => state.unlockedLevels);
   const completedLevels = useGameStore((state) => state.completedLevels);
   const endlessStats = useGameStore((state) => state.endlessStats);
   const loadout = useGameStore((state) => state.loadout);
+  const activeBuffs = useGameStore((state) => state.sanctuary.activeBuffs);
   const setLoadout = useGameStore((state) => state.setLoadout);
 
   const defaultLevel =
@@ -230,13 +236,39 @@ export function LevelSelectScreen({
             )}
           </div>
 
-          <div className="text-xs text-slate-400 font-numeric">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 font-numeric">
             {loadout.mode === 'DUMBBELLS' ? (
               <span className="text-amber-300 font-semibold">
                 ×2 · +{dmgBonusPct}% {t('levels.damageLabel')}
               </span>
             ) : (
               <span>{t('loadout.bodyweightHint')}</span>
+            )}
+
+            {onOpenSanctuary && (
+              <>
+                <span aria-hidden="true" className="text-slate-700">
+                  ·
+                </span>
+                <button
+                  type="button"
+                  onClick={onOpenSanctuary}
+                  className={`inline-flex items-center gap-1.5 font-semibold transition-colors whitespace-nowrap ${
+                    activeBuffs.length > 0
+                      ? 'text-emerald-400 hover:text-emerald-300'
+                      : 'text-slate-400 hover:text-emerald-300'
+                  }`}
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  <span>
+                    {activeBuffs.length > 0
+                      ? activeBuffs
+                          .map((id) => `${SANCTUARY_MIX_MAP[id]?.icon ?? ''} ${t(SANCTUARY_MIX_KEYS[id].name)}`)
+                          .join(', ')
+                      : t('sanctuary.goCraftMixes')}
+                  </span>
+                </button>
+              </>
             )}
           </div>
         </div>

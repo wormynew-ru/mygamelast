@@ -835,4 +835,72 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('applies Sanctuary pre-battle buffs (Ult start, Ult charge boost, damage mitigation, XP boost) and consumes them on victory', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      useGameStore.setState((state) => ({
+        coins: 500,
+        garden: {
+          ...state.garden,
+          cropInventory: {
+            PROTEIN_MINT: 2,
+            IRON_BAMBOO: 3,
+            CHILI_PEPPER: 3,
+            GOLDEN_LOTUS: 1,
+          },
+        },
+      }));
+
+      const store = useGameStore.getState();
+      expect(store.upgradeSanctuaryLab()).toBe(true); // Tier 2 -> 2 slots
+      expect(store.upgradeSanctuaryLab()).toBe(true); // Tier 3 -> 3 slots + 15 start Ult
+      expect(store.craftMix('BAMBOO_FORTIFIER')).toBe(true);
+      expect(store.craftMix('LOTUS_NECTAR')).toBe(true);
+      expect(store.activateMixBuff('BAMBOO_FORTIFIER')).not.toBeNull();
+      expect(store.activateMixBuff('LOTUS_NECTAR')).not.toBeNull();
+
+      // Lotus (30) + Tier 3 bonus (15) = 45% starting Ult charge; 2 Squat reps vs resistant Burger (8 dmg each = 16) defeat 15 HP
+      useGameStore.getState().startCombat({ ...createMonster(MONSTERS.BURGER), hp: 15, xpReward: 50 });
+
+      const detector = createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+      ]);
+
+      const tracker = createMockTracker();
+      const session = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: detector,
+        exerciseDamageMultiplier: 1.0,
+        exerciseId: 'SQUAT',
+        levelId: 'LEVEL_1',
+        poseTracker: tracker,
+        soundFX: createMockSoundFX(),
+      });
+
+      await session.start();
+      const startStatus = session.getStatus();
+      expect(startStatus.activeSanctuaryBuffs).toEqual(['BAMBOO_FORTIFIER', 'LOTUS_NECTAR']);
+      expect(startStatus.ultimateCharge).toBe(45);
+
+      const xpBefore = useGameStore.getState().player.xp;
+      tracker.triggerPose(500);
+      tracker.triggerPose(1000);
+      expect(session.getStatus().ultimateCharge).toBeGreaterThan(45);
+
+      tracker.triggerPose(1500); // Finishes 15 HP Burger -> victory
+      expect(session.getStatus().state).toBe('VICTORY');
+      // 50 base XP * 1.3 Lotus Nectar = 65 XP
+      expect(useGameStore.getState().player.xp - xpBefore).toBe(65);
+      // Pre-battle buffs are consumed after finishing the battle
+      expect(useGameStore.getState().sanctuary.activeBuffs).toEqual([]);
+
+      session.stop();
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
 });

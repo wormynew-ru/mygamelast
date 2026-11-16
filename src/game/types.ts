@@ -195,6 +195,12 @@ export interface EndlessArenaStats {
 export type SeedId = 'PROTEIN_MINT' | 'IRON_BAMBOO' | 'CHILI_PEPPER' | 'GOLDEN_LOTUS';
 export type WeedId = 'WEED_DANDELION' | 'WEED_THISTLE' | 'WEED_VINE';
 export type WateringCanTier = 1 | 2 | 3 | 4;
+export type SanctuaryMixId =
+  | 'MINT_ISOTONIC'
+  | 'BAMBOO_FORTIFIER'
+  | 'CHILI_OVERDRIVE_SHOT'
+  | 'LOTUS_NECTAR';
+export type SanctuaryLabTier = 1 | 2 | 3;
 
 export interface GardenPlotState {
   id: number;
@@ -212,6 +218,13 @@ export interface GardenState {
   waterCharges: number;
   totalHarvested: number;
   weedsDefeated: number;
+}
+
+export interface SanctuaryState {
+  labTier: SanctuaryLabTier;
+  mixInventory: Record<SanctuaryMixId, number>;
+  activeBuffs: SanctuaryMixId[];
+  totalCrafted: number;
 }
 
 export interface ExerciseCalibrationSettings {
@@ -251,6 +264,7 @@ export interface GameState {
   bestiary: Record<string, BestiaryEntry>;
   endlessStats: EndlessArenaStats;
   garden: GardenState;
+  sanctuary: SanctuaryState;
 
   /** Settings and calibration */
   settings: {

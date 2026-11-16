@@ -13,8 +13,11 @@ import type {
   Item,
   MonsterStats,
   PlayerStats,
+  SanctuaryLabTier,
+  SanctuaryMixId,
 } from './types';
 import { EXERCISES, type ExerciseId } from './data/exercises';
+import { getAggregatedSanctuaryBuffs } from './data/sanctuary';
 
 export const COMBO_WINDOW_BASE_MS = 3800;
 export const TOXIC_DEBUFF_DURATION_MS = 6000;
@@ -98,10 +101,12 @@ export function calculateTonnageDelta(
 export function calculateUltimateChargeGain(params: {
   isHoldTick: boolean;
   comboCount: number;
+  chargeMultiplier?: number;
 }): number {
   const base = params.isHoldTick ? 12 : 18;
   const comboBonus = Math.min(10, Math.floor(Math.max(0, params.comboCount) / 2) * 2);
-  return base + comboBonus;
+  const mult = params.chargeMultiplier ?? 1.0;
+  return Math.max(1, Math.round((base + comboBonus) * mult));
 }
 
 /**
@@ -161,6 +166,7 @@ export interface CombatAttackOptions {
   isDebuffed?: boolean;
   loadout?: EquipmentLoadout;
   isUltimate?: boolean;
+  xpMultiplier?: number;
 }
 
 /**
@@ -232,7 +238,8 @@ export function applyDamageToMonster(
   let updatedPlayer = { ...player };
 
   if (isKilled) {
-    const xpMult = getLoadoutXpMultiplier(options.loadout, options.exerciseId);
+    const xpMult =
+      getLoadoutXpMultiplier(options.loadout, options.exerciseId) * (options.xpMultiplier ?? 1.0);
     xpGained = Math.round(monster.xpReward * xpMult);
     updatedPlayer.xp += xpGained;
 
@@ -379,18 +386,22 @@ export function createPlayer(): PlayerStats {
 }
 
 /**
- * Compute effective player stats including all equipped item bonuses.
+ * Compute effective player stats including equipped item bonuses and active Sanctuary mixes.
  */
 export function getEffectivePlayerStats(
   player: PlayerStats,
   equippedItemIds: string[],
-  itemsCatalog: Record<string, Item>
+  itemsCatalog: Record<string, Item>,
+  activeSanctuaryBuffs: readonly SanctuaryMixId[] = [],
+  labTier: SanctuaryLabTier = 1
 ): PlayerStats {
-  let attackBonus = 0;
-  let defenseBonus = 0;
+  const sanctuaryBonuses = getAggregatedSanctuaryBuffs(activeSanctuaryBuffs, labTier);
+  let attackBonus = sanctuaryBonuses.attackBonus;
+  let defenseBonus = sanctuaryBonuses.defenseBonus;
   let maxHpBonus = 0;
-  let critChanceBonus = 0;
-  let comboWindowBonusMs = player.comboWindowBonusMs ?? 0;
+  let critChanceBonus = sanctuaryBonuses.critChanceBonus;
+  let comboWindowBonusMs =
+    (player.comboWindowBonusMs ?? 0) + sanctuaryBonuses.comboWindowBonusMs;
 
   for (const itemId of equippedItemIds) {
     const item = itemsCatalog[itemId];
@@ -447,15 +458,20 @@ export function rollItemDrop(
 /**
  * Calculate incoming damage from a monster counter-attack.
  * Active static hold (isBlocking = true) mitigates 70% of monster attack power.
+ * Optional incomingDamageMultiplier (e.g. from Sanctuary Bamboo Fortifier) further reduces damage.
  */
 export function calculateMonsterCounterAttack(
   player: PlayerStats,
   monsterAttack: number,
-  isBlocking: boolean
+  isBlocking: boolean,
+  incomingDamageMultiplier: number = 1.0
 ): { player: PlayerStats; damageTaken: number; wasBlocked: boolean } {
+  const mult = Math.max(0, incomingDamageMultiplier);
+
   if (isBlocking) {
     const mitigatedAttack = Math.floor(monsterAttack * 0.3);
-    const damageTaken = Math.max(0, mitigatedAttack - player.defense);
+    const rawBlocked = Math.max(0, mitigatedAttack - player.defense);
+    const damageTaken = Math.max(0, Math.floor(rawBlocked * mult));
     return {
       player: {
         ...player,
@@ -466,10 +482,15 @@ export function calculateMonsterCounterAttack(
     };
   }
 
-  const updated = applyDamageToPlayer(player, monsterAttack);
+  const baseDamage = Math.max(1, monsterAttack - player.defense);
+  const damageTaken = Math.max(1, Math.floor(baseDamage * mult));
+  const newHp = Math.max(0, player.hp - damageTaken);
   return {
-    player: updated,
-    damageTaken: player.hp - updated.hp,
+    player: {
+      ...player,
+      hp: newHp,
+    },
+    damageTaken: player.hp - newHp,
     wasBlocked: false,
   };
 }

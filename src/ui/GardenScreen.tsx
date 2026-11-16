@@ -59,6 +59,7 @@ import { VoiceToggleButton, useVoiceCommandHandler } from './VoiceControl';
 interface GardenScreenProps {
   onBack: () => void;
   onStartWeedBattle: (plotId: number, weedId: WeedId, exerciseId: ExerciseId) => void;
+  onOpenSanctuary?: () => void;
 }
 
 const STAGE_KEYS: Record<ReturnType<typeof getPlantStage>, TranslationKey> = {
@@ -69,7 +70,7 @@ const STAGE_KEYS: Record<ReturnType<typeof getPlantStage>, TranslationKey> = {
   MATURE: 'garden.stage.MATURE',
 };
 
-export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
+export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: GardenScreenProps) {
   const { t } = useTranslation();
 
   const coins = useGameStore((state) => state.coins);
@@ -643,12 +644,16 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
             </div>
             <button
               onClick={() => {
-                setShopTab('SANCTUARY');
-                shopSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (onOpenSanctuary) {
+                  onOpenSanctuary();
+                } else {
+                  setShopTab('SANCTUARY');
+                  shopSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
               }}
               className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors whitespace-nowrap"
             >
-              {t('garden.sanctuaryTab')} →
+              {onOpenSanctuary ? t('sanctuary.openFullSanctuary') : t('garden.sanctuaryTab')} →
             </button>
           </div>
 
@@ -776,7 +781,7 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                 );
               })}
             </div>
-          ) : (
+          ) : shopTab === 'TOOLS' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {([1, 2, 3, 4] as WateringCanTier[]).map((tier) => {
                 const can = WATERING_CANS[tier];
@@ -855,21 +860,25 @@ export function GardenScreen({ onBack, onStartWeedBattle }: GardenScreenProps) {
                 </div>
               )}
             </div>
-          )}
-
-          {shopTab === 'SANCTUARY' && (
+          ) : (
             <div className="space-y-4">
-              <div className="bg-emerald-950/30 border border-emerald-700/50 rounded-xl p-5 space-y-1.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="bg-emerald-950/30 border border-emerald-700/50 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+                <div className="space-y-1 max-w-xl">
                   <div className="inline-flex items-center gap-2 text-sm font-bold text-white">
                     <FlaskConical className="w-4 h-4 text-emerald-400" />
-                    <span>{t('garden.sanctuaryBannerTitle')}</span>
+                    <span>{t('garden.sanctuaryReadyBannerTitle')}</span>
                   </div>
-                  <span className="text-xs font-semibold text-amber-300">
-                    {t('garden.comingSoonBadge')}
-                  </span>
+                  <p className="text-xs text-slate-300">{t('garden.sanctuaryReadyBannerDesc')}</p>
                 </div>
-                <p className="text-xs text-slate-300">{t('garden.sanctuaryBannerDesc')}</p>
+                {onOpenSanctuary && (
+                  <button
+                    onClick={onOpenSanctuary}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <FlaskConical className="w-4 h-4" />
+                    <span>{t('sanctuary.openFullSanctuary')}</span>
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

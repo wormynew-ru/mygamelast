@@ -6,7 +6,13 @@ import type { AchievementId } from '../game/data/achievements';
 import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
 import type { SanctuaryMixId } from '../game/data/sanctuary';
-import type { ItemRarity, MonsterArchetype, SeedId, WateringCanTier } from '../game/types';
+import type {
+  ItemRarity,
+  MonsterArchetype,
+  SanctuaryLabTier,
+  SeedId,
+  WateringCanTier,
+} from '../game/types';
 import type { TranslationKey } from '../i18n/useTranslation';
 
 export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
@@ -201,6 +207,10 @@ export const ACHIEVEMENT_KEYS: Record<
     name: 'achievement.WEED_SLAYER.name',
     description: 'achievement.WEED_SLAYER.description',
   },
+  BOTANICAL_ALCHEMIST: {
+    name: 'achievement.BOTANICAL_ALCHEMIST.name',
+    description: 'achievement.BOTANICAL_ALCHEMIST.description',
+  },
 };
 
 export const SEED_KEYS: Record<
@@ -255,4 +265,13 @@ export const SANCTUARY_MIX_KEYS: Record<
     name: 'garden.mix.LOTUS_NECTAR.name',
     effect: 'garden.mix.LOTUS_NECTAR.effect',
   },
+};
+
+export const SANCTUARY_LAB_KEYS: Record<
+  SanctuaryLabTier,
+  { name: TranslationKey; perk: TranslationKey }
+> = {
+  1: { name: 'sanctuary.labTier1Name', perk: 'sanctuary.labTier1Perk' },
+  2: { name: 'sanctuary.labTier2Name', perk: 'sanctuary.labTier2Perk' },
+  3: { name: 'sanctuary.labTier3Name', perk: 'sanctuary.labTier3Perk' },
 };

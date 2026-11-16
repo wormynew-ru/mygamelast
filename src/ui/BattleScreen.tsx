@@ -33,6 +33,7 @@ import { getCircuitById, type CircuitId } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { getLevelById } from '../game/data/levels';
 import { ITEMS } from '../game/data/items';
+import { SANCTUARY_MIX_MAP } from '../game/data/sanctuary';
 import { type AchievementId } from '../game/data/achievements';
 import type { BattleRank, WeedId } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
@@ -43,6 +44,7 @@ import {
   EXERCISE_NAME_KEYS,
   ITEM_NAME_KEYS,
   MONSTER_NAME_KEYS,
+  SANCTUARY_MIX_KEYS,
 } from './gameKeys';
 import { VoiceToggleButton, useVoiceCommandHandler } from './VoiceControl';
 
@@ -167,12 +169,14 @@ export function BattleScreen({
     victorySummary: null,
     poseDelegate: useGameStore.getState().settings.poseDelegate,
     poseDelegateFallback: false,
+    activeSanctuaryBuffs: [...useGameStore.getState().sanctuary.activeBuffs],
   });
   const [isDamaged, setIsDamaged] = useState(false);
   const [isHeroHit, setIsHeroHit] = useState(false);
 
   const basePlayer = useGameStore((state) => state.player);
   const equippedItems = useGameStore((state) => state.inventory.equippedItems);
+  const sanctuary = useGameStore((state) => state.sanctuary);
   const loadout = useGameStore((state) => state.loadout);
   const enemy = useGameStore((state) => state.currentEnemy);
   const startCombat = useGameStore((state) => state.startCombat);
@@ -181,7 +185,7 @@ export function BattleScreen({
 
   const effectivePlayer = useMemo(
     () => selectEffectivePlayerStats(useGameStore.getState()),
-    [basePlayer, equippedItems]
+    [basePlayer, equippedItems, sanctuary]
   );
 
   const circuitDef = circuitId ? getCircuitById(circuitId) : undefined;
@@ -359,6 +363,9 @@ export function BattleScreen({
   const handleSurrender = () => {
     if (useGameStore.getState().player.hp <= 0) {
       revivePlayer();
+    }
+    if (mode === 'ENDLESS' && (sessionStatus.state === 'VICTORY' || currentWave > 1)) {
+      useGameStore.getState().consumeActiveSanctuaryBuffs();
     }
     sessionRef.current?.stop();
     endCombat();
@@ -593,6 +600,16 @@ export function BattleScreen({
                 ? t('battle.delegateFallback')
                 : sessionStatus.poseDelegate}
             </span>
+            {sessionStatus.activeSanctuaryBuffs.length > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-emerald-300 font-medium">
+                  {sessionStatus.activeSanctuaryBuffs
+                    .map((id) => `${SANCTUARY_MIX_MAP[id]?.icon ?? ''} ${t(SANCTUARY_MIX_KEYS[id].name)}`)
+                    .join(' · ')}
+                </span>
+              </>
+            )}
           </div>
 
           {/* Audio Unlock Banner */}

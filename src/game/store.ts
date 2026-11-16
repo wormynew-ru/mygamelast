@@ -18,6 +18,7 @@ import type {
   Inventory,
   MonsterStats,
   PlayerStats,
+  SanctuaryMixId,
   SeedId,
   StreakState,
   WorkoutStats,
@@ -43,6 +44,15 @@ import {
   waterSinglePlotInGarden,
   type HarvestReward,
 } from './data/garden';
+import {
+  SANCTUARY_LAB_TIERS,
+  SANCTUARY_MIX_MAP,
+  createInitialSanctuaryState,
+  getMixEffectiveHeal,
+  getNextSanctuaryLabTier,
+  isMixReadyToCraft,
+  normalizeSanctuaryState,
+} from './data/sanctuary';
 import {
   getDailyQuestsForDate,
   getLocalDateKey,
@@ -145,6 +155,7 @@ function createInitialState(): GameState {
     bestiary: {},
     endlessStats: createInitialEndlessStats(),
     garden: createInitialGardenState(),
+    sanctuary: createInitialSanctuaryState(),
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
@@ -242,6 +253,11 @@ interface GameStore extends GameState {
   defeatPlotWeed: (plotId: number) => boolean;
   triggerGardenWeed: (plotId?: number) => number | null;
 
+  craftMix: (mixId: SanctuaryMixId) => boolean;
+  activateMixBuff: (mixId: SanctuaryMixId) => { healedHp: number } | null;
+  upgradeSanctuaryLab: () => boolean;
+  consumeActiveSanctuaryBuffs: () => void;
+
   updateSettings: (settings: Partial<GameState['settings']>) => void;
   updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
   resetExerciseCalibration: () => void;
@@ -265,7 +281,7 @@ function isSerializedMap(value: unknown): value is SerializedMap {
 }
 
 function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 11) {
+  if (version >= 0 && version <= 12) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -329,6 +345,7 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
         ...(state.endlessStats ?? {}),
       },
       garden: normalizeGardenState(state.garden),
+      sanctuary: normalizeSanctuaryState(state.sanctuary),
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
@@ -988,6 +1005,121 @@ export const useGameStore = create<GameStore>()(
         return spawnedPlotId;
       },
 
+      craftMix: (mixId) => {
+        const blueprint = SANCTUARY_MIX_MAP[mixId];
+        if (!blueprint) return false;
+        const state = get();
+        if (!isMixReadyToCraft(state.garden.cropInventory, blueprint)) {
+          return false;
+        }
+
+        const nextCropInventory = { ...state.garden.cropInventory };
+        for (const req of blueprint.ingredients) {
+          nextCropInventory[req.seedId] = Math.max(
+            0,
+            (nextCropInventory[req.seedId] ?? 0) - req.qty
+          );
+        }
+
+        set({
+          garden: {
+            ...state.garden,
+            cropInventory: nextCropInventory,
+          },
+          sanctuary: {
+            ...state.sanctuary,
+            mixInventory: {
+              ...state.sanctuary.mixInventory,
+              [mixId]: (state.sanctuary.mixInventory[mixId] ?? 0) + 1,
+            },
+            totalCrafted: state.sanctuary.totalCrafted + 1,
+          },
+        });
+        get().syncAchievements();
+        return true;
+      },
+
+      activateMixBuff: (mixId) => {
+        const blueprint = SANCTUARY_MIX_MAP[mixId];
+        if (!blueprint) return null;
+        const state = get();
+        const qty = state.sanctuary.mixInventory[mixId] ?? 0;
+        const maxSlots = SANCTUARY_LAB_TIERS[state.sanctuary.labTier].maxBuffSlots;
+        if (
+          qty <= 0 ||
+          state.sanctuary.activeBuffs.includes(mixId) ||
+          state.sanctuary.activeBuffs.length >= maxSlots
+        ) {
+          return null;
+        }
+
+        const healPotential = getMixEffectiveHeal(blueprint, state.sanctuary.labTier);
+        let nextBasePlayer = state.player;
+        let healedHp = 0;
+
+        if (healPotential > 0) {
+          const effBefore = getEffectivePlayerStats(
+            state.player,
+            state.inventory.equippedItems,
+            ITEMS,
+            state.sanctuary.activeBuffs,
+            state.sanctuary.labTier
+          );
+          const missing = Math.max(0, effBefore.maxHp - effBefore.hp);
+          healedHp = Math.min(healPotential, missing);
+          if (healedHp > 0) {
+            nextBasePlayer = {
+              ...state.player,
+              hp: Math.min(state.player.maxHp, state.player.hp + healedHp),
+            };
+          }
+        }
+
+        set({
+          player: nextBasePlayer,
+          sanctuary: {
+            ...state.sanctuary,
+            mixInventory: {
+              ...state.sanctuary.mixInventory,
+              [mixId]: qty - 1,
+            },
+            activeBuffs: [...state.sanctuary.activeBuffs, mixId],
+          },
+        });
+
+        return { healedHp };
+      },
+
+      upgradeSanctuaryLab: () => {
+        const state = get();
+        const nextTier = getNextSanctuaryLabTier(state.sanctuary.labTier);
+        if (!nextTier) return false;
+        const cost = SANCTUARY_LAB_TIERS[nextTier].upgradeCost;
+        if (state.coins < cost) return false;
+
+        set({
+          coins: state.coins - cost,
+          sanctuary: {
+            ...state.sanctuary,
+            labTier: nextTier,
+          },
+        });
+        return true;
+      },
+
+      consumeActiveSanctuaryBuffs: () =>
+        set((state) => {
+          if (state.sanctuary.activeBuffs.length === 0) {
+            return state;
+          }
+          return {
+            sanctuary: {
+              ...state.sanctuary,
+              activeBuffs: [],
+            },
+          };
+        }),
+
       updateSettings: (settingsUpdate) =>
         set((state) => ({
           settings: { ...state.settings, ...settingsUpdate },
@@ -1028,7 +1160,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 11,
+      version: 12,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {
@@ -1041,5 +1173,11 @@ export const useGameStore = create<GameStore>()(
 );
 
 export function selectEffectivePlayerStats(state: GameState): PlayerStats {
-  return getEffectivePlayerStats(state.player, state.inventory.equippedItems, ITEMS);
+  return getEffectivePlayerStats(
+    state.player,
+    state.inventory.equippedItems,
+    ITEMS,
+    state.sanctuary?.activeBuffs ?? [],
+    state.sanctuary?.labTier ?? 1
+  );
 }
