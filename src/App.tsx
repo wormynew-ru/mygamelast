@@ -20,7 +20,7 @@ import { OfflineIndicator } from './ui/PWAInstallButton';
 import { VoiceControlProvider, useVoiceCommandHandler } from './ui/VoiceControl';
 import { useGameStore } from './game/store';
 import { createEndlessWaveMonster, createMonster, MONSTERS } from './game/data/monsters';
-import { getCircuitById, type CircuitId } from './game/data/circuits';
+import { getCircuitById } from './game/data/circuits';
 import { getLevelById } from './game/data/levels';
 import {
   getAggregatedMutatorEffects,
@@ -28,7 +28,13 @@ import {
   getWeeklyChallengeForWeek,
 } from './game/data/programs';
 import type { ExerciseId } from './game/data/exercises';
-import type { MonsterStats, MutatorId, WeedId } from './game/types';
+import type {
+  CustomCircuitDefinition,
+  MonsterStats,
+  MutatorId,
+  TabataConfig,
+  WeedId,
+} from './game/types';
 import type { BattleMode } from './session/WorkoutSession';
 import { setCurrentLanguage } from './i18n';
 
@@ -44,14 +50,16 @@ type Screen =
   | 'CALIBRATION'
   | 'SETTINGS';
 
-type LevelSelectTab = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT';
+type LevelSelectTab = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'TABATA';
 
 interface ActiveEncounter {
   levelId?: string;
   exerciseId: ExerciseId;
   mode: BattleMode;
   wave: number;
-  circuitId?: CircuitId;
+  circuitId?: string;
+  customCircuit?: CustomCircuitDefinition;
+  tabataConfig?: TabataConfig;
   gardenPlotId?: number;
   weedId?: WeedId;
   activeMutatorsOverride?: MutatorId[];
@@ -127,10 +135,15 @@ function AppContent() {
   );
 
   const handleStartCircuit = useCallback(
-    (circuitId: CircuitId) => {
-      const circuit = getCircuitById(circuitId);
-      if (!circuit || circuit.rooms.length === 0) return;
-      const firstRoom = circuit.rooms[0];
+    (circuitId: string) => {
+      const builtIn = getCircuitById(circuitId);
+      const custom = !builtIn
+        ? useGameStore.getState().customCircuits.find((c) => c.id === circuitId)
+        : undefined;
+      const rooms = builtIn?.rooms ?? custom?.rooms;
+      if (!rooms || rooms.length === 0) return;
+
+      const firstRoom = rooms[0];
       const monsterTemplate = MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER;
       const mutators = useGameStore.getState().activeMutators;
       const monster = scaleEnemyForMutators(createMonster(monsterTemplate), mutators);
@@ -142,6 +155,42 @@ function AppContent() {
         mode: 'CIRCUIT',
         wave: 1,
         circuitId,
+        customCircuit: custom,
+      });
+      setCurrentScreen('BATTLE');
+    },
+    [setCurrentLevel, startCombat]
+  );
+
+  const handleStartTabata = useCallback(
+    (monsterId: string, exerciseId: ExerciseId, tabataConfig: TabataConfig) => {
+      const monsterTemplate = MONSTERS[monsterId] ?? MONSTERS.BURGER;
+      const mutators = useGameStore.getState().activeMutators;
+      const monster = scaleEnemyForMutators(createMonster(monsterTemplate), mutators);
+
+      setCurrentLevel(null);
+      startCombat(monster);
+      setActiveEncounter({
+        exerciseId,
+        mode: 'TABATA',
+        wave: 1,
+        tabataConfig,
+      });
+      setCurrentScreen('BATTLE');
+    },
+    [setCurrentLevel, startCombat]
+  );
+
+  const handleStartBenchmark = useCallback(
+    (exerciseId: ExerciseId) => {
+      const monster = createMonster(MONSTERS.BURGER);
+      setCurrentLevel(null);
+      startCombat(monster);
+      setActiveEncounter({
+        exerciseId,
+        mode: 'BENCHMARK',
+        wave: 1,
+        activeMutatorsOverride: [],
       });
       setCurrentScreen('BATTLE');
     },
@@ -224,6 +273,13 @@ function AppContent() {
       case 'NAV_CIRCUIT':
         setLevelSelectTab('CIRCUIT');
         setCurrentScreen('CAMPAIGN');
+        return true;
+      case 'NAV_TABATA':
+        setLevelSelectTab('TABATA');
+        setCurrentScreen('CAMPAIGN');
+        return true;
+      case 'START_BENCHMARK':
+        handleStartBenchmark('SQUAT');
         return true;
       case 'NAV_INVENTORY':
         setCurrentScreen('INVENTORY');
@@ -323,6 +379,8 @@ function AppContent() {
           onStartEncounter={handleStartEncounter}
           onStartEndless={handleStartEndless}
           onStartCircuit={handleStartCircuit}
+          onStartTabata={handleStartTabata}
+          onStartBenchmark={handleStartBenchmark}
           onOpenSanctuary={() => setCurrentScreen('SANCTUARY')}
         />
       )}
@@ -342,6 +400,8 @@ function AppContent() {
           mode={activeEncounter.mode}
           initialWave={activeEncounter.wave}
           circuitId={activeEncounter.circuitId}
+          customCircuit={activeEncounter.customCircuit}
+          tabataConfig={activeEncounter.tabataConfig}
           gardenPlotId={activeEncounter.gardenPlotId}
           weedId={activeEncounter.weedId}
           activeMutatorsOverride={activeEncounter.activeMutatorsOverride}

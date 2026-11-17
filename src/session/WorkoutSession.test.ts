@@ -1233,4 +1233,235 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('runs Tabata interval cycles, freezes monster counter-attacks during REST, and completes with VICTORY', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.SODA), hp: 500, attack: 20 });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    // 10s work / 5s rest / 2 rounds => cycle 15s, total = 1*15 + 10 = 25s
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'JUMPING_JACK',
+      mode: 'TABATA',
+      tabataConfig: {
+        presetId: 'CLASSIC_20_10',
+        workSec: 10,
+        restSec: 5,
+        rounds: 2,
+      },
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    // Baseline frame at 1000ms -> WORK round 1
+    tracker.triggerPose(1000);
+    expect(session.getStatus().tabata?.phase).toBe('WORK');
+    expect(session.getStatus().tabata?.round).toBe(1);
+
+    // +2000ms (ts 3000) -> still WORK
+    tracker.triggerPose(3000);
+    // Jump into REST by stepping 2000ms increments up to 11500ms (since dtMs is clamped at 2000ms per frame)
+    tracker.triggerPose(5000);
+    tracker.triggerPose(7000);
+    tracker.triggerPose(9000);
+    tracker.triggerPose(11500); // elapsed = 10500ms -> REST phase
+    expect(session.getStatus().tabata?.phase).toBe('REST');
+    expect(sound.play).toHaveBeenCalledWith('INTERVAL_BELL');
+
+    const hpBeforeRest = useGameStore.getState().player.hp;
+    // Advance across REST (11500 -> 15500ms) -> player takes 0 monster damage during REST
+    tracker.triggerPose(13500);
+    tracker.triggerPose(15500);
+    expect(useGameStore.getState().player.hp).toBe(hpBeforeRest);
+
+    // Advance to >= 25_000ms elapsed (ts >= 26_000ms) to finish Tabata round 2
+    for (let ts = 17500; ts <= 27500; ts += 2000) {
+      tracker.triggerPose(ts);
+    }
+
+    const finalStatus = session.getStatus();
+    expect(finalStatus.state).toBe('VICTORY');
+    expect(finalStatus.victorySummary?.mode).toBe('TABATA');
+    expect(finalStatus.victorySummary?.tabataRoundsCompleted).toBe(2);
+    expect(useGameStore.getState().workoutStats.tabataCompleted).toBe(1);
+    expect(useGameStore.getState().unlockedAchievements).toContain('TABATA_FINISHER');
+
+    session.stop();
+  });
+
+  it('supports Pre-Battle Warm-up (8 reps -> +25% Ult) and skipWarmUp()', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.BURGER), hp: 200, attack: 20 });
+
+    const repStates: ExerciseState[] = Array.from({ length: 10 }, (_, idx) => ({
+      phase: 'IDLE' as const,
+      repCount: idx,
+      progress: 0,
+      visibility: 'VISIBLE' as const,
+    }));
+    const detector = createStubDetector(repStates);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      warmUpEnabled: true,
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    expect(session.getStatus().warmUpActive).toBe(true);
+
+    // During warm-up reps do not hit enemy and enemy does not strike player
+    for (let i = 0; i <= 7; i++) {
+      tracker.triggerPose(1000 + i * 1000);
+    }
+    expect(useGameStore.getState().currentEnemy?.hp).toBe(200);
+    expect(useGameStore.getState().player.hp).toBe(100);
+    expect(session.getStatus().warmUpActive).toBe(true);
+
+    // 8th rep completes warm-up and grants +25% Ult charge + INTERVAL_BELL
+    tracker.triggerPose(9000);
+    expect(session.getStatus().warmUpActive).toBe(false);
+    expect(session.getStatus().warmUpCompleted).toBe(true);
+    expect(session.getStatus().ultimateCharge).toBe(25);
+    expect(sound.play).toHaveBeenCalledWith('INTERVAL_BELL');
+    session.stop();
+
+    // Test skipWarmUp() starts combat immediately without Ult bonus
+    const skipSession = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: createStubDetector([]),
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      warmUpEnabled: true,
+      poseTracker: createMockTracker(),
+      soundFX: createMockSoundFX(),
+    });
+    await skipSession.start();
+    expect(skipSession.getStatus().warmUpActive).toBe(true);
+    skipSession.skipWarmUp();
+    expect(skipSession.getStatus().warmUpActive).toBe(false);
+    expect(skipSession.getStatus().ultimateCharge).toBe(0);
+    skipSession.stop();
+  });
+
+  it('switches exercises mid-battle while preserving combo/Ult/enemy HP and granting Fresh Focus multiplier', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.PIZZA), hp: 200 });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 2, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    tracker.triggerPose(1000);
+    tracker.triggerPose(1500);
+    tracker.triggerPose(2000);
+
+    const comboBefore = session.getStatus().comboCount;
+    const ultBefore = session.getStatus().ultimateCharge;
+    const enemyHpBefore = useGameStore.getState().currentEnemy?.hp;
+    expect(comboBefore).toBe(2);
+    expect(ultBefore).toBeGreaterThan(0);
+
+    session.switchExerciseMidBattle('LUNGE');
+    const afterSwitch = session.getStatus();
+    expect(afterSwitch.exerciseId).toBe('LUNGE');
+    expect(afterSwitch.comboCount).toBe(comboBefore);
+    expect(afterSwitch.ultimateCharge).toBe(ultBefore);
+    expect(afterSwitch.exerciseSwitchesCount).toBe(1);
+    expect(afterSwitch.freshSwitchRemainingSec).toBe(8);
+    expect(useGameStore.getState().currentEnemy?.hp).toBe(enemyHpBefore);
+    expect(sound.play).toHaveBeenCalledWith('POWER_UP');
+
+    session.stop();
+  });
+
+  it('completes 60s Fitness Benchmark cleanly without monster counter-attacks and emits live cadence RPM & metronome ticks', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({ ...createMonster(MONSTERS.BURGER), hp: 100, attack: 30 });
+
+    const repStates: ExerciseState[] = Array.from({ length: 12 }, (_, idx) => ({
+      phase: 'IDLE' as const,
+      repCount: idx,
+      progress: 0,
+      visibility: 'VISIBLE' as const,
+    }));
+    const detector = createStubDetector(repStates);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      mode: 'BENCHMARK',
+      cadenceMode: 'STEADY_60',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    for (let i = 0; i < 6; i++) {
+      tracker.triggerPose(1000 + i * 1000);
+    }
+
+    // No monster counter-attack damage in BENCHMARK mode, live RPM > 0, and METRONOME_TICK played
+    expect(useGameStore.getState().player.hp).toBe(100);
+    expect(session.getStatus().currentCadenceRpm).toBeGreaterThan(0);
+    expect(sound.play).toHaveBeenCalledWith('METRONOME_TICK');
+
+    // Advance 60 seconds using 2000ms steps (dtMs clamped at 2000ms per pose callback)
+    for (let ts = 8000; ts <= 66_000; ts += 2000) {
+      tracker.triggerPose(ts);
+    }
+
+    const done = session.getStatus();
+    expect(done.state).toBe('VICTORY');
+    expect(done.victorySummary?.mode).toBe('BENCHMARK');
+    expect(done.victorySummary?.benchmarkEntry?.exerciseId).toBe('SQUAT');
+    expect(done.victorySummary?.benchmarkEntry?.score).toBe(11);
+    expect(done.victorySummary?.benchmarkIsNewBest).toBe(true);
+    expect(useGameStore.getState().bestBenchmarkByExercise.SQUAT).toBe(11);
+    expect(useGameStore.getState().unlockedAchievements).toContain('BENCHMARK_TESTED');
+
+    session.stop();
+  });
 });

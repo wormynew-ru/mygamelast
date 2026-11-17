@@ -8,6 +8,8 @@ import type { ExerciseId } from '../game/data/exercises';
 import type { SanctuaryMixId, SanctuarySynergyId, MonsterTrophyId } from '../game/data/sanctuary';
 import type {
   ArtifactId,
+  BenchmarkRating,
+  CadenceMode,
   ExerciseDiscipline,
   ItemRarity,
   MonsterArchetype,
@@ -16,6 +18,7 @@ import type {
   SanctuaryLabTier,
   SanctuaryMixCategory,
   SeedId,
+  TabataPresetId,
   TalentBranch,
   TalentId,
   WateringCanTier,
@@ -115,6 +118,18 @@ export const CIRCUIT_KEYS: Record<
   FULL_BODY_BLITZ: {
     name: 'circuits.FULL_BODY_BLITZ.name',
     description: 'circuits.FULL_BODY_BLITZ.description',
+  },
+  LOWER_POWER_SPLIT: {
+    name: 'circuits.LOWER_POWER_SPLIT.name',
+    description: 'circuits.LOWER_POWER_SPLIT.description',
+  },
+  CARDIO_SHRED: {
+    name: 'circuits.CARDIO_SHRED.name',
+    description: 'circuits.CARDIO_SHRED.description',
+  },
+  DUMBBELL_SCULPT: {
+    name: 'circuits.DUMBBELL_SCULPT.name',
+    description: 'circuits.DUMBBELL_SCULPT.description',
   },
 };
 
@@ -261,6 +276,18 @@ export const ACHIEVEMENT_KEYS: Record<
   MUTANT_BOTANIST: {
     name: 'achievement.MUTANT_BOTANIST.name',
     description: 'achievement.MUTANT_BOTANIST.description',
+  },
+  TABATA_FINISHER: {
+    name: 'achievement.TABATA_FINISHER.name',
+    description: 'achievement.TABATA_FINISHER.description',
+  },
+  CUSTOM_ARCHITECT: {
+    name: 'achievement.CUSTOM_ARCHITECT.name',
+    description: 'achievement.CUSTOM_ARCHITECT.description',
+  },
+  BENCHMARK_TESTED: {
+    name: 'achievement.BENCHMARK_TESTED.name',
+    description: 'achievement.BENCHMARK_TESTED.description',
   },
 };
 
@@ -488,4 +515,36 @@ export const MUTATOR_KEYS: Record<
   BLITZ_CLOCK: { name: 'mutators.BLITZ_CLOCK.name', desc: 'mutators.BLITZ_CLOCK.desc' },
   TOXIC_MIST: { name: 'mutators.TOXIC_MIST.name', desc: 'mutators.TOXIC_MIST.desc' },
   NO_ITEMS: { name: 'mutators.NO_ITEMS.name', desc: 'mutators.NO_ITEMS.desc' },
+};
+
+export const TABATA_PRESET_KEYS: Record<
+  TabataPresetId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  CLASSIC_20_10: {
+    name: 'tabata.preset.CLASSIC_20_10.name',
+    desc: 'tabata.preset.CLASSIC_20_10.desc',
+  },
+  POWER_30_15: {
+    name: 'tabata.preset.POWER_30_15.name',
+    desc: 'tabata.preset.POWER_30_15.desc',
+  },
+  ENDURANCE_40_20: {
+    name: 'tabata.preset.ENDURANCE_40_20.name',
+    desc: 'tabata.preset.ENDURANCE_40_20.desc',
+  },
+};
+
+export const CADENCE_MODE_KEYS: Record<CadenceMode, TranslationKey> = {
+  OFF: 'cadence.OFF',
+  STRENGTH_2_1_2: 'cadence.STRENGTH_2_1_2',
+  STEADY_60: 'cadence.STEADY_60',
+  CARDIO_90: 'cadence.CARDIO_90',
+};
+
+export const BENCHMARK_RATING_KEYS: Record<BenchmarkRating, TranslationKey> = {
+  BRONZE: 'benchmark.rating.BRONZE',
+  SILVER: 'benchmark.rating.SILVER',
+  GOLD: 'benchmark.rating.GOLD',
+  ELITE: 'benchmark.rating.ELITE',
 };

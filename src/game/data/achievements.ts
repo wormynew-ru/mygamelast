@@ -31,7 +31,10 @@ export type AchievementId =
   | 'ARTIFACT_KEEPER'
   | 'WEEKLY_CONQUEROR'
   | 'PROGRAM_FINISHER'
-  | 'MUTANT_BOTANIST';
+  | 'MUTANT_BOTANIST'
+  | 'TABATA_FINISHER'
+  | 'CUSTOM_ARCHITECT'
+  | 'BENCHMARK_TESTED';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -170,6 +173,21 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'MUTANT_BOTANIST',
     icon: '🧬',
     check: (state) => (state.garden?.plots ?? []).some((p) => Boolean(p.isMutant)),
+  },
+  {
+    id: 'TABATA_FINISHER',
+    icon: '⏱️',
+    check: (state) => (state.workoutStats?.tabataCompleted ?? 0) >= 1,
+  },
+  {
+    id: 'CUSTOM_ARCHITECT',
+    icon: '🛠️',
+    check: (state) => (state.customCircuits?.length ?? 0) >= 1,
+  },
+  {
+    id: 'BENCHMARK_TESTED',
+    icon: '📈',
+    check: (state) => (state.benchmarks?.length ?? 0) >= 1,
   },
 ];
 

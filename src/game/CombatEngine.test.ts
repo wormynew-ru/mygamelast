@@ -621,6 +621,9 @@ describe('CombatEngine', () => {
         bestSingleHitDamage: 0,
         activeMutators: [],
         weeklyChallenge: createInitialWeeklyChallengeState(),
+        customCircuits: [],
+        benchmarks: [],
+        bestBenchmarkByExercise: {},
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
@@ -642,6 +645,8 @@ describe('CombatEngine', () => {
             highKneesLiftAngle: 110,
             frontRaisePeakAngle: 80,
           },
+          cadenceMode: 'OFF',
+          warmUpEnabled: false,
           language: 'ru',
         },
       };

@@ -20,6 +20,9 @@ import {
   Flame,
   Dumbbell,
   Sparkles,
+  Timer,
+  RefreshCw,
+  Activity,
 } from 'lucide-react';
 import {
   createWorkoutSessionForBattle,
@@ -29,7 +32,7 @@ import {
 } from '../session/WorkoutSession';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { createEndlessWaveMonster, createMonster, MONSTERS } from '../game/data/monsters';
-import { getCircuitById, type CircuitId } from '../game/data/circuits';
+import { getCircuitById } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { getLevelById } from '../game/data/levels';
 import { ITEMS } from '../game/data/items';
@@ -41,12 +44,28 @@ import {
 } from '../game/data/sanctuary';
 import { type AchievementId } from '../game/data/achievements';
 import { getAggregatedMutatorEffects } from '../game/data/programs';
-import type { BattleRank, MonsterStats, MutatorId, WeedId } from '../game/types';
+import {
+  BENCHMARK_DURATION_SEC,
+  CADENCE_ORDER,
+  FRESH_SWITCH_MIN_REPS_HINT,
+  WARMUP_DURATION_SEC,
+  WARMUP_TARGET_REPS,
+} from '../game/data/trainingFormats';
+import type {
+  BattleRank,
+  CustomCircuitDefinition,
+  MonsterStats,
+  MutatorId,
+  TabataConfig,
+  WeedId,
+} from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import {
   ACHIEVEMENT_KEYS,
   ARCHETYPE_KEYS,
   ARTIFACT_KEYS,
+  BENCHMARK_RATING_KEYS,
+  CADENCE_MODE_KEYS,
   CIRCUIT_KEYS,
   EXERCISE_NAME_KEYS,
   ITEM_NAME_KEYS,
@@ -63,7 +82,9 @@ interface BattleScreenProps {
   exerciseId: ExerciseId;
   mode?: BattleMode;
   initialWave?: number;
-  circuitId?: CircuitId;
+  circuitId?: string;
+  customCircuit?: CustomCircuitDefinition;
+  tabataConfig?: TabataConfig;
   gardenPlotId?: number;
   weedId?: WeedId;
   activeMutatorsOverride?: MutatorId[];
@@ -143,6 +164,8 @@ export function BattleScreen({
   mode = 'CAMPAIGN',
   initialWave = 1,
   circuitId,
+  customCircuit,
+  tabataConfig,
   gardenPlotId,
   weedId,
   activeMutatorsOverride,
@@ -176,6 +199,10 @@ export function BattleScreen({
       initialSanctuary.activeBuffs,
       initialSanctuary.labTier
     );
+    const warmUpStarts =
+      Boolean(storeState.settings.warmUpEnabled) &&
+      mode !== 'BENCHMARK' &&
+      mode !== 'WEED';
     return {
       state: 'STARTING',
       exerciseState: null,
@@ -206,6 +233,18 @@ export function BattleScreen({
       toxicSurgeStacks: 0,
       activeMutators: activeMutatorsOverride ?? [...storeState.activeMutators],
       isScriptedPose: storeState.settings.scriptedPoseEnabled,
+      exerciseId,
+      cadenceMode: storeState.settings.cadenceMode ?? 'OFF',
+      currentCadenceRpm: 0,
+      tabata: null,
+      warmUpActive: warmUpStarts,
+      warmUpRemainingSec: warmUpStarts ? WARMUP_DURATION_SEC : 0,
+      warmUpReps: 0,
+      warmUpTargetReps: WARMUP_TARGET_REPS,
+      warmUpCompleted: false,
+      benchmarkRemainingSec: mode === 'BENCHMARK' ? BENCHMARK_DURATION_SEC : null,
+      freshSwitchRemainingSec: 0,
+      exerciseSwitchesCount: 0,
     };
   });
   const [isDamaged, setIsDamaged] = useState(false);
@@ -217,6 +256,8 @@ export function BattleScreen({
   const talents = useGameStore((state) => state.talents);
   const artifacts = useGameStore((state) => state.artifacts);
   const scriptedPoseEnabled = useGameStore((state) => state.settings.scriptedPoseEnabled);
+  const customCircuits = useGameStore((state) => state.customCircuits);
+  const updateSettings = useGameStore((state) => state.updateSettings);
   const loadout = useGameStore((state) => state.loadout);
   const enemy = useGameStore((state) => state.currentEnemy);
   const startCombat = useGameStore((state) => state.startCombat);
@@ -228,7 +269,27 @@ export function BattleScreen({
     [basePlayer, equippedItems, sanctuary, talents, artifacts]
   );
 
-  const circuitDef = circuitId ? getCircuitById(circuitId) : undefined;
+  const activeCircuit = useMemo(() => {
+    if (!circuitId) return undefined;
+    const builtIn = getCircuitById(circuitId);
+    if (builtIn) {
+      return {
+        id: builtIn.id,
+        name: t(CIRCUIT_KEYS[builtIn.id].name),
+        rooms: builtIn.rooms,
+      };
+    }
+    const custom = customCircuit ?? customCircuits.find((c) => c.id === circuitId);
+    if (custom) {
+      return {
+        id: custom.id,
+        name: custom.name,
+        rooms: custom.rooms,
+      };
+    }
+    return undefined;
+  }, [circuitId, customCircuit, customCircuits, t]);
+
   const exerciseDef = EXERCISES[activeExerciseId];
   const levelDef = levelId ? getLevelById(levelId) : undefined;
   const initialEnemyIdRef = useRef<string | undefined>(enemy?.id);
@@ -271,6 +332,10 @@ export function BattleScreen({
 
     let disposed = false;
 
+    const customRoomsSnapshot =
+      customCircuit?.rooms ??
+      (circuitId ? useGameStore.getState().customCircuits.find((c) => c.id === circuitId)?.rooms : undefined);
+
     const session = createWorkoutSessionForBattle({
       videoElement: videoEl,
       canvasElement: canvasEl,
@@ -280,17 +345,22 @@ export function BattleScreen({
       endlessWave: initialWave,
       circuitId,
       circuitRoomIndex: 0,
+      customCircuitRooms: customRoomsSnapshot,
       gardenPlotId,
       activeMutators: activeMutatorsOverride,
       weeklyWeekKey,
       programDayIndex,
       scriptedPoseEnabled,
+      tabataConfig,
     });
     sessionRef.current = session;
 
     const unsubscribe = session.onStateChange((status) => {
       if (disposed) return;
       setSessionStatus(status);
+      if (status.exerciseId) {
+        setActiveExerciseId(status.exerciseId);
+      }
 
       if (status.lastCombatEvent && status.lastCombatEvent.id !== lastCombatEventIdRef.current) {
         lastCombatEventIdRef.current = status.lastCombatEvent.id;
@@ -358,6 +428,8 @@ export function BattleScreen({
     mode,
     initialWave,
     circuitId,
+    customCircuit,
+    tabataConfig,
     gardenPlotId,
     activeMutatorsOverride,
     weeklyWeekKey,
@@ -366,9 +438,9 @@ export function BattleScreen({
   ]);
 
   const handleAdvanceCircuitRoom = useCallback(() => {
-    if (!circuitDef) return;
+    if (!activeCircuit) return;
     const nextIndex = circuitRoomIndex + 1;
-    const nextRoom = circuitDef.rooms[nextIndex];
+    const nextRoom = activeCircuit.rooms[nextIndex];
     if (!nextRoom) return;
 
     const template = MONSTERS[nextRoom.monsterId] ?? MONSTERS.BURGER;
@@ -382,21 +454,21 @@ export function BattleScreen({
       exerciseId: nextRoom.exerciseId,
       roomIndex: nextIndex,
     });
-  }, [circuitDef, circuitRoomIndex, applyMutatorScale]);
+  }, [activeCircuit, circuitRoomIndex, applyMutatorScale]);
 
   const isBetweenCircuitRooms =
     mode === 'CIRCUIT' &&
     sessionStatus.state === 'VICTORY' &&
     Boolean(sessionStatus.victorySummary && !sessionStatus.victorySummary.circuitCompleted) &&
-    Boolean(circuitDef && circuitDef.rooms[circuitRoomIndex + 1]);
+    Boolean(activeCircuit && activeCircuit.rooms[circuitRoomIndex + 1]);
 
   useEffect(() => {
-    if (!isBetweenCircuitRooms || !circuitDef) {
+    if (!isBetweenCircuitRooms || !activeCircuit) {
       setCircuitRestSec(null);
       return undefined;
     }
 
-    const initialRest = circuitDef.rooms[circuitRoomIndex]?.restAfterSec ?? 5;
+    const initialRest = activeCircuit.rooms[circuitRoomIndex]?.restAfterSec ?? 5;
     setCircuitRestSec(initialRest);
 
     const intervalId = window.setInterval(() => {
@@ -413,7 +485,7 @@ export function BattleScreen({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isBetweenCircuitRooms, circuitDef, circuitRoomIndex]);
+  }, [isBetweenCircuitRooms, activeCircuit, circuitRoomIndex]);
 
   useEffect(() => {
     if (isBetweenCircuitRooms && circuitRestSec === 0) {
@@ -463,8 +535,8 @@ export function BattleScreen({
       sessionRef.current?.reset(freshEnemy, 1);
       return;
     }
-    if (mode === 'CIRCUIT' && circuitDef && circuitDef.rooms[0]) {
-      const firstRoom = circuitDef.rooms[0];
+    if (mode === 'CIRCUIT' && activeCircuit && activeCircuit.rooms[0]) {
+      const firstRoom = activeCircuit.rooms[0];
       const freshEnemy = applyMutatorScale(
         createMonster(MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER)
       );
@@ -537,7 +609,14 @@ export function BattleScreen({
   const showLoadoutBadge =
     loadout.mode === 'DUMBBELLS' && loadout.weightKg > 0 && exerciseDef.supportsDumbbellWeight;
 
-  const nextCircuitRoom = circuitDef?.rooms[circuitRoomIndex + 1];
+  const nextCircuitRoom = activeCircuit?.rooms[circuitRoomIndex + 1];
+
+  const handleCycleCadenceMode = () => {
+    const currentIndex = CADENCE_ORDER.indexOf(sessionStatus.cadenceMode);
+    const nextMode = CADENCE_ORDER[(currentIndex + 1) % CADENCE_ORDER.length];
+    sessionRef.current?.setCadenceMode(nextMode);
+    updateSettings({ cadenceMode: nextMode });
+  };
 
   useVoiceCommandHandler((cmd) => {
     switch (cmd.type) {
@@ -549,6 +628,12 @@ export function BattleScreen({
       case 'RESUME':
         if (sessionStatus.state === 'PAUSED') {
           sessionRef.current?.resume();
+        }
+        return true;
+      case 'SELECT_EXERCISE':
+        if (mode !== 'BENCHMARK') {
+          sessionRef.current?.switchExerciseMidBattle(cmd.exerciseId);
+          setActiveExerciseId(cmd.exerciseId);
         }
         return true;
       case 'NEXT':
@@ -594,22 +679,48 @@ export function BattleScreen({
             label={`${t('battle.player')} · ${t('stats.level')} ${basePlayer.level}`}
             tone="player"
           />
-          <HPBar
-            current={displayEnemy?.hp ?? 0}
-            max={displayEnemy?.maxHp ?? monsterTemplate.maxHp}
-            label={
-              mode === 'ENDLESS'
-                ? `${t('battle.waveLabel')} ${currentWave} · ${monsterName}`
-                : mode === 'WEEKLY'
-                  ? `${t('weekly.title')} · ${monsterName}`
-                  : mode === 'CIRCUIT' && circuitDef
-                    ? `${t(CIRCUIT_KEYS[circuitDef.id].name)} (${circuitRoomIndex + 1}/${circuitDef.rooms.length}) · ${monsterName}`
-                    : mode === 'WEED' && typeof gardenPlotId === 'number'
-                      ? `${t('battle.weedModeBadge')} #${gardenPlotId + 1} · ${monsterName}`
-                      : monsterName
-            }
-            tone="enemy"
-          />
+          {mode === 'BENCHMARK' ? (
+            <div className="w-full flex flex-col justify-center">
+              <div className="flex justify-between items-baseline text-sm font-semibold mb-1.5 gap-2">
+                <span className="text-emerald-300 truncate">{t('benchmark.title')}</span>
+                <span className="font-numeric text-xs text-slate-200 shrink-0">
+                  {sessionStatus.benchmarkRemainingSec ?? BENCHMARK_DURATION_SEC}s
+                </span>
+              </div>
+              <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                <div
+                  className="h-full bg-emerald-500 transition-[width] duration-150"
+                  style={{
+                    width: `${Math.round(
+                      ((BENCHMARK_DURATION_SEC -
+                        (sessionStatus.benchmarkRemainingSec ?? BENCHMARK_DURATION_SEC)) /
+                        BENCHMARK_DURATION_SEC) *
+                        100
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <HPBar
+              current={displayEnemy?.hp ?? 0}
+              max={displayEnemy?.maxHp ?? monsterTemplate.maxHp}
+              label={
+                mode === 'ENDLESS'
+                  ? `${t('battle.waveLabel')} ${currentWave} · ${monsterName}`
+                  : mode === 'WEEKLY'
+                    ? `${t('weekly.title')} · ${monsterName}`
+                    : mode === 'TABATA'
+                      ? `${t('levels.tabataTab')} · ${monsterName}`
+                      : mode === 'CIRCUIT' && activeCircuit
+                        ? `${activeCircuit.name} (${circuitRoomIndex + 1}/${activeCircuit.rooms.length}) · ${monsterName}`
+                        : mode === 'WEED' && typeof gardenPlotId === 'number'
+                          ? `${t('battle.weedModeBadge')} #${gardenPlotId + 1} · ${monsterName}`
+                          : monsterName
+              }
+              tone="enemy"
+            />
+          )}
         </div>
       </header>
 
@@ -622,10 +733,10 @@ export function BattleScreen({
 
           {/* Top-left Exercise, Loadout, Matchup & FPS Info */}
           <div className="absolute top-4 left-4 bg-slate-950/85 border border-slate-800 px-3 py-1.5 rounded-lg text-xs text-slate-200 flex flex-wrap items-center gap-2">
-            {mode === 'CIRCUIT' && circuitDef && (
+            {mode === 'CIRCUIT' && activeCircuit && (
               <>
                 <span className="font-numeric font-semibold text-amber-400">
-                  {t('battle.roomLabel')} {circuitRoomIndex + 1}/{circuitDef.rooms.length}
+                  {t('battle.roomLabel')} {circuitRoomIndex + 1}/{activeCircuit.rooms.length}
                 </span>
                 <span aria-hidden="true">·</span>
               </>
@@ -742,6 +853,27 @@ export function BattleScreen({
             </button>
           )}
 
+          {/* Pre-Battle Warm-up Banner */}
+          {sessionStatus.state === 'ACTIVE' && sessionStatus.warmUpActive && (
+            <div className="absolute top-16 left-4 right-4 max-w-md mx-auto bg-slate-950/90 border border-emerald-500/70 rounded-xl px-4 py-3 text-center space-y-2 z-10">
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold text-emerald-300">
+                <span>{t('warmup.title')}</span>
+                <span className="font-numeric">
+                  {sessionStatus.warmUpRemainingSec}s · {sessionStatus.warmUpReps}/
+                  {sessionStatus.warmUpTargetReps}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300">{t('warmup.subtitle')}</p>
+              <button
+                type="button"
+                onClick={() => sessionRef.current?.skipWarmUp()}
+                className="px-3 py-1 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition-colors whitespace-nowrap"
+              >
+                {t('warmup.skip')}
+              </button>
+            </div>
+          )}
+
           {/* Visibility Warning Scrim */}
           {sessionStatus.state === 'ACTIVE' && visibility !== 'VISIBLE' && (
             <div className="absolute bottom-4 left-4 right-4 max-w-xl mx-auto bg-amber-500/95 text-slate-950 px-4 py-2.5 rounded-lg text-center text-sm font-semibold">
@@ -803,232 +935,354 @@ export function BattleScreen({
 
         {/* Right Combat HUD Panel */}
         <aside className="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 p-5 flex flex-col justify-between gap-4 shrink-0 overflow-y-auto">
-          {/* Monster Sprite + Archetype + Shield + Attack Timer */}
-          <div className="flex flex-col items-center text-center pt-1 space-y-2.5">
-            {sessionStatus.bossPhase > 0 && (
-              <div className="text-xs font-semibold text-red-400">
-                {t('battle.bossEnrage')} {sessionStatus.bossPhase}
+          {mode === 'BENCHMARK' ? (
+            <div className="flex flex-col items-center text-center pt-2 space-y-4">
+              <Activity className="w-10 h-10 text-emerald-400" />
+              <div>
+                <div className="text-xs font-semibold text-emerald-400">60s TEST</div>
+                <h2 className="text-lg font-bold text-white mt-0.5">{t('benchmark.title')}</h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  {exerciseDef.icon} {t(EXERCISE_NAME_KEYS[activeExerciseId])}
+                </p>
               </div>
-            )}
-
-            <motion.div
-              animate={
-                isDamaged
-                  ? { x: [-8, 8, -6, 6, 0], scale: [1, 0.94, 1] }
-                  : isWarningActive
-                    ? { scale: [1, 1.12, 1.04], rotate: [0, -5, 5, 0] }
-                    : { scale: 1, rotate: 0, x: 0 }
-              }
-              transition={
-                isDamaged
-                  ? { duration: 0.25 }
-                  : isWarningActive
-                    ? { duration: 0.45, repeat: Infinity, ease: 'easeInOut' }
-                    : { duration: 0.2 }
-              }
-              className="text-6xl select-none"
-            >
-              {monsterTemplate.sprite}
-            </motion.div>
-
-            <div>
-              <h2 className="text-lg font-bold text-white">{monsterName}</h2>
-              {displayEnemy?.archetype && (
-                <div className="text-xs text-amber-400 font-medium">
-                  {t(ARCHETYPE_KEYS[displayEnemy.archetype])}
+              <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                <div className="text-xs text-slate-400">{t('benchmark.timerLabel')}</div>
+                <div className="font-numeric text-4xl font-bold text-emerald-400">
+                  {sessionStatus.benchmarkRemainingSec ?? BENCHMARK_DURATION_SEC}s
                 </div>
-              )}
+              </div>
             </div>
-
-            {/* Enemy Shield Bar */}
-            {typeof displayEnemy?.shieldHits === 'number' && displayEnemy.shieldHits > 0 && (
-              <div className="w-full bg-sky-950/40 border border-sky-700/60 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs font-semibold text-sky-300">
-                <span className="inline-flex items-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>{t('battle.shield')}</span>
-                </span>
-                <span className="font-numeric">
-                  {displayEnemy.shieldHits} / {displayEnemy.maxShieldHits ?? displayEnemy.shieldHits}
-                </span>
-              </div>
-            )}
-
-            {/* Enemy Counter-Attack Bar */}
-            <div
-              className={`w-full rounded-lg p-3 space-y-1.5 border transition-colors ${
-                isWarningActive
-                  ? 'bg-red-950/35 border-red-500/80'
-                  : 'bg-slate-950 border-slate-800'
-              }`}
-            >
-              <div className="flex justify-between items-center text-xs gap-2">
-                <span
-                  className={`inline-flex items-center gap-1.5 font-medium truncate ${
-                    isWarningActive ? 'text-red-300 font-semibold' : 'text-slate-400'
-                  }`}
-                >
-                  {isWarningActive && <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />}
-                  <span className="truncate">
-                    {isWarningActive ? t('battle.attackIncoming') : t('battle.enemyAttackTimer')}
-                  </span>
-                </span>
-                <span
-                  className={`font-numeric font-semibold shrink-0 ${
-                    isWarningActive ? 'text-red-400' : 'text-amber-400'
-                  }`}
-                >
-                  {secondsUntilAttack}s
-                </span>
-              </div>
-              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+          ) : (
+            /* Monster Sprite + Archetype + Shield + Tabata / Attack Timer */
+            <div className="flex flex-col items-center text-center pt-1 space-y-2.5">
+              {mode === 'TABATA' && sessionStatus.tabata && !sessionStatus.warmUpActive && (
                 <div
-                  className={`h-full transition-[width] duration-150 ${
-                    isWarningActive ? 'bg-red-500' : 'bg-amber-500'
+                  className={`w-full rounded-lg p-3 border text-left space-y-1.5 ${
+                    sessionStatus.tabata.phase === 'REST'
+                      ? 'bg-sky-950/40 border-sky-500/70'
+                      : 'bg-fuchsia-950/40 border-fuchsia-500/70'
                   }`}
-                  style={{ width: `${attackTimerPercent}%` }}
-                />
-              </div>
-              {isWarningActive && exerciseDef.trackingType === 'hold' && (
-                <div className="flex items-center justify-center gap-1.5 text-xs text-sky-300 font-medium pt-0.5">
-                  <Shield className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t('battle.holdBlockHint')}</span>
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span
+                      className={`inline-flex items-center gap-1.5 ${
+                        sessionStatus.tabata.phase === 'REST'
+                          ? 'text-sky-300'
+                          : 'text-fuchsia-300'
+                      }`}
+                    >
+                      <Timer className="w-3.5 h-3.5" />
+                      <span>
+                        {sessionStatus.tabata.phase === 'REST'
+                          ? t('tabata.restPhase')
+                          : t('tabata.workPhase')}
+                      </span>
+                    </span>
+                    <span className="font-numeric text-white">
+                      {t('tabata.roundLabel')} {sessionStatus.tabata.round}/
+                      {sessionStatus.tabata.totalRounds} · {sessionStatus.tabata.remainingSec}s
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-[width] duration-150 ${
+                        sessionStatus.tabata.phase === 'REST' ? 'bg-sky-400' : 'bg-fuchsia-500'
+                      }`}
+                      style={{
+                        width: `${Math.round(sessionStatus.tabata.progress * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  {sessionStatus.tabata.phase === 'REST' && (
+                    <div className="text-[11px] text-sky-300 font-medium">
+                      {t('tabata.restPausedHint')}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
 
-            {sessionStatus.activeMutators.includes('NO_ITEMS') && (
-              <div className="w-full bg-rose-950/40 border border-rose-700/50 rounded-lg px-3 py-1.5 text-[11px] font-medium text-rose-300 text-center">
-                {t('battle.mutatorsBlockedItems')}
-              </div>
-            )}
-
-            {/* Active Toxic Debuff Warning */}
-            {sessionStatus.isPlayerDebuffed && (
-              <div className="w-full bg-purple-950/40 border border-purple-700/60 rounded-lg px-3 py-1.5 space-y-0.5 text-xs font-semibold text-purple-300">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Skull className="w-3.5 h-3.5" />
-                    <span>{t('battle.toxicDebuff')}</span>
-                  </span>
-                  <span className="font-numeric">{sessionStatus.debuffRemainingSec}s</span>
+              {sessionStatus.bossPhase > 0 && (
+                <div className="text-xs font-semibold text-red-400">
+                  {t('battle.bossEnrage')} {sessionStatus.bossPhase}
                 </div>
-                {exerciseDef.trackingType === 'hold' && (
-                  <div className="text-[11px] font-medium text-sky-300">
-                    {t('battle.holdCleanseHint')}
+              )}
+
+              <motion.div
+                animate={
+                  isDamaged
+                    ? { x: [-8, 8, -6, 6, 0], scale: [1, 0.94, 1] }
+                    : isWarningActive
+                      ? { scale: [1, 1.12, 1.04], rotate: [0, -5, 5, 0] }
+                      : { scale: 1, rotate: 0, x: 0 }
+                }
+                transition={
+                  isDamaged
+                    ? { duration: 0.25 }
+                    : isWarningActive
+                      ? { duration: 0.45, repeat: Infinity, ease: 'easeInOut' }
+                      : { duration: 0.2 }
+                }
+                className="text-6xl select-none"
+              >
+                {monsterTemplate.sprite}
+              </motion.div>
+
+              <div>
+                <h2 className="text-lg font-bold text-white">{monsterName}</h2>
+                {displayEnemy?.archetype && (
+                  <div className="text-xs text-amber-400 font-medium">
+                    {t(ARCHETYPE_KEYS[displayEnemy.archetype])}
                   </div>
                 )}
               </div>
-            )}
 
-            {/* Damage / Block / Cleanse Popups */}
-            <div className="min-h-[24px] flex flex-col items-center gap-1">
-              {justCleansed && (
-                <div className="inline-flex items-center gap-1 text-xs font-semibold text-sky-300">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{t('battle.toxicCleansed')}</span>
+              {/* Enemy Shield Bar */}
+              {typeof displayEnemy?.shieldHits === 'number' && displayEnemy.shieldHits > 0 && (
+                <div className="w-full bg-sky-950/40 border border-sky-700/60 rounded-lg px-3 py-1.5 flex items-center justify-between text-xs font-semibold text-sky-300">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>{t('battle.shield')}</span>
+                  </span>
+                  <span className="font-numeric">
+                    {displayEnemy.shieldHits} / {displayEnemy.maxShieldHits ?? displayEnemy.shieldHits}
+                  </span>
                 </div>
               )}
 
-              <AnimatePresence mode="wait">
-                {sessionStatus.lastCombatEvent && (
-                  <motion.div
-                    key={sessionStatus.lastCombatEvent.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.2 }}
-                    className={`font-numeric text-sm font-bold ${
-                      sessionStatus.lastCombatEvent.wasUltimate
-                        ? 'text-fuchsia-300'
-                        : sessionStatus.lastCombatEvent.wasCritical
-                          ? 'text-amber-400'
-                          : 'text-emerald-400'
+              {/* Enemy Counter-Attack Bar */}
+              <div
+                className={`w-full rounded-lg p-3 space-y-1.5 border transition-colors ${
+                  isWarningActive
+                    ? 'bg-red-950/35 border-red-500/80'
+                    : 'bg-slate-950 border-slate-800'
+                }`}
+              >
+                <div className="flex justify-between items-center text-xs gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1.5 font-medium truncate ${
+                      isWarningActive ? 'text-red-300 font-semibold' : 'text-slate-400'
                     }`}
                   >
-                    -{sessionStatus.lastCombatEvent.damage} HP
-                    {sessionStatus.lastCombatEvent.wasUltimate
-                      ? ` · ${t('battle.ultimateOverdrive')}`
-                      : ''}
-                    {sessionStatus.lastCombatEvent.wasCritical
-                      ? ` · ${t('battle.criticalHit')}`
-                      : ''}
-                    {sessionStatus.lastCombatEvent.shieldBroken
-                      ? ` · ${t('battle.shieldBroken')}`
-                      : ''}
-                  </motion.div>
+                    {isWarningActive && <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                    <span className="truncate">
+                      {isWarningActive ? t('battle.attackIncoming') : t('battle.enemyAttackTimer')}
+                    </span>
+                  </span>
+                  <span
+                    className={`font-numeric font-semibold shrink-0 ${
+                      isWarningActive ? 'text-red-400' : 'text-amber-400'
+                    }`}
+                  >
+                    {secondsUntilAttack}s
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-[width] duration-150 ${
+                      isWarningActive ? 'bg-red-500' : 'bg-amber-500'
+                    }`}
+                    style={{ width: `${attackTimerPercent}%` }}
+                  />
+                </div>
+                {isWarningActive && exerciseDef.trackingType === 'hold' && (
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-sky-300 font-medium pt-0.5">
+                    <Shield className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t('battle.holdBlockHint')}</span>
+                  </div>
                 )}
-              </AnimatePresence>
+              </div>
 
-              <AnimatePresence mode="wait">
-                {sessionStatus.lastMonsterAttackEvent && (
-                  <motion.div
-                    key={sessionStatus.lastMonsterAttackEvent.id}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className={`inline-flex items-center gap-1.5 text-xs font-semibold font-numeric ${
-                      sessionStatus.lastMonsterAttackEvent.wasBlocked
-                        ? 'text-sky-400'
-                        : 'text-red-400'
-                    }`}
-                  >
-                    {sessionStatus.lastMonsterAttackEvent.wasBlocked && (
-                      <Shield className="w-3.5 h-3.5" />
-                    )}
-                    <span>
-                      {sessionStatus.lastMonsterAttackEvent.wasBlocked
-                        ? `${t('battle.blocked')} (-${sessionStatus.lastMonsterAttackEvent.damageTaken} HP)`
-                        : `${t('battle.incomingDamage')}: -${sessionStatus.lastMonsterAttackEvent.damageTaken} HP`}
-                      {sessionStatus.lastMonsterAttackEvent.thornsDamage
-                        ? ` · ${t('battle.thornsReflected')} -${sessionStatus.lastMonsterAttackEvent.thornsDamage}`
+              {sessionStatus.activeMutators.includes('NO_ITEMS') && (
+                <div className="w-full bg-rose-950/40 border border-rose-700/50 rounded-lg px-3 py-1.5 text-[11px] font-medium text-rose-300 text-center">
+                  {t('battle.mutatorsBlockedItems')}
+                </div>
+              )}
+
+              {/* Active Toxic Debuff Warning */}
+              {sessionStatus.isPlayerDebuffed && (
+                <div className="w-full bg-purple-950/40 border border-purple-700/60 rounded-lg px-3 py-1.5 space-y-0.5 text-xs font-semibold text-purple-300">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Skull className="w-3.5 h-3.5" />
+                      <span>{t('battle.toxicDebuff')}</span>
+                    </span>
+                    <span className="font-numeric">{sessionStatus.debuffRemainingSec}s</span>
+                  </div>
+                  {exerciseDef.trackingType === 'hold' && (
+                    <div className="text-[11px] font-medium text-sky-300">
+                      {t('battle.holdCleanseHint')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Damage / Block / Cleanse Popups */}
+              <div className="min-h-[24px] flex flex-col items-center gap-1">
+                {justCleansed && (
+                  <div className="inline-flex items-center gap-1 text-xs font-semibold text-sky-300">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{t('battle.toxicCleansed')}</span>
+                  </div>
+                )}
+
+                <AnimatePresence mode="wait">
+                  {sessionStatus.lastCombatEvent && (
+                    <motion.div
+                      key={sessionStatus.lastCombatEvent.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2 }}
+                      className={`font-numeric text-sm font-bold ${
+                        sessionStatus.lastCombatEvent.wasUltimate
+                          ? 'text-fuchsia-300'
+                          : sessionStatus.lastCombatEvent.wasCritical
+                            ? 'text-amber-400'
+                            : 'text-emerald-400'
+                      }`}
+                    >
+                      -{sessionStatus.lastCombatEvent.damage} HP
+                      {sessionStatus.lastCombatEvent.wasUltimate
+                        ? ` · ${t('battle.ultimateOverdrive')}`
                         : ''}
-                    </span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+                      {sessionStatus.lastCombatEvent.wasCritical
+                        ? ` · ${t('battle.criticalHit')}`
+                        : ''}
+                      {sessionStatus.lastCombatEvent.shieldBroken
+                        ? ` · ${t('battle.shieldBroken')}`
+                        : ''}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-          {/* Tempo Combo + Ultimate Charge + Exercise Telemetry */}
+                <AnimatePresence mode="wait">
+                  {sessionStatus.lastMonsterAttackEvent && (
+                    <motion.div
+                      key={sessionStatus.lastMonsterAttackEvent.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold font-numeric ${
+                        sessionStatus.lastMonsterAttackEvent.wasBlocked
+                          ? 'text-sky-400'
+                          : 'text-red-400'
+                      }`}
+                    >
+                      {sessionStatus.lastMonsterAttackEvent.wasBlocked && (
+                        <Shield className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {sessionStatus.lastMonsterAttackEvent.wasBlocked
+                          ? `${t('battle.blocked')} (-${sessionStatus.lastMonsterAttackEvent.damageTaken} HP)`
+                          : `${t('battle.incomingDamage')}: -${sessionStatus.lastMonsterAttackEvent.damageTaken} HP`}
+                        {sessionStatus.lastMonsterAttackEvent.thornsDamage
+                          ? ` · ${t('battle.thornsReflected')} -${sessionStatus.lastMonsterAttackEvent.thornsDamage}`
+                          : ''}
+                      </span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
+
+          {/* Tempo Combo + Ultimate Charge + Live Cadence + Mid-Battle Switch + Exercise Telemetry */}
           <div className="space-y-2.5">
-            <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 space-y-2">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs font-numeric">
-                  <span className="inline-flex items-center gap-1.5 font-semibold text-amber-400">
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>
-                      {t('battle.combo')}: {sessionStatus.comboCount}
+            {mode !== 'BENCHMARK' && (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 space-y-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-numeric">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-amber-400">
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>
+                        {t('battle.combo')}: {sessionStatus.comboCount}
+                      </span>
                     </span>
-                  </span>
-                  <span className="font-bold text-white">
-                    ×{sessionStatus.comboMultiplier.toFixed(2).replace(/\.00$/, '')}
-                  </span>
+                    <span className="font-bold text-white">
+                      ×{sessionStatus.comboMultiplier.toFixed(2).replace(/\.00$/, '')}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-400 transition-[width] duration-100"
+                      style={{ width: `${comboPercent}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-400 transition-[width] duration-100"
-                    style={{ width: `${comboPercent}%` }}
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-1 pt-1 border-t border-slate-900">
-                <div className="flex items-center justify-between text-xs font-numeric">
-                  <span className="inline-flex items-center gap-1.5 font-semibold text-fuchsia-400">
-                    <Flame className="w-3.5 h-3.5" />
-                    <span>{t('battle.ultimate')}</span>
-                  </span>
-                  <span className="font-bold text-fuchsia-200">{ultimatePercent}%</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-fuchsia-500 transition-[width] duration-150"
-                    style={{ width: `${ultimatePercent}%` }}
-                  />
+                <div className="space-y-1 pt-1 border-t border-slate-900">
+                  <div className="flex items-center justify-between text-xs font-numeric">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-fuchsia-400">
+                      <Flame className="w-3.5 h-3.5" />
+                      <span>{t('battle.ultimate')}</span>
+                    </span>
+                    <span className="font-bold text-fuchsia-200">{ultimatePercent}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-fuchsia-500 transition-[width] duration-150"
+                      style={{ width: `${ultimatePercent}%` }}
+                    />
+                  </div>
                 </div>
               </div>
+            )}
+
+            {/* Live Cadence RPM + Metronome Cycler */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+              <div className="font-numeric">
+                <span className="text-slate-400">{t('cadence.rpmLabel')}: </span>
+                <span className="font-bold text-sky-300">
+                  {sessionStatus.currentCadenceRpm} {t('cadence.rpmUnit')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCycleCadenceMode}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold rounded-md transition-colors whitespace-nowrap shrink-0"
+              >
+                {t(CADENCE_MODE_KEYS[sessionStatus.cadenceMode])}
+              </button>
             </div>
+
+            {/* Mid-Battle Superset Exercise Switcher */}
+            {mode !== 'BENCHMARK' && (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-slate-400 font-semibold">
+                    <RefreshCw className="w-3 h-3" />
+                    <span>{t('battle.switchExercise')}</span>
+                  </span>
+                  {sessionStatus.freshSwitchRemainingSec > 0 && (
+                    <span className="font-numeric font-bold text-emerald-400">
+                      {t('battle.freshBonus')} ({sessionStatus.freshSwitchRemainingSec}s)
+                    </span>
+                  )}
+                </div>
+                <select
+                  value={activeExerciseId}
+                  onChange={(e) => {
+                    const nextEx = e.target.value as ExerciseId;
+                    sessionRef.current?.switchExerciseMidBattle(nextEx);
+                    setActiveExerciseId(nextEx);
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-white"
+                >
+                  {(Object.keys(EXERCISES) as ExerciseId[]).map((exId) => (
+                    <option key={`hud-switch-${exId}`} value={exId}>
+                      {EXERCISES[exId].icon} {t(EXERCISE_NAME_KEYS[exId])}
+                    </option>
+                  ))}
+                </select>
+                {sessionStatus.comboCount >= FRESH_SWITCH_MIN_REPS_HINT &&
+                  sessionStatus.freshSwitchRemainingSec === 0 && (
+                    <div className="text-[11px] text-amber-300 font-medium">
+                      {t('battle.switchHint')}
+                    </div>
+                  )}
+              </div>
+            )}
 
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
               {exerciseDef.trackingType === 'hold' ? (
@@ -1115,7 +1369,7 @@ export function BattleScreen({
                 </div>
                 <div>
                   <div className="font-numeric text-xs font-semibold text-amber-400 mb-1">
-                    {t('battle.roomLabel')} {circuitRoomIndex + 1}/{circuitDef?.rooms.length}
+                    {t('battle.roomLabel')} {circuitRoomIndex + 1}/{activeCircuit?.rooms.length}
                   </div>
                   <h2 className="font-display text-2xl font-bold text-white">
                     {t('battle.nextRoomReady')}
@@ -1229,6 +1483,59 @@ export function BattleScreen({
                         <span className="font-numeric text-slate-200">
                           ~{sessionStatus.victorySummary.estimatedKcal} {t('battle.kcalUnit')}
                         </span>
+                      </div>
+                    )}
+
+                    {typeof sessionStatus.victorySummary.avgCadenceRpm === 'number' &&
+                      sessionStatus.victorySummary.avgCadenceRpm > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">{t('cadence.avgRpm')}</span>
+                          <span className="font-numeric text-sky-300 font-semibold">
+                            {sessionStatus.victorySummary.avgCadenceRpm} {t('cadence.rpmUnit')}
+                          </span>
+                        </div>
+                      )}
+
+                    {typeof sessionStatus.victorySummary.tabataRoundsCompleted === 'number' && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">{t('tabata.roundsCleared')}</span>
+                        <span className="font-numeric text-fuchsia-300 font-semibold">
+                          {sessionStatus.victorySummary.tabataRoundsCompleted}
+                        </span>
+                      </div>
+                    )}
+
+                    {typeof sessionStatus.victorySummary.exerciseSwitchesCount === 'number' &&
+                      sessionStatus.victorySummary.exerciseSwitchesCount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">{t('battle.switchesCount')}</span>
+                          <span className="font-numeric text-emerald-300 font-semibold">
+                            {sessionStatus.victorySummary.exerciseSwitchesCount}
+                          </span>
+                        </div>
+                      )}
+
+                    {sessionStatus.victorySummary.benchmarkEntry && (
+                      <div className="bg-emerald-950/35 border border-emerald-700/50 rounded-md px-3 py-2 space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-slate-300">{t('benchmark.scoreLabel')}</span>
+                          <span className="font-numeric font-bold text-white">
+                            {sessionStatus.victorySummary.benchmarkEntry.score}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-300">{t('benchmark.ratingLabel')}</span>
+                          <span className="font-semibold text-amber-300">
+                            {t(
+                              BENCHMARK_RATING_KEYS[
+                                sessionStatus.victorySummary.benchmarkEntry.rating
+                              ]
+                            )}
+                          </span>
+                        </div>
+                        {sessionStatus.victorySummary.benchmarkIsNewBest && (
+                          <div className="text-emerald-400 font-bold">{t('benchmark.newBest')}</div>
+                        )}
                       </div>
                     )}
 

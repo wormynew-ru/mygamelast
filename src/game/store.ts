@@ -10,7 +10,10 @@ import type {
   AlchemyOrder,
   ArtifactId,
   BattleRank,
+  BenchmarkEntry,
   BestiaryEntry,
+  CustomCircuitDefinition,
+  CustomCircuitRoom,
   DailyActivityEntry,
   DailyQuestState,
   EndlessArenaStats,
@@ -34,7 +37,17 @@ import type {
 import { createPlayer, getEffectivePlayerStats, levelUp, useConsumableItem } from './CombatEngine';
 import { ITEMS } from './data/items';
 import { evaluateNewAchievements } from './data/achievements';
-import { type ExerciseId } from './data/exercises';
+import { EXERCISES, type ExerciseId } from './data/exercises';
+import {
+  MAX_CUSTOM_CIRCUITS,
+  MIN_CUSTOM_CIRCUIT_ROOMS,
+  normalizeCustomCircuits,
+} from './data/circuits';
+import {
+  CADENCE_MODES,
+  computeBenchmarkRating,
+  normalizeBenchmarks,
+} from './data/trainingFormats';
 import {
   QUICK_WEED_CLEAR_COST,
   SEEDS,
@@ -99,7 +112,7 @@ import {
 import { isSerializedMap, type SerializedMap } from './portability';
 import { setCurrentLanguage, type Language } from '../i18n';
 
-export const SAVE_SCHEMA_VERSION = 14;
+export const SAVE_SCHEMA_VERSION = 15;
 
 export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
   squatBottomAngle: 90,
@@ -136,6 +149,7 @@ function createInitialWorkoutStats(): WorkoutStats {
     maxCombo: 0,
     totalTonnageKg: 0,
     circuitsCompleted: 0,
+    tabataCompleted: 0,
     totalEstimatedKcal: 0,
     totalDurationSec: 0,
     totalCoinsEarned: 0,
@@ -209,6 +223,9 @@ function createInitialState(): GameState {
     bestSingleHitDamage: 0,
     activeMutators: [],
     weeklyChallenge: createInitialWeeklyChallengeState(),
+    customCircuits: [],
+    benchmarks: [],
+    bestBenchmarkByExercise: {},
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
@@ -220,6 +237,8 @@ function createInitialState(): GameState {
       exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
       language: 'ru',
       scriptedPoseEnabled: false,
+      cadenceMode: 'OFF',
+      warmUpEnabled: false,
     },
   };
 }
@@ -281,6 +300,7 @@ interface GameStore extends GameState {
     coinsEarned?: number;
     tonnageKg?: number;
     circuitsCompleted?: number;
+    tabataCompleted?: number;
     durationSec?: number;
     dateKey?: string;
     suppressWeedSpawn?: boolean;
@@ -358,6 +378,15 @@ interface GameStore extends GameState {
     rewardXp: number;
     leveledUp: boolean;
   } | null;
+
+  saveCustomCircuit: (name: string, rooms: CustomCircuitRoom[], dateKey?: string) => CustomCircuitDefinition | null;
+  deleteCustomCircuit: (circuitId: string) => void;
+  recordBenchmarkResult: (params: {
+    exerciseId: ExerciseId;
+    score: number;
+    avgCadenceRpm: number;
+    dateKey?: string;
+  }) => { entry: BenchmarkEntry; isNewBest: boolean };
 
   updateSettings: (settings: Partial<GameState['settings']>) => void;
   updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
@@ -470,11 +499,30 @@ export function migrateGameState(persistedState: unknown, version: number): Game
       bestSingleHitDamage: Math.max(0, Math.floor(state.bestSingleHitDamage ?? 0)),
       activeMutators: migratedMutators,
       weeklyChallenge: normalizeWeeklyChallengeState(state.weeklyChallenge),
+      customCircuits: normalizeCustomCircuits(state.customCircuits),
+      benchmarks: normalizeBenchmarks(state.benchmarks),
+      bestBenchmarkByExercise: (() => {
+        const clean: Partial<Record<ExerciseId, number>> = {};
+        if (state.bestBenchmarkByExercise && typeof state.bestBenchmarkByExercise === 'object') {
+          for (const exId of Object.keys(EXERCISES) as ExerciseId[]) {
+            const val = Number(state.bestBenchmarkByExercise[exId] ?? 0);
+            if (val > 0) {
+              clean[exId] = Math.floor(val);
+            }
+          }
+        }
+        return clean;
+      })(),
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
         voiceControlEnabled: Boolean(state.settings?.voiceControlEnabled),
         scriptedPoseEnabled: Boolean(state.settings?.scriptedPoseEnabled),
+        warmUpEnabled: Boolean(state.settings?.warmUpEnabled),
+        cadenceMode:
+          state.settings?.cadenceMode && state.settings.cadenceMode in CADENCE_MODES
+            ? state.settings.cadenceMode
+            : 'OFF',
         targetPoseFps:
           state.settings?.targetPoseFps === 15 || state.settings?.targetPoseFps === 30
             ? state.settings.targetPoseFps
@@ -725,6 +773,7 @@ export const useGameStore = create<GameStore>()(
           const kcalDelta = delta.estimatedKcal ?? 0;
           const tonnageDelta = delta.tonnageKg ?? 0;
           const circuitsDelta = delta.circuitsCompleted ?? 0;
+          const tabataDelta = delta.tabataCompleted ?? 0;
           const durationDelta = delta.durationSec ?? 0;
 
           const nextQuests = normalizeDailyQuests(state.dailyQuests, todayKey);
@@ -803,6 +852,7 @@ export const useGameStore = create<GameStore>()(
               totalTonnageKg:
                 Math.round(((state.workoutStats.totalTonnageKg ?? 0) + tonnageDelta) * 10) / 10,
               circuitsCompleted: (state.workoutStats.circuitsCompleted ?? 0) + circuitsDelta,
+              tabataCompleted: (state.workoutStats.tabataCompleted ?? 0) + tabataDelta,
               totalEstimatedKcal:
                 Math.round(((state.workoutStats.totalEstimatedKcal ?? 0) + kcalDelta) * 10) / 10,
               totalDurationSec: (state.workoutStats.totalDurationSec ?? 0) + durationDelta,
@@ -1714,6 +1764,63 @@ export const useGameStore = create<GameStore>()(
           rewardXp: order.rewardXp,
           leveledUp,
         };
+      },
+
+      saveCustomCircuit: (name, rooms, dateKey = getLocalDateKey()) => {
+        if (rooms.length < MIN_CUSTOM_CIRCUIT_ROOMS) return null;
+        const state = get();
+        if (state.customCircuits.length >= MAX_CUSTOM_CIRCUITS) return null;
+        const id = `custom-${Date.now()}-${state.customCircuits.length + 1}`;
+        const normalized = normalizeCustomCircuits([
+          ...state.customCircuits,
+          {
+            id,
+            name: name.trim() || `Custom #${state.customCircuits.length + 1}`,
+            rooms,
+            createdAtDate: dateKey,
+          },
+        ]);
+        const created = normalized[normalized.length - 1] ?? null;
+        if (!created) return null;
+        set({ customCircuits: normalized });
+        get().syncAchievements();
+        return created;
+      },
+
+      deleteCustomCircuit: (circuitId) =>
+        set((state) => ({
+          customCircuits: state.customCircuits.filter((c) => c.id !== circuitId),
+        })),
+
+      recordBenchmarkResult: ({
+        exerciseId,
+        score,
+        avgCadenceRpm,
+        dateKey = getLocalDateKey(),
+      }) => {
+        const state = get();
+        const cleanScore = Math.max(0, Math.floor(score));
+        const rating = computeBenchmarkRating(exerciseId, cleanScore);
+        const entry: BenchmarkEntry = {
+          id: `bm-${dateKey}-${state.benchmarks.length + 1}`,
+          dateKey,
+          exerciseId,
+          score: cleanScore,
+          avgCadenceRpm: Math.round(avgCadenceRpm * 10) / 10,
+          rating,
+        };
+        const prevBest = state.bestBenchmarkByExercise[exerciseId] ?? 0;
+        const isNewBest = cleanScore > prevBest && cleanScore > 0;
+        const nextBestMap = isNewBest
+          ? { ...state.bestBenchmarkByExercise, [exerciseId]: cleanScore }
+          : state.bestBenchmarkByExercise;
+
+        set({
+          benchmarks: [...state.benchmarks, entry].slice(-100),
+          bestBenchmarkByExercise: nextBestMap,
+        });
+        get().syncAchievements();
+        return { entry, isNewBest };
       },
 
       updateSettings: (settingsUpdate) =>

@@ -143,6 +143,7 @@ export interface WorkoutStats {
   maxCombo: number;
   totalTonnageKg: number;
   circuitsCompleted: number;
+  tabataCompleted?: number;
   totalEstimatedKcal?: number;
   totalDurationSec?: number;
   totalCoinsEarned?: number;
@@ -374,6 +375,41 @@ export interface ExerciseCalibrationSettings {
 
 export type PoseComputeDelegate = 'GPU' | 'CPU';
 
+export type CadenceMode = 'OFF' | 'STRENGTH_2_1_2' | 'STEADY_60' | 'CARDIO_90';
+
+export type TabataPresetId = 'CLASSIC_20_10' | 'POWER_30_15' | 'ENDURANCE_40_20';
+
+export interface TabataConfig {
+  presetId?: TabataPresetId;
+  workSec: number;
+  restSec: number;
+  rounds: number;
+}
+
+export interface CustomCircuitRoom {
+  monsterId: string;
+  exerciseId: ExerciseId;
+  restAfterSec: number;
+}
+
+export interface CustomCircuitDefinition {
+  id: string;
+  name: string;
+  rooms: CustomCircuitRoom[];
+  createdAtDate: string;
+}
+
+export type BenchmarkRating = 'BRONZE' | 'SILVER' | 'GOLD' | 'ELITE';
+
+export interface BenchmarkEntry {
+  id: string;
+  dateKey: string;
+  exerciseId: ExerciseId;
+  score: number;
+  avgCadenceRpm: number;
+  rating: BenchmarkRating;
+}
+
 /**
  * Persistent game state (saved/loaded via Zustand).
  */
@@ -410,6 +446,11 @@ export interface GameState {
   activeMutators: MutatorId[];
   weeklyChallenge: WeeklyChallengeState;
 
+  /** Training Formats, Custom Circuits & Benchmarks */
+  customCircuits: CustomCircuitDefinition[];
+  benchmarks: BenchmarkEntry[];
+  bestBenchmarkByExercise: Partial<Record<ExerciseId, number>>;
+
   /** Settings and calibration */
   settings: {
     soundEnabled: boolean;
@@ -422,5 +463,7 @@ export interface GameState {
     exerciseCalibration: ExerciseCalibrationSettings;
     language: 'ru' | 'en'; // UI language
     scriptedPoseEnabled: boolean;
+    cadenceMode: CadenceMode;
+    warmUpEnabled: boolean;
   };
 }

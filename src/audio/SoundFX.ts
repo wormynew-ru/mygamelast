@@ -17,14 +17,16 @@
  * Sound types available in the system.
  */
 export type SoundType =
-  | 'BOTTOM_HIT'    // Squat bottom reached
-  | 'REP_COMPLETE'  // Valid rep counted
-  | 'ERROR'         // Invalid form/incomplete rep
-  | 'POWER_UP'      // Level up/achievement
-  | 'COMBO'         // Combo multiplier
-  | 'DAMAGE'        // Player takes damage
-  | 'WARNING'       // Incoming enemy attack telegraph
-  | 'VICTORY';      // Battle won
+  | 'BOTTOM_HIT'     // Squat bottom reached
+  | 'REP_COMPLETE'   // Valid rep counted
+  | 'ERROR'          // Invalid form/incomplete rep
+  | 'POWER_UP'       // Level up/achievement
+  | 'COMBO'          // Combo multiplier
+  | 'DAMAGE'         // Player takes damage
+  | 'WARNING'        // Incoming enemy attack telegraph
+  | 'VICTORY'        // Battle won
+  | 'METRONOME_TICK' // Tempo cadence pulse
+  | 'INTERVAL_BELL'; // Tabata/Benchmark interval transition bell
 
 /**
  * Audio configuration.
@@ -146,6 +148,12 @@ export class SoundFX {
         break;
       case 'VICTORY':
         this.playVictory();
+        break;
+      case 'METRONOME_TICK':
+        this.playMetronomeTick();
+        break;
+      case 'INTERVAL_BELL':
+        this.playIntervalBell();
         break;
     }
   }
@@ -438,5 +446,56 @@ export class SoundFX {
       osc.start(now);
       osc.stop(now + 0.8);
     });
+  }
+
+  /**
+   * Subtle crisp metronome tick for tempo cadence pacing.
+   */
+  private playMetronomeTick(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const now = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1050, now);
+    osc.frequency.exponentialRampToValueAtTime(650, now + 0.03);
+
+    const env = this.audioContext.createGain();
+    env.gain.setValueAtTime(0, now);
+    env.gain.linearRampToValueAtTime(0.16, now + 0.004);
+    env.gain.exponentialRampToValueAtTime(0.005, now + 0.045);
+
+    osc.connect(env);
+    env.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.05);
+  }
+
+  /**
+   * Crisp double bell for Tabata Work/Rest transitions & Benchmark completion.
+   */
+  private playIntervalBell(): void {
+    if (!this.audioContext || !this.masterGain) return;
+
+    const now = this.audioContext.currentTime;
+    const strikes = [0, 0.14];
+    for (const offset of strikes) {
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'triangle';
+      const t0 = now + offset;
+      osc.frequency.setValueAtTime(880, t0);
+
+      const env = this.audioContext.createGain();
+      env.gain.setValueAtTime(0, t0);
+      env.gain.linearRampToValueAtTime(0.28, t0 + 0.01);
+      env.gain.exponentialRampToValueAtTime(0.008, t0 + 0.22);
+
+      osc.connect(env);
+      env.connect(this.masterGain);
+
+      osc.start(t0);
+      osc.stop(t0 + 0.24);
+    }
   }
 }

@@ -4,11 +4,13 @@
  */
 
 import { useRef, useState, type ChangeEvent } from 'react';
-import { ArrowLeft, Cpu, Download, Mic, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, Cpu, Download, Mic, Sparkles, Timer, Trash2, Upload } from 'lucide-react';
 import { exportSaveToJson, parseAndValidateSaveJson } from '../game/portability';
+import { CADENCE_ORDER } from '../game/data/trainingFormats';
 import { SAVE_SCHEMA_VERSION, migrateGameState, useGameStore } from '../game/store';
 import { AVAILABLE_LANGUAGES } from '../i18n';
 import { useTranslation } from '../i18n/useTranslation';
+import { CADENCE_MODE_KEYS } from './gameKeys';
 import { useVoiceControl } from './VoiceControl';
 
 interface SettingsScreenProps {
@@ -302,6 +304,52 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
                 {t('settings.poseDelegateCpu')}
               </button>
             </div>
+          </div>
+
+          {/* Tempo Cadence Metronome */}
+          <div className="p-5 space-y-3">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+                <Timer className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{t('cadence.label')}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">{t('cadence.desc')}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {CADENCE_ORDER.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => updateSettings({ cadenceMode: mode })}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap ${
+                    settings.cadenceMode === mode
+                      ? 'bg-sky-400 border-sky-400 text-slate-950'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {t(CADENCE_MODE_KEYS[mode])}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Pre-Battle Warm-up */}
+          <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-white">{t('warmup.settingsLabel')}</div>
+              <p className="text-xs text-slate-400 mt-0.5">{t('warmup.settingsDesc')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => updateSettings({ warmUpEnabled: !settings.warmUpEnabled })}
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 self-start sm:self-center ${
+                settings.warmUpEnabled
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              }`}
+            >
+              {settings.warmUpEnabled ? t('settings.audioOn') : t('settings.audioOff')}
+            </button>
           </div>
 
           {/* Save Export & Import (JSON) */}

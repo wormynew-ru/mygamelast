@@ -3,8 +3,9 @@
  * with Bodyweight / Dumbbell Loadout weight configuration.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
   ArrowLeft,
   Lock,
   Check,
@@ -12,13 +13,23 @@ import {
   Infinity as InfinityIcon,
   Shield,
   Dumbbell,
+  Plus,
   Repeat,
   FlaskConical,
+  Timer,
+  Trash2,
 } from 'lucide-react';
 import { LEVELS, type CampaignLevel } from '../game/data/levels';
 import { MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
-import { CIRCUITS, type CircuitId } from '../game/data/circuits';
+import {
+  CIRCUITS,
+  MAX_CUSTOM_CIRCUITS,
+  MAX_CUSTOM_CIRCUIT_ROOMS,
+  MIN_CUSTOM_CIRCUIT_ROOMS,
+  computeCustomCircuitRewards,
+} from '../game/data/circuits';
+import { TABATA_PRESETS, TABATA_PRESET_ORDER } from '../game/data/trainingFormats';
 import { SANCTUARY_MIX_MAP, SANCTUARY_SYNERGY_MAP, getActiveSanctuarySynergies } from '../game/data/sanctuary';
 import {
   MAX_ACTIVE_MUTATORS,
@@ -26,6 +37,7 @@ import {
   MUTATORS,
   getAggregatedMutatorEffects,
 } from '../game/data/programs';
+import type { CustomCircuitRoom, TabataConfig, TabataPresetId } from '../game/types';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
@@ -38,15 +50,18 @@ import {
   MUTATOR_KEYS,
   SANCTUARY_MIX_KEYS,
   SANCTUARY_SYNERGY_KEYS,
+  TABATA_PRESET_KEYS,
 } from './gameKeys';
 import { useVoiceCommandHandler } from './VoiceControl';
 
 interface LevelSelectScreenProps {
-  initialTab?: 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT';
+  initialTab?: 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'TABATA';
   onBack: () => void;
   onStartEncounter: (levelId: string, exerciseId: ExerciseId) => void;
   onStartEndless: (exerciseId: ExerciseId) => void;
-  onStartCircuit: (circuitId: CircuitId) => void;
+  onStartCircuit: (circuitId: string) => void;
+  onStartTabata?: (monsterId: string, exerciseId: ExerciseId, tabataConfig: TabataConfig) => void;
+  onStartBenchmark?: (exerciseId: ExerciseId) => void;
   onOpenSanctuary?: () => void;
 }
 
@@ -58,6 +73,8 @@ export function LevelSelectScreen({
   onStartEncounter,
   onStartEndless,
   onStartCircuit,
+  onStartTabata,
+  onStartBenchmark,
   onOpenSanctuary,
 }: LevelSelectScreenProps) {
   const { t } = useTranslation();
@@ -71,17 +88,38 @@ export function LevelSelectScreen({
   const toggleMutator = useGameStore((state) => state.toggleMutator);
   const clearMutators = useGameStore((state) => state.clearMutators);
   const setLoadout = useGameStore((state) => state.setLoadout);
+  const customCircuits = useGameStore((state) => state.customCircuits);
+  const saveCustomCircuit = useGameStore((state) => state.saveCustomCircuit);
+  const deleteCustomCircuit = useGameStore((state) => state.deleteCustomCircuit);
+  const warmUpEnabled = useGameStore((state) => state.settings.warmUpEnabled);
+  const updateSettings = useGameStore((state) => state.updateSettings);
+  const bestBenchmarkByExercise = useGameStore((state) => state.bestBenchmarkByExercise);
   const mutatorEffects = getAggregatedMutatorEffects(activeMutators);
 
   const defaultLevel =
     LEVELS.find((lvl) => unlockedLevels.includes(lvl.id) && !completedLevels.includes(lvl.id)) ??
     LEVELS[0];
 
-  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT'>(initialTab);
+  const [modeTab, setModeTab] = useState<'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'TABATA'>(initialTab);
   const [selectedLevelId, setSelectedLevelId] = useState<string>(defaultLevel.id);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseId>(
     defaultLevel.recommendedExercise
   );
+  const [selectedTabataPreset, setSelectedTabataPreset] =
+    useState<TabataPresetId>('CLASSIC_20_10');
+  const [selectedTabataMonsterId, setSelectedTabataMonsterId] = useState<string>('BURGER');
+  const [customName, setCustomName] = useState<string>('');
+  const [customRooms, setCustomRooms] = useState<CustomCircuitRoom[]>([
+    { exerciseId: 'SQUAT', monsterId: 'BURGER', restAfterSec: 8 },
+    { exerciseId: 'PUSH_UP', monsterId: 'FRIES', restAfterSec: 8 },
+    { exerciseId: 'PLANK', monsterId: 'PIZZA', restAfterSec: 0 },
+  ]);
+
+  const battleMonsters = useMemo(
+    () => Object.values(MONSTERS).filter((m) => !m.id.startsWith('WEED_')),
+    []
+  );
+  const exerciseEntries = useMemo(() => Object.keys(EXERCISES) as ExerciseId[], []);
 
   useEffect(() => {
     setModeTab(initialTab);
@@ -103,6 +141,54 @@ export function LevelSelectScreen({
     setSelectedExercise(level.recommendedExercise);
   };
 
+  const launchTabata = () => {
+    const preset = TABATA_PRESETS[selectedTabataPreset];
+    onStartTabata?.(selectedTabataMonsterId, selectedExercise, {
+      presetId: preset.id,
+      workSec: preset.workSec,
+      restSec: preset.restSec,
+      rounds: preset.rounds,
+    });
+  };
+
+  const handleAddCustomRoom = () => {
+    if (customRooms.length >= MAX_CUSTOM_CIRCUIT_ROOMS) return;
+    setCustomRooms((prev) => {
+      const updated = prev.map((r, i) =>
+        i === prev.length - 1 ? { ...r, restAfterSec: r.restAfterSec || 8 } : r
+      );
+      return [...updated, { exerciseId: 'LUNGE', monsterId: 'BURGER', restAfterSec: 0 }];
+    });
+  };
+
+  const handleRemoveCustomRoom = (index: number) => {
+    if (customRooms.length <= MIN_CUSTOM_CIRCUIT_ROOMS) return;
+    setCustomRooms((prev) => {
+      const filtered = prev.filter((_, i) => i !== index);
+      return filtered.map((r, i) =>
+        i === filtered.length - 1 ? { ...r, restAfterSec: 0 } : r
+      );
+    });
+  };
+
+  const handleUpdateCustomRoom = (index: number, patch: Partial<CustomCircuitRoom>) => {
+    setCustomRooms((prev) =>
+      prev.map((r, i) => {
+        if (i !== index) return r;
+        const merged = { ...r, ...patch };
+        return i === prev.length - 1 ? { ...merged, restAfterSec: 0 } : merged;
+      })
+    );
+  };
+
+  const handleSaveCustomCircuit = () => {
+    if (customCircuits.length >= MAX_CUSTOM_CIRCUITS) return;
+    const saved = saveCustomCircuit(customName, customRooms);
+    if (saved) {
+      setCustomName('');
+    }
+  };
+
   useVoiceCommandHandler((cmd) => {
     switch (cmd.type) {
       case 'NAV_CAMPAIGN':
@@ -113,6 +199,12 @@ export function LevelSelectScreen({
         return true;
       case 'NAV_CIRCUIT':
         setModeTab('CIRCUIT');
+        return true;
+      case 'NAV_TABATA':
+        setModeTab('TABATA');
+        return true;
+      case 'START_BENCHMARK':
+        onStartBenchmark?.(selectedExercise);
         return true;
       case 'SELECT_EXERCISE':
         setSelectedExercise(cmd.exerciseId);
@@ -128,6 +220,8 @@ export function LevelSelectScreen({
           onStartEndless(selectedExercise);
         } else if (modeTab === 'CIRCUIT' && CIRCUITS[0]) {
           onStartCircuit(CIRCUITS[0].id);
+        } else if (modeTab === 'TABATA') {
+          launchTabata();
         }
         return true;
       case 'EXIT':
@@ -183,6 +277,17 @@ export function LevelSelectScreen({
             >
               <Repeat className="w-3.5 h-3.5" />
               <span>{t('levels.circuitTab')}</span>
+            </button>
+            <button
+              onClick={() => setModeTab('TABATA')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                modeTab === 'TABATA'
+                  ? 'bg-fuchsia-500 text-slate-950'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Timer className="w-3.5 h-3.5" />
+              <span>{t('levels.tabataTab')}</span>
             </button>
           </div>
 
@@ -633,9 +738,9 @@ export function LevelSelectScreen({
             </button>
           </div>
         </main>
-      ) : (
-        /* Circuit Training Dungeons */
-        <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
+      ) : modeTab === 'CIRCUIT' ? (
+        /* Circuit Training Dungeons + Custom Circuits */
+        <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-8">
           <div>
             <h2 className="font-display text-3xl font-bold text-white">{t('circuits.title')}</h2>
             <p className="text-sm text-slate-400 mt-1">{t('circuits.subtitle')}</p>
@@ -704,6 +809,406 @@ export function LevelSelectScreen({
               );
             })}
           </div>
+
+          {/* Saved Custom Circuits */}
+          {customCircuits.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-bold text-white">{t('circuits.savedTitle')}</h3>
+                <span className="text-xs font-numeric text-slate-400">
+                  {customCircuits.length} / {MAX_CUSTOM_CIRCUITS}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {customCircuits.map((cc) => {
+                  const rewards = computeCustomCircuitRewards(cc.rooms.length);
+                  return (
+                    <div
+                      key={cc.id}
+                      className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="text-base font-bold text-white truncate">{cc.name}</h4>
+                          <span className="text-xs font-numeric text-sky-400 font-semibold shrink-0">
+                            {cc.rooms.length} {t('circuits.roomsCount')}
+                          </span>
+                        </div>
+                        <div className="space-y-1 pt-2 border-t border-slate-800 text-xs">
+                          {cc.rooms.map((room, idx) => {
+                            const monster = MONSTERS[room.monsterId];
+                            const ex = EXERCISES[room.exerciseId];
+                            return (
+                              <div
+                                key={`${cc.id}-${idx}`}
+                                className="flex items-baseline justify-between gap-2 text-slate-300"
+                              >
+                                <span className="truncate">
+                                  {idx + 1}. {ex.icon} {t(EXERCISE_NAME_KEYS[room.exerciseId])}
+                                </span>
+                                <span className="text-slate-400 shrink-0">
+                                  {monster?.sprite}{' '}
+                                  {MONSTER_NAME_KEYS[room.monsterId]
+                                    ? t(MONSTER_NAME_KEYS[room.monsterId])
+                                    : monster?.name}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                        <div className="text-xs font-numeric text-amber-400 font-semibold">
+                          +{rewards.bonusCoins} {t('stats.coins')} · +{rewards.bonusXp} XP
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onStartCircuit(cc.id)}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-lg transition-colors whitespace-nowrap"
+                          >
+                            <Repeat className="w-3.5 h-3.5" />
+                            <span>{t('circuits.startCircuit')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteCustomCircuit(cc.id)}
+                            aria-label={t('circuits.deleteCustom')}
+                            className="inline-flex items-center justify-center px-3 py-2 bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-200 rounded-lg transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Custom Circuit Builder */}
+          <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-white">{t('circuits.builderTitle')}</h3>
+                <p className="text-xs text-slate-400 mt-1">{t('circuits.builderSubtitle')}</p>
+              </div>
+              <div className="text-xs font-numeric text-amber-400 font-semibold">
+                +{computeCustomCircuitRewards(customRooms.length).bonusCoins} {t('stats.coins')} · +
+                {computeCustomCircuitRewards(customRooms.length).bonusXp} XP
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                value={customName}
+                maxLength={40}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder={t('circuits.namePlaceholder')}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+              />
+              <button
+                type="button"
+                onClick={handleAddCustomRoom}
+                disabled={customRooms.length >= MAX_CUSTOM_CIRCUIT_ROOMS}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{t('circuits.addRoom')}</span>
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {customRooms.map((room, idx) => {
+                const isLast = idx === customRooms.length - 1;
+                return (
+                  <div
+                    key={`builder-room-${idx}`}
+                    className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center bg-slate-950 border border-slate-800 rounded-lg p-3"
+                  >
+                    <div className="sm:col-span-1 text-xs font-numeric font-bold text-slate-400">
+                      #{idx + 1}
+                    </div>
+                    <div className="sm:col-span-4">
+                      <select
+                        value={room.exerciseId}
+                        onChange={(e) =>
+                          handleUpdateCustomRoom(idx, {
+                            exerciseId: e.target.value as ExerciseId,
+                          })
+                        }
+                        className="w-full bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-white"
+                      >
+                        {exerciseEntries.map((exId) => (
+                          <option key={exId} value={exId}>
+                            {EXERCISES[exId].icon} {t(EXERCISE_NAME_KEYS[exId])}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-4">
+                      <select
+                        value={room.monsterId}
+                        onChange={(e) =>
+                          handleUpdateCustomRoom(idx, { monsterId: e.target.value })
+                        }
+                        className="w-full bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-white"
+                      >
+                        {battleMonsters.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.sprite} {MONSTER_NAME_KEYS[m.id] ? t(MONSTER_NAME_KEYS[m.id]) : m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2 flex items-center gap-1.5">
+                      <label className="text-[11px] text-slate-400 shrink-0">
+                        {t('circuits.restSec')}:
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        disabled={isLast}
+                        value={isLast ? 0 : room.restAfterSec}
+                        onChange={(e) =>
+                          handleUpdateCustomRoom(idx, {
+                            restAfterSec: Math.max(0, Math.min(30, Number(e.target.value) || 0)),
+                          })
+                        }
+                        className="w-14 bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-xs font-numeric text-white disabled:opacity-40"
+                      />
+                    </div>
+                    <div className="sm:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomRoom(idx)}
+                        disabled={customRooms.length <= MIN_CUSTOM_CIRCUIT_ROOMS}
+                        className="p-1.5 text-slate-400 hover:text-red-300 disabled:opacity-30 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              {customCircuits.length >= MAX_CUSTOM_CIRCUITS ? (
+                <span className="text-xs text-amber-400">{t('circuits.limitReached')}</span>
+              ) : (
+                <span className="text-xs font-numeric text-slate-400">
+                  {customRooms.length}/{MAX_CUSTOM_CIRCUIT_ROOMS} {t('circuits.roomsCount')}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveCustomCircuit}
+                disabled={customCircuits.length >= MAX_CUSTOM_CIRCUITS}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Check className="w-4 h-4" />
+                <span>{t('circuits.saveCustom')}</span>
+              </button>
+            </div>
+          </section>
+        </main>
+      ) : (
+        /* Tabata Interval Training & 60s Fitness Benchmark */
+        <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Tabata / HIIT Card */}
+          <section className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-5">
+              <div>
+                <div className="inline-flex items-center gap-2 text-xs font-semibold text-fuchsia-400">
+                  <Timer className="w-3.5 h-3.5" />
+                  <span>HIIT / TABATA</span>
+                </div>
+                <h2 className="font-display text-2xl font-bold text-white mt-1">
+                  {t('tabata.title')}
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">{t('tabata.subtitle')}</p>
+              </div>
+
+              {/* Interval Protocol */}
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('tabata.presetLabel')}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {TABATA_PRESET_ORDER.map((presetId) => {
+                    const isSelected = selectedTabataPreset === presetId;
+                    return (
+                      <button
+                        key={presetId}
+                        type="button"
+                        onClick={() => setSelectedTabataPreset(presetId)}
+                        className={`p-3 rounded-lg border text-left transition-colors ${
+                          isSelected
+                            ? 'bg-fuchsia-950/40 border-fuchsia-400 text-white'
+                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-white">
+                          {t(TABATA_PRESET_KEYS[presetId].name)}
+                        </div>
+                        <div className="text-[11px] font-numeric text-fuchsia-300 mt-1">
+                          {t(TABATA_PRESET_KEYS[presetId].desc)}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Warm-Up Pre-Battle Toggle */}
+              <div className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white">
+                    {t('warmup.settingsLabel')}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    {t('warmup.settingsDesc')}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ warmUpEnabled: !warmUpEnabled })}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                    warmUpEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  }`}
+                >
+                  {warmUpEnabled ? t('settings.audioOn') : t('settings.audioOff')}
+                </button>
+              </div>
+
+              {/* Opponent Picker */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300">
+                  {t('tabata.chooseEnemy')}
+                </label>
+                <select
+                  value={selectedTabataMonsterId}
+                  onChange={(e) => setSelectedTabataMonsterId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white"
+                >
+                  {battleMonsters.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.sprite} {MONSTER_NAME_KEYS[m.id] ? t(MONSTER_NAME_KEYS[m.id]) : m.name} · HP{' '}
+                      {m.maxHp}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Exercise Picker */}
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('levels.chooseExercise')}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {exerciseEntries.map((exId) => {
+                    const def = EXERCISES[exId];
+                    const active = selectedExercise === exId;
+                    return (
+                      <button
+                        key={`tabata-ex-${exId}`}
+                        type="button"
+                        onClick={() => setSelectedExercise(exId)}
+                        className={`p-2.5 rounded-lg border text-left transition-colors ${
+                          active
+                            ? 'bg-slate-800 border-fuchsia-400 text-white'
+                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold truncate">
+                          {def.icon} {t(EXERCISE_NAME_KEYS[exId])}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={launchTabata}
+              className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Timer className="w-4 h-4" />
+              <span>{t('tabata.start')}</span>
+            </button>
+          </section>
+
+          {/* 60s Fitness Benchmark Card */}
+          <section className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between gap-5">
+            <div className="space-y-4">
+              <div>
+                <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>60s TEST</span>
+                </div>
+                <h2 className="font-display text-2xl font-bold text-white mt-1">
+                  {t('benchmark.title')}
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  {t('benchmark.subtitle')}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('levels.chooseExercise')}
+                </div>
+                <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                  {exerciseEntries.map((exId) => {
+                    const def = EXERCISES[exId];
+                    const active = selectedExercise === exId;
+                    const best = bestBenchmarkByExercise[exId];
+                    return (
+                      <button
+                        key={`bm-ex-${exId}`}
+                        type="button"
+                        onClick={() => setSelectedExercise(exId)}
+                        className={`w-full px-3 py-2 rounded-lg border flex items-center justify-between gap-2 text-left transition-colors ${
+                          active
+                            ? 'bg-slate-800 border-emerald-500 text-white'
+                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <span className="text-xs font-semibold truncate">
+                          {def.icon} {t(EXERCISE_NAME_KEYS[exId])}
+                        </span>
+                        <span className="font-numeric text-xs text-amber-300 shrink-0">
+                          {typeof best === 'number' && best > 0
+                            ? def.trackingType === 'hold'
+                              ? `${best}s`
+                              : best
+                            : '—'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onStartBenchmark?.(selectedExercise)}
+              className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Activity className="w-4 h-4" />
+              <span>{t('benchmark.start')}</span>
+            </button>
+          </section>
         </main>
       )}
     </div>

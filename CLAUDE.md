@@ -114,21 +114,21 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 - ✅ `src/vision/exercises/index.ts` — Detector registry (exports all 10 detectors)
 
 #### **Audio System (100% complete, 15 tests)**
-- ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (8 synthesized sounds incl. `WARNING` two-tone strike alert, NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
-- ✅ `src/audio/VoiceCommandEngine.ts` — Pure client-side Web Speech API (`SpeechRecognition`) hands-free command parser & continuous recognizer (`parseVoiceCommand` for RU/EN battle controls, navigation incl. `NAV_GARDEN`, `NAV_SANCTUARY`, `NAV_TALENTS`, garden actions `GARDEN_WATER`/`GARDEN_HARVEST`/`GARDEN_WEED`, all 10 exercises, dumbbell weights, circuits, analytics periods/metrics + cooldown deduplication + auto-restart) + 5 tests
+- ✅ `src/audio/SoundFX.ts` — Web Audio API synthesizer (10 synthesized sounds incl. `WARNING` strike alert, `METRONOME_TICK`, and `INTERVAL_BELL` double-bell; NO external mp3/wav files), suspended AudioContext resume & `isUnlocked()` check + optional Web Speech `speak()` + 10 tests
+- ✅ `src/audio/VoiceCommandEngine.ts` — Pure client-side Web Speech API (`SpeechRecognition`) hands-free command parser & continuous recognizer (`parseVoiceCommand` for RU/EN battle controls, navigation incl. `NAV_TABATA`, `START_BENCHMARK`, `NAV_GARDEN`, `NAV_SANCTUARY`, `NAV_TALENTS`, garden actions `GARDEN_WATER`/`GARDEN_HARVEST`/`GARDEN_WEED`, all 10 exercises for mid-battle switching too, dumbbell weights, circuits, analytics periods/metrics + cooldown deduplication + auto-restart) + 5 tests
 
-#### **Game System (100% complete, 81 tests)**
-- ✅ `src/game/types.ts` — RPG, `EquipmentLoadout`, `PoseComputeDelegate` (`'GPU' | 'CPU'`), `WorkoutStats`, `DailyActivityEntry`, `GardenState` (`isMutant` plots), `SanctuaryState` (`SanctuaryLabTier` `1..3`, 12 `SanctuaryMixId` recipes, `MonsterTrophyId`, `SanctuaryPreset`, `AlchemyOrder`), `PlayerTalentState`, `ArtifactState` (dedicated 2-slot endgame relics), `ProgramProgressState`, `ExercisePersonalRecord`, `MutatorId`, `WeeklyChallengeState`, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, `ExerciseCalibrationSettings` (10 exercises)
+#### **Game System (100% complete, 87 tests)**
+- ✅ `src/game/types.ts` — RPG, `EquipmentLoadout`, `PoseComputeDelegate` (`'GPU' | 'CPU'`), `WorkoutStats` (incl. `tabataCompleted`), `DailyActivityEntry`, `GardenState` (`isMutant` plots), `SanctuaryState` (`SanctuaryLabTier` `1..3`, 12 `SanctuaryMixId` recipes, `MonsterTrophyId`, `SanctuaryPreset`, `AlchemyOrder`), `PlayerTalentState`, `ArtifactState` (dedicated 2-slot endgame relics), `ProgramProgressState`, `ExercisePersonalRecord`, `MutatorId`, `WeeklyChallengeState`, `TabataConfig`, `CadenceMode`, `CustomCircuitDefinition`, `BenchmarkEntry`, Combo/Matchup/Archetype/Rank, ItemRarity, DailyQuestState, StreakState, BestiaryEntry, EndlessArenaStats, Achievement, `ExerciseCalibrationSettings` (10 exercises)
 - ✅ `src/game/CombatEngine.ts` — Damage calculation, Dumbbell Loadout scaling + `dumbbellDamageBonus`, Talent (`MIGHT`/`BASTION`/`BOTANY`) & Artifact passive modifiers (execute bonus, Overdrive heal/ult-charge/shield-break, thorns reflect, combo window), Mutator modifiers, Sanctuary combat modifiers, Ultimate Overdrive, Tempo Combo streaks, exercise matchups, enemy shield mitigation, Boss Phase 1 Grease Shield, Toxic debuff, Battle Rank, weight-adjusted `estimateWorkoutKcal`, counter-attacks + hold blocking, equipment bonuses, consumable healing, loot drops + 47 tests
-- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`SAVE_SCHEMA_VERSION = 14`, backwards-compatible `v0–v14` `migrateGameState` & `importGameState`), Sanctuary mixes/trophies/presets/daily alchemy orders, Garden mutations, Talents (`upgradeTalent`, `respecTalents`), Endgame Artifacts (`unlockArtifact`, `equipArtifact`, `unequipArtifact`), Training Programs (`startProgram`, `advanceProgramDay`, `abandonProgram`), Mutators (`toggleMutator`, `clearMutators`), Weekly Challenge (`completeWeeklyChallenge`), Personal Records (`recordPersonalRecords`), `scriptedPoseEnabled` toggle, Fit-Coins economy, daily quests, 7-day streak, 400-day activity history, Bestiary, Endless Arena, 25 achievements sync, calibration, language sync + 6 tests (`store.v35.test.ts`)
+- ✅ `src/game/store.ts` — Zustand store with `Map`-safe localStorage persistence (`SAVE_SCHEMA_VERSION = 15`, backwards-compatible `v0–v15` `migrateGameState` & `importGameState`), Sanctuary mixes/trophies/presets/daily alchemy orders, Garden mutations, Talents (`upgradeTalent`, `respecTalents`), Endgame Artifacts (`unlockArtifact`, `equipArtifact`, `unequipArtifact`), Training Programs (`startProgram`, `advanceProgramDay`, `abandonProgram`), Mutators (`toggleMutator`, `clearMutators`), Weekly Challenge (`completeWeeklyChallenge`), Personal Records (`recordPersonalRecords`), Custom Circuits (`saveCustomCircuit`, `deleteCustomCircuit`), 60s Fitness Benchmarks (`recordBenchmarkResult`, `bestBenchmarkByExercise`), `cadenceMode` & `warmUpEnabled` settings, `scriptedPoseEnabled` toggle, Fit-Coins economy, daily quests, 7-day streak, 400-day activity history, Bestiary, Endless Arena, 28 achievements sync, calibration, language sync + 7 tests (`store.v35.test.ts`)
 - ✅ `src/game/portability.ts` — `Map`-safe full JSON save export/import (`exportSaveToJson`, `parseAndValidateSaveJson`) and RFC-4180 CSV activity log export (`exportActivityToCsv` covering all 10 exercises) + 3 tests
-- ✅ `src/game/data/` — `exercises.ts` (10 exercises), `monsters.ts` (16 monsters incl. Endless Apex Bosses at Waves 10/15/20), `circuits.ts` (3 presets), `items.ts` (10 items), `levels.ts` (5 stages), `dailyQuests.ts`, `achievements.ts` (25 achievements incl. `TALENT_AWAKENED`, `APEX_CHALLENGER`, `ARTIFACT_KEEPER`, `WEEKLY_CONQUEROR`, `PROGRAM_FINISHER`, `MUTANT_BOTANIST`), `talents.ts` (3 branches, 12 nodes, respec + 4 tests), `artifacts.ts` (6 relics, 2 slots, wave/weekly/circuit unlocks + 3 tests), `programs.ts` (4 3–7 day programs, 5 mutators, ISO-week deterministic Weekly Challenge + 3 tests), `garden.ts` (mutant plot `×2` yield / `1.5×` XP / `+35%` drop chance + 7 tests), `sanctuary.ts` (presets & daily alchemy orders + 6 tests), `analytics.ts` (+ 2 tests)
+- ✅ `src/game/data/` — `exercises.ts` (10 exercises), `monsters.ts` (16 monsters incl. Endless Apex Bosses at Waves 10/15/20), `circuits.ts` (6 built-in presets + `normalizeCustomCircuits` / `computeCustomCircuitRewards`), `trainingFormats.ts` (Tabata 20/10, 30/15, 40/20 presets, Tempo Cadence Metronome & sliding-window `RPM`, Pre-Battle Warm-up constants, Fresh Focus superset switch bonuses, 60s Fitness Benchmark ratings & 0–100 Conditioning Index + 5 tests), `items.ts` (10 items), `levels.ts` (5 stages), `dailyQuests.ts`, `achievements.ts` (28 achievements incl. `TABATA_FINISHER`, `CUSTOM_ARCHITECT`, `BENCHMARK_TESTED`), `talents.ts` (3 branches, 12 nodes, respec + 4 tests), `artifacts.ts` (6 relics, 2 slots, wave/weekly/circuit unlocks + 3 tests), `programs.ts` (4 3–7 day programs, 5 mutators, ISO-week deterministic Weekly Challenge + 3 tests), `garden.ts` (mutant plot `×2` yield / `1.5×` XP / `+35%` drop chance + 7 tests), `sanctuary.ts` (presets & daily alchemy orders + 6 tests), `analytics.ts` (+ 2 tests)
 
-#### **Session Layer (100% complete, 24 tests)**
-- ✅ `src/session/WorkoutSession.ts` — Coordinator (`CAMPAIGN` | `ENDLESS` | `CIRCUIT` | `WEED`), Talent/Artifact/Mutator/Sanctuary buff aggregation, Thorns reflect from both Sanctuary & Talents/Artifacts, Overdrive heal & execute bonuses, `NO_ITEMS` & `TOXIC_MIST` mutators, Endless wave `10/15/20` Apex boss progression & artifact unlock checks, Sanctuary End-of-battle/Endless consumption, `scriptedPoseEnabled` support, `poseDelegate` tracking, `advanceCircuitRoom()`, `WEED` victory handling, tonnage/kcal tracking, `startToken` cancellation, Screen Wake Lock, auto-pause + 24 tests
+#### **Session Layer (100% complete, 28 tests)**
+- ✅ `src/session/WorkoutSession.ts` — Coordinator (`CAMPAIGN` | `ENDLESS` | `CIRCUIT` | `WEED` | `WEEKLY` | `TABATA` | `BENCHMARK`), Tabata intervals (`WORK`/`REST` pause & double-bell cues), 60s clean Fitness Benchmark mode, optional Pre-Battle Warm-up (`20s` / `8 reps` -> `+25%` Ult, skippable via `skipWarmUp()`), Mid-Battle Superset Exercise Switch (`switchExerciseMidBattle` preserving combo/Ult/HP with `×1.25` 8s Fresh Focus bonus), Tempo Cadence Metronome & live sliding `currentCadenceRpm` / `avgCadenceRpm`, custom circuit rooms support, Talent/Artifact/Mutator/Sanctuary buff aggregation, Thorns reflect, Overdrive heal & execute bonuses, `scriptedPoseEnabled` support, `poseDelegate` tracking, `advanceCircuitRoom()`, `WEED` victory handling, tonnage/kcal tracking, `startToken` cancellation, Screen Wake Lock, auto-pause + 28 tests
 
 #### **Localization Layer (100% complete)**
-- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Complete RU/EN translation dictionaries covering all Junk Slayer v3.5 features (all 10 exercises, 3 Apex bosses, 12 talents, 6 artifacts, 4 programs, 5 mutators, Weekly Challenge, PR table, Garden mutations, Sanctuary presets & daily orders, JSON/CSV portability, Scripted Pose Driver)
+- ✅ `src/i18n/ru.ts` & `src/i18n/en.ts` — Complete RU/EN translation dictionaries covering all Junk Slayer v3.5 + Training Formats features (all 10 exercises, 3 Apex bosses, 12 talents, 6 artifacts, 4 programs, 5 mutators, Weekly Challenge, PR table, Garden mutations, Sanctuary presets & daily orders, JSON/CSV portability, Scripted Pose Driver, Tabata presets, 6 built-in circuits + Custom Circuit Builder, 60s Benchmark ratings, Warm-up & Superset switcher, Tempo Cadence modes)
 - ✅ `src/i18n/index.ts` & `src/i18n/useTranslation.ts` — Translation helpers & React hook synced with Zustand store
 
 #### **PWA & Offline Assets (100% complete)**
@@ -137,20 +137,20 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 - ✅ `public/icon.svg`, `public/pwa-192x192.png`, `public/pwa-512x512.png`, `public/pwa-maskable-512x512.png`, `public/apple-touch-icon.png` — Complete multi-platform PWA & iOS icon set
 - ✅ `src/ui/PWAInstallButton.tsx` — In-app Chromium install prompt (`beforeinstallprompt`), iOS Safari installation modal, and `OfflineIndicator`
 
-#### **UI Layer (Complete Junk Slayer v3.5 RPG, Talents, Artifacts, Programs, Weekly, Garden, Sanctuary & Analytics)**
-- ✅ `src/ui/gameKeys.ts` — Typed i18n lookup dictionary covering all 10 exercises, 16 monsters, 12 talents, 6 artifacts, 4 programs, 5 mutators, 3 circuits, 10 items, 4 seeds, 4 watering cans, 4 monster trophies, 12 Sanctuary mixes, 7 synergies, and 25 achievements
-- ✅ `src/ui/MainMenu.tsx` — Hero RPG card, Sanctuary Hub card, Personal Garden entry card, **Weekly Challenge** launcher card, **Training Programs (3–7d)** selector & day tracker, **Talents** navigation with available points counter, Daily Quests & 7-day Streak strip, PWA install CTA, 25-badge Achievements grid
+#### **UI Layer (Complete Junk Slayer v3.5 RPG, Training Formats, Talents, Artifacts, Programs, Weekly, Garden, Sanctuary & Analytics)**
+- ✅ `src/ui/gameKeys.ts` — Typed i18n lookup dictionary covering all 10 exercises, 16 monsters, 12 talents, 6 artifacts, 4 programs, 5 mutators, 6 circuits, Tabata presets, Cadence modes, Benchmark ratings, 10 items, 4 seeds, 4 watering cans, 4 monster trophies, 12 Sanctuary mixes, 7 synergies, and 28 achievements
+- ✅ `src/ui/MainMenu.tsx` — Hero RPG card, Sanctuary Hub card, Personal Garden entry card, **Weekly Challenge** launcher card, **Training Programs (3–7d)** selector & day tracker, **Talents** navigation with available points counter, Daily Quests & 7-day Streak strip, PWA install CTA, 28-badge Achievements grid
 - ✅ `src/ui/TalentTreeScreen.tsx` — Standalone 3-branch Talent Tree screen (`MIGHT` / `BASTION` / `BOTANY`) with rank progress, prerequisite validation, 100 Fit-Coin respec, and voice exit support
 - ✅ `src/ui/GardenScreen.tsx` — Personal Fitness Garden hub: 6 plots with **Mutant ×2** golden highlight, yield/XP bonus readout & mutant harvest toast, watering can upgrades/refills, Botanical Stash, Weed Battle modal
 - ✅ `src/ui/SanctuaryScreen.tsx` — Hero's Hideout & Mix Lab: active pre-battle buff slots (`1..3`), **3-slot Mix Loadout Presets** (Save/Apply), **Daily Alchemy Order** turn-in panel, Lab tier upgrades, 12 mixes, 7 synergies, Monster Trophies
-- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena | Circuit Dungeon` selector, Bodyweight vs Dumbbell Loadout switcher, **Run Mutators Bar** (`0..3` armed + XP/Coin boost multiplier), active Sanctuary strip, all 10 exercises, 3 Circuit cards
+- ✅ `src/ui/LevelSelectScreen.tsx` — Segmented `Campaign | Endless Arena | Circuit Dungeon | Tabata & Test` selector, Bodyweight vs Dumbbell Loadout switcher, **Run Mutators Bar** (`0..3` armed + XP/Coin boost multiplier), active Sanctuary strip, all 10 exercises, 6 built-in Circuit cards + **Custom Circuit Builder (2–6 rooms, up to 6 saved)**, Tabata (`20/10`, `30/15`, `40/20`) & 60s Benchmark launchers
 - ✅ `src/ui/InventoryScreen.tsx` — Segmented `Bag | Shop` tabs with Fit-Coins, **Endgame Artifacts (2 Dedicated Relic Slots)** section in Bag, equipment & consumables, Monster Trophies, Botanical Stash
-- ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — Multi-period analytics (`TODAY`–`ALL`), **Export CSV** button, **Personal Records (PR)** table across all 10 exercises, and 16-monster Bestiary (incl. Waves 10/15/20 Endless Apex bosses)
-- ✅ `src/ui/SettingsScreen.tsx` — Language, audio, voice commands, camera, 15/30/60 FPS, GPU/CPU delegate selector, **Scripted Pose Driver (camera-free)** toggle, **JSON Save Export & Import** panel, reset modal
-- ✅ `src/ui/BattleScreen.tsx` — Live CV arena supporting `CAMPAIGN`, `ENDLESS`, `CIRCUIT`, `WEED`, Weekly Challenge (`WEEKLY`), and Program Day completions; mutator scaling & `DEMO POSE` badge; Talent/Artifact/Sanctuary HUD; Victory Summary showing Weekly/Program bonuses, new Artifacts, and broken Personal Records
+- ✅ `src/ui/BestiaryAnalyticsScreen.tsx` — Multi-period analytics (`TODAY`–`ALL`), **Export CSV** button, **Physical Conditioning Index (0–100) & 60s Fitness Benchmarks** section (best ratings across 10 exercises + recent benchmark log), **Personal Records (PR)** table across all 10 exercises, and 16-monster Bestiary
+- ✅ `src/ui/SettingsScreen.tsx` — Language, audio, voice commands, **Tempo Cadence Metronome**, **Pre-Battle Warm-up (20s)** toggle, camera, 15/30/60 FPS, GPU/CPU delegate selector, **Scripted Pose Driver (camera-free)** toggle, **JSON Save Export & Import** panel, reset modal
+- ✅ `src/ui/BattleScreen.tsx` — Live CV arena supporting `CAMPAIGN`, `ENDLESS`, `CIRCUIT` (built-in & custom), `WEED`, `WEEKLY`, `TABATA` (`WORK`/`REST` bar), `BENCHMARK` (60s clean test countdown), and Program Day completions; Pre-Battle Warm-up banner w/ Skip; Live Cadence `RPM` & quick Metronome cycler; Mid-Battle Superset Exercise Switcher (`+ Fresh Focus ×1.25` + `SELECT_EXERCISE` voice trigger); Victory Summary showing Tabata rounds, Benchmark rating/new-best, avg cadence `RPM`, switches, Weekly/Program bonuses, new Artifacts, and broken Personal Records
 - ✅ `src/ui/VoiceControl.tsx` — `VoiceControlProvider`, LIFO `useVoiceCommandHandler` hook, `<VoiceToggleButton />`, and floating command feedback toast
 - ✅ `src/ui/CalibrationSandbox.tsx` — Multi-exercise calibration tool (all 10 detectors) with live `scriptedPoseEnabled` switcher (`DEMO POSE`), `poseDelegate` badge, and persistent live threshold sliders
-- ✅ `src/App.tsx` — Root screen router (`MENU | CAMPAIGN | TALENTS | GARDEN | SANCTUARY | INVENTORY | BESTIARY | BATTLE | CALIBRATION | SETTINGS`) wiring Weekly Challenge, Program Day, and Mutator-scaled runs
+- ✅ `src/App.tsx` — Root screen router (`MENU | CAMPAIGN | TALENTS | GARDEN | SANCTUARY | INVENTORY | BESTIARY | BATTLE | CALIBRATION | SETTINGS`) wiring Weekly Challenge, Program Day, Tabata, 60s Benchmark, Custom Circuits, and Mutator-scaled runs
 
 #### **Documentation**
 - ✅ `README.md` — Comprehensive Russian technical & user guide
@@ -158,7 +158,7 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 
 ### 6.2 Test Coverage Summary
 
-**Total: 262/262 tests passing across 25 test files (100% ✅)**
+**Total: 272/272 tests passing across 26 test files (100% ✅)**
 
 | File | Tests | Status |
 |------|-------|--------|
@@ -179,19 +179,20 @@ Never mix CV, RPG logic, and React UI in the same file. Follow this modular stru
 | `VoiceCommandEngine.test.ts` | 5 | ✅ Pass |
 | `CombatEngine.test.ts` | 47 | ✅ Pass |
 | `analytics.test.ts` | 2 | ✅ Pass |
+| `trainingFormats.test.ts` | 5 | ✅ Pass |
 | `garden.test.ts` | 7 | ✅ Pass |
 | `sanctuary.test.ts` | 6 | ✅ Pass |
 | `talents.test.ts` | 4 | ✅ Pass |
 | `artifacts.test.ts` | 3 | ✅ Pass |
 | `programs.test.ts` | 3 | ✅ Pass |
 | `portability.test.ts` | 3 | ✅ Pass |
-| `store.v35.test.ts` | 6 | ✅ Pass |
-| `WorkoutSession.test.ts` | 24 | ✅ Pass |
+| `store.v35.test.ts` | 7 | ✅ Pass |
+| `WorkoutSession.test.ts` | 28 | ✅ Pass |
 
 ### 6.3 What's NOT Implemented Yet ❌
 
 #### **Future Polish / Post-v3.5 Roadmap (see `ROADMAP.md`):**
-- ⏳ Interval Tabata (`20s/10s`) / superset timer mode
+- ⏳ Optional cloud profile sync layered over JSON export
 - ⏳ Automated browser Playwright E2E UI verification using built-in `ScriptedPoseSource`
 
 ### 6.4 File Structure Snapshot
@@ -229,24 +230,25 @@ src/
 │       ├── HighKneesDetector.ts / .test.ts     ✅ (4 tests)
 │       └── FrontRaiseDetector.ts / .test.ts    ✅ (4 tests)
 │
-├── session/                         ✅ Complete (24 tests)
-│   ├── WorkoutSession.ts           ✅ Coordinator (Campaign/Endless/Circuit/Weed), Talents/Artifacts/Mutators/Sanctuary buffs, Scripted driver, Overdrive, tonnage
+├── session/                         ✅ Complete (28 tests)
+│   ├── WorkoutSession.ts           ✅ Coordinator (Campaign/Endless/Circuit/Weed/Weekly/Tabata/Benchmark), Warm-up, Superset Switch, Cadence RPM, Talents/Artifacts/Mutators/Sanctuary buffs
 │   └── WorkoutSession.test.ts      ✅
 │
-├── game/                            ✅ Complete (81 tests)
-│   ├── types.ts                    ✅ RPG, Talents, Artifacts, Programs, PRs, Mutators, Weekly, Garden, Sanctuary, Loadout, Calibration & Achievement interfaces
+├── game/                            ✅ Complete (87 tests)
+│   ├── types.ts                    ✅ RPG, Talents, Artifacts, Programs, PRs, Mutators, Weekly, Tabata, Cadence, Custom Circuits, Benchmarks, Garden, Sanctuary, Loadout, Calibration & Achievement interfaces
 │   ├── CombatEngine.ts / .test.ts  ✅ Combat, Talents/Artifacts/Mutators/Sanctuary multipliers, loadouts, tonnage, Overdrive, combos, matchups, shields, boss transitions (47 tests)
 │   ├── portability.ts / .test.ts   ✅ Map-safe JSON save export/import & RFC-4180 CSV activity export (3 tests)
-│   ├── store.ts                    ✅ Zustand v14 persist + v0–v14 migration + Talents, Artifacts, Programs, PRs, Mutators, Weekly, Sanctuary presets/orders, Mutant plots
-│   ├── store.v35.test.ts           ✅ v3.5 store actions & migration integration tests (6 tests)
+│   ├── store.ts                    ✅ Zustand v15 persist + v0–v15 migration + Custom Circuits, Benchmarks, Cadence/Warm-up settings, Talents, Artifacts, Programs, PRs, Mutators, Weekly, Sanctuary presets/orders, Mutant plots
+│   ├── store.v35.test.ts           ✅ v3.5+ store actions & migration integration tests (7 tests)
 │   └── data/
 │       ├── exercises.ts            ✅ 10 exercises (rep/hold + dumbbell support)
 │       ├── monsters.ts             ✅ 16 monsters (4 archetypes; incl. Endless Apex Bosses at Waves 10/15/20 + 3 garden weeds)
-│       ├── circuits.ts             ✅ 3 Circuit Dungeon presets
+│       ├── circuits.ts             ✅ 6 Circuit Dungeon presets + custom circuit builder helpers
+│       ├── trainingFormats.ts / .test.ts ✅ Tabata presets, Cadence Metronome & RPM, Warm-up, Fresh Switch, 60s Benchmark ratings & Conditioning Index (5 tests)
 │       ├── items.ts                ✅ 10 items (4 rarities) + SHOP_ITEM_IDS
 │       ├── levels.ts               ✅ 5 campaign stages + drop tables
 │       ├── dailyQuests.ts          ✅ Deterministic Daily Quests & 7-day Streak calendar helpers
-│       ├── achievements.ts         ✅ 25 achievements + pure evaluator
+│       ├── achievements.ts         ✅ 28 achievements + pure evaluator
 │       ├── talents.ts / .test.ts   ✅ 3-branch Talent Tree (12 nodes, respec) (4 tests)
 │       ├── artifacts.ts / .test.ts ✅ 6 Endgame Artifacts (2 dedicated slots) (3 tests)
 │       ├── programs.ts / .test.ts  ✅ 4 Training Programs (3–7d), 5 Mutators & ISO-week Weekly Challenge (3 tests)
@@ -255,7 +257,7 @@ src/
 │       └── analytics.ts / .test.ts ✅ Multi-period workout analytics aggregator (Today/7d/Month/Year/All) (2 tests)
 │
 ├── audio/                           ✅ Complete (15 tests)
-│   ├── SoundFX.ts / .test.ts       ✅ 8 synthesized sounds (incl. WARNING) + unlock check + speak() (10 tests)
+│   ├── SoundFX.ts / .test.ts       ✅ 10 synthesized sounds (incl. WARNING, METRONOME_TICK, INTERVAL_BELL) + unlock check + speak() (10 tests)
 │   └── VoiceCommandEngine.ts / .test.ts ✅ Client-side Web Speech API parser & recognizer (5 tests)
 │
 ├── i18n/                            ✅ Complete
@@ -264,18 +266,18 @@ src/
 │   ├── ru.ts                       ✅ Primary Russian translations
 │   └── en.ts                       ✅ Secondary English translations
 │
-└── ui/                              ✅ Complete Junk Slayer v3.5 RPG UI
-    ├── gameKeys.ts                 ✅ Shared entity/talent/artifact/program/mutator/sanctuary/achievement i18n dictionary
+└── ui/                              ✅ Complete Junk Slayer v3.5+ RPG UI
+    ├── gameKeys.ts                 ✅ Shared entity/training-format/talent/artifact/program/mutator/sanctuary/achievement i18n dictionary
     ├── VoiceControl.tsx            ✅ VoiceControlProvider, useVoiceCommandHandler, VoiceToggleButton & toast
-    ├── MainMenu.tsx                ✅ Hero profile, Weekly Challenge, Training Programs, Talents nav, Sanctuary & Garden hubs, Daily Quests, 25 Achievements
+    ├── MainMenu.tsx                ✅ Hero profile, Weekly Challenge, Training Programs, Talents nav, Sanctuary & Garden hubs, Daily Quests, 28 Achievements
     ├── TalentTreeScreen.tsx        ✅ 3-branch Hero Talent Tree & respec UI
     ├── GardenScreen.tsx            ✅ Personal Fitness Garden (6 plots w/ Mutant ×2 bonus, Botanical Stash, Sanctuary shortcut, Weed Patrol)
     ├── SanctuaryScreen.tsx         ✅ Hero Hideout & Mix Lab (Lab tiers 1..3, 3-slot Presets, Daily Alchemy Orders, 12 mixes, 7 synergies, Trophies)
-    ├── LevelSelectScreen.tsx       ✅ Campaign / Endless Arena / Circuit Dungeons + Run Mutators bar + Loadout + Sanctuary strip + 10 exercises
+    ├── LevelSelectScreen.tsx       ✅ Campaign / Endless / Circuit (6 built-in + Custom Builder) / Tabata & 60s Benchmark + Mutators bar + Loadout + Sanctuary strip + 10 exercises
     ├── InventoryScreen.tsx         ✅ Segmented Bag (incl. 2-slot Endgame Artifacts, Monster Trophies, Botanical Stash) & Fit-Coins Shop
-    ├── BestiaryAnalyticsScreen.tsx ✅ Multi-period analytics, Export CSV, Personal Records table (10 exercises), 16-monster Bestiary
-    ├── SettingsScreen.tsx          ✅ Language, audio, voice, camera, 15/30/60 FPS, GPU/CPU delegate, Scripted Pose Driver, JSON Export/Import
-    ├── BattleScreen.tsx            ✅ Live CV arena (incl. WEEKLY, Program Day, Mutators, DEMO POSE, Talents/Artifacts/Sanctuary HUD, PR/Artifact Victory summary)
+    ├── BestiaryAnalyticsScreen.tsx ✅ Multi-period analytics, Conditioning Index & 60s Benchmarks, Export CSV, Personal Records table (10 exercises), 16-monster Bestiary
+    ├── SettingsScreen.tsx          ✅ Language, audio, voice, Cadence Metronome, Pre-Battle Warm-up, camera, 15/30/60 FPS, GPU/CPU delegate, Scripted Pose Driver, JSON Export/Import
+    ├── BattleScreen.tsx            ✅ Live CV arena (incl. TABATA, BENCHMARK, WEEKLY, Program Day, Custom Circuits, Warm-up banner, Live RPM/Metronome, Mid-Battle Exercise Switcher)
     ├── CalibrationSandbox.tsx      ✅ 10-exercise calibration + live Scripted Pose Driver + GPU/CPU badge + threshold sliders
     └── PWAInstallButton.tsx        ✅ Chromium/iOS install prompt + OfflineIndicator
 ```
@@ -285,7 +287,7 @@ src/
 ```bash
 ✅ npm run typecheck  — Strict TypeScript, 0 errors
 ✅ npm run lint       — ESLint strict boundaries & no-any, 0 errors / 0 warnings
-✅ npm test           — 262/262 tests passing (25/25 files)
+✅ npm test           — 272/272 tests passing (26/26 files)
 ✅ npm run build      — Clean Vite production build + PWA manifest & Service Worker
 ```
 
@@ -317,9 +319,14 @@ npm run dev
 
 ### 6.9 Session History & Timestamps
 
-**Latest update:** 2026-11-17 16:20 UTC
+**Latest update:** 2026-11-17 17:45 UTC
 
 **Recent work:**
+- ✅ 2026-11-17: **Implemented Real Training Formats & Tempo Expansion (Section 3, `v15` save schema, `272/272` tests across 26 test files)**:
+  - **Tabata / HIIT Interval Mode (`TABATA`)**: Added `20/10 × 6` (`CLASSIC_20_10`), `30/15 × 6` (`POWER_30_15`), and `40/20 × 4` (`ENDURANCE_40_20`) interval protocols where `REST` pauses monster counter-attacks & combo decay with double-bell `INTERVAL_BELL` cues and victory tracking (`tabataCompleted`).
+  - **Expanded Circuits + Custom Circuit Builder**: Kept all 3 original circuits and added 3 new built-in circuits (`LOWER_POWER_SPLIT`, `CARDIO_SHRED`, `DUMBBELL_SCULPT` = 6 total) plus a Custom Circuit Builder (2–6 rooms, exercise + monster + rest sec, up to 6 saved presets in `store.customCircuits`).
+  - **Pre-Battle Warm-up & Mid-Battle Superset Exercise Switcher**: Optional `20s` / `8 reps` Warm-up phase granting `+25%` starting Ult charge (`skipWarmUp()` available); mid-battle `switchExerciseMidBattle` selector & `SELECT_EXERCISE` voice trigger preserving combo/Ult/HP with `×1.25` 8s Fresh Focus bonus and superset hint at `15+` hits.
+  - **Tempo Cadence Metronome, Live `RPM` & 60s Fitness Benchmark (`BENCHMARK`)**: Synthesized `METRONOME_TICK` (`OFF` / `STRENGTH_2_1_2` / `STEADY_60` / `CARDIO_90`), sliding-window live `currentCadenceRpm` & `avgCadenceRpm`, clean 60s Benchmark test (no counter-attacks) with `BRONZE`/`SILVER`/`GOLD`/`ELITE` ratings, `0–100` Physical Conditioning Index (`BestiaryAnalyticsScreen`), `NAV_TABATA` & `START_BENCHMARK` voice triggers, and 3 new achievements (`TABATA_FINISHER`, `CUSTOM_ARCHITECT`, `BENCHMARK_TESTED` = 28 total).
 - ✅ 2026-11-17: **Shipped Junk Slayer v3.5 Major Meta-Progression, CV & Portability Update (all 8 pillars, `262/262` tests across 25 test files)**:
   - **CV & Exercises (10 total)**: Added `LungeDetector`, `HighKneesDetector`, `FrontRaiseDetector` + combat multipliers, voice commands, calibration sliders, and `ScriptedPoseSource` camera-free 33-landmark driver integrated into `PoseTracker`, `SettingsScreen`, `CalibrationSandbox`, and `BattleScreen`.
   - **Endgame Bosses & Dedicated Artifacts**: Added 3 Endless Apex Bosses (`BOSS_DONUT_TITAN` Wave 10, `BOSS_SODA_OVERLORD` Wave 15, `BOSS_FRIES_EMPEROR` Wave 20+) and standalone 2-slot `artifacts` system (6 relics unlocked via Arena waves, Circuits, and Weekly Challenges).
@@ -332,7 +339,7 @@ npm run dev
   - Added anti-double-heal-exploit tracking (`healedBuffIds`) with safe `deactivateMixBuff`, discipline multipliers, 90% block mitigation, 1s Toxic cleanse, thorns reflect, Toxic immunity & Surge stacks, armor pierce, shield-shatter Ult, and persistent full-run buff lifetime across `ENDLESS` Arena waves (`223/223` tests passing).
 
 **Next session priorities:**
-1. Optional **Tabata (`20s/10s`) / superset interval workout mode**
+1. Optional cloud profile sync layered over JSON export
 2. Headless Playwright E2E UI test suite driving `BattleScreen` via `scriptedPoseEnabled`
 
 ---

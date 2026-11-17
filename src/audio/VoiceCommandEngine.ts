@@ -22,6 +22,8 @@ export type VoiceCommand =
   | { type: 'NAV_CAMPAIGN' }
   | { type: 'NAV_ENDLESS' }
   | { type: 'NAV_CIRCUIT' }
+  | { type: 'NAV_TABATA' }
+  | { type: 'START_BENCHMARK' }
   | { type: 'NAV_INVENTORY' }
   | { type: 'NAV_BESTIARY' }
   | { type: 'NAV_CALIBRATION' }
@@ -251,6 +253,14 @@ const PHRASE_RULES: readonly PhraseRule[] = [
   {
     phrases: ['круговой данж', 'круговая тренировка', 'круговая', 'круговой', 'данж', 'круг', 'circuit', 'dungeon'],
     build: () => ({ type: 'NAV_CIRCUIT' }),
+  },
+  {
+    phrases: ['табата', 'интервалы', 'интервальная', 'tabata', 'hiit'],
+    build: () => ({ type: 'NAV_TABATA' }),
+  },
+  {
+    phrases: ['фитнес тест', 'бенчмарк', 'тест 60 секунд', 'fitness test', 'benchmark'],
+    build: () => ({ type: 'START_BENCHMARK' }),
   },
   {
     phrases: ['выбрать уровень', 'выбор уровня', 'кампания', 'кампанию', 'уровни', 'campaign', 'levels'],

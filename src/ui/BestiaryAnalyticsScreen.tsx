@@ -28,6 +28,7 @@ import {
   type AnalyticsChartMetric,
   type AnalyticsPeriod,
 } from '../game/data/analytics';
+import { computeFitnessConditioningIndex } from '../game/data/trainingFormats';
 import { exportActivityToCsv } from '../game/portability';
 import { useGameStore } from '../game/store';
 import type { MonsterArchetype } from '../game/types';
@@ -35,6 +36,7 @@ import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import {
   ARCHETYPE_KEYS,
   ARCHETYPE_TRAIT_KEYS,
+  BENCHMARK_RATING_KEYS,
   CIRCUIT_KEYS,
   EXERCISE_NAME_KEYS,
   MONSTER_DESC_KEYS,
@@ -124,6 +126,15 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
   const endlessStats = useGameStore((state) => state.endlessStats);
   const personalRecords = useGameStore((state) => state.personalRecords);
   const bestSingleHitDamage = useGameStore((state) => state.bestSingleHitDamage);
+  const benchmarks = useGameStore((state) => state.benchmarks);
+  const bestBenchmarkByExercise = useGameStore((state) => state.bestBenchmarkByExercise);
+
+  const conditioningIndex = useMemo(
+    () => computeFitnessConditioningIndex(bestBenchmarkByExercise),
+    [bestBenchmarkByExercise]
+  );
+
+  const recentBenchmarks = useMemo(() => [...benchmarks].slice(-5).reverse(), [benchmarks]);
 
   const handleExportCsv = () => {
     const csv = exportActivityToCsv(dailyHistory);
@@ -632,6 +643,89 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          {/* Physical Conditioning Index & 60s Benchmarks */}
+          <div className="space-y-3 pt-4 border-t border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-white">
+                {t('analytics.conditioningTitle')}
+              </h3>
+              <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-numeric">
+                <span className="text-slate-400 mr-2">{t('analytics.conditioningIndex')}:</span>
+                <span className="font-bold text-emerald-400">{conditioningIndex} / 100</span>
+              </div>
+            </div>
+
+            {benchmarks.length === 0 ? (
+              <p className="text-xs text-slate-400">{t('analytics.noBenchmarks')}</p>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  {exerciseList.map((ex) => {
+                    const bestVal = bestBenchmarkByExercise[ex.id as ExerciseId];
+                    return (
+                      <div
+                        key={`bm-best-${ex.id}`}
+                        className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col justify-between gap-1"
+                      >
+                        <span className="text-[11px] text-slate-400 truncate">
+                          {ex.icon} {t(EXERCISE_NAME_KEYS[ex.id])}
+                        </span>
+                        <span className="font-numeric text-sm font-bold text-white">
+                          {typeof bestVal === 'number' && bestVal > 0
+                            ? ex.trackingType === 'hold'
+                              ? `${bestVal}s`
+                              : bestVal
+                            : '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {recentBenchmarks.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold text-slate-400">
+                      {t('analytics.recentBenchmarks')}
+                    </div>
+                    <div className="divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
+                      {recentBenchmarks.map((entry) => {
+                        const ex = EXERCISES[entry.exerciseId];
+                        return (
+                          <div
+                            key={entry.id}
+                            className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                          >
+                            <span className="text-slate-200 font-medium">
+                              {ex.icon} {t(EXERCISE_NAME_KEYS[entry.exerciseId])}
+                              {entry.dateKey ? (
+                                <span className="text-slate-500 font-numeric ml-2">
+                                  {entry.dateKey}
+                                </span>
+                              ) : null}
+                            </span>
+                            <div className="flex items-center gap-3 font-numeric">
+                              <span className="text-white font-bold">
+                                {ex.trackingType === 'hold' ? `${entry.score}s` : entry.score}
+                              </span>
+                              {entry.avgCadenceRpm > 0 && (
+                                <span className="text-slate-400">
+                                  {entry.avgCadenceRpm} {t('cadence.rpmUnit')}
+                                </span>
+                              )}
+                              <span className="text-amber-300 font-semibold">
+                                {t(BENCHMARK_RATING_KEYS[entry.rating])}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

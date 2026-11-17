@@ -11,6 +11,9 @@ import type { ExerciseDetector, ExerciseState } from '../vision/types';
 import type {
   ArtifactId,
   BattleRank,
+  BenchmarkEntry,
+  CadenceMode,
+  CustomCircuitRoom,
   EquipmentLoadout,
   ExerciseCalibrationSettings,
   ExerciseMatchup,
@@ -19,6 +22,7 @@ import type {
   MutatorId,
   SanctuaryMixId,
   SanctuarySynergyId,
+  TabataConfig,
 } from '../game/types';
 import { PoseTracker, type PoseDelegate, type TrackerError } from '../vision/PoseTracker';
 import {
@@ -61,7 +65,7 @@ import {
   levelUp,
   rollItemDrop,
 } from '../game/CombatEngine';
-import { getCircuitById } from '../game/data/circuits';
+import { computeCustomCircuitRewards, getCircuitById } from '../game/data/circuits';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { ITEMS } from '../game/data/items';
 import { getLevelById } from '../game/data/levels';
@@ -73,6 +77,21 @@ import {
 import { getAggregatedTalentModifiers } from '../game/data/talents';
 import { getAggregatedArtifactEffects, getArtifactUnlockForWave } from '../game/data/artifacts';
 import { getAggregatedMutatorEffects, getISOWeekKey } from '../game/data/programs';
+import {
+  BENCHMARK_DURATION_SEC,
+  CADENCE_MODES,
+  DEFAULT_TABATA_CONFIG,
+  FRESH_SWITCH_BONUS_DURATION_MS,
+  FRESH_SWITCH_DAMAGE_MULTIPLIER,
+  TABATA_PRESETS,
+  WARMUP_DURATION_SEC,
+  WARMUP_TARGET_REPS,
+  WARMUP_ULTIMATE_BONUS,
+  calculateSlidingCadenceRpm,
+  computeTabataSnapshot,
+  type TabataPhase,
+  type TabataTickSnapshot,
+} from '../game/data/trainingFormats';
 import { SoundFX } from '../audio/SoundFX';
 import { DEFAULT_EXERCISE_CALIBRATION, useGameStore } from '../game/store';
 import { t } from '../i18n';
@@ -87,7 +106,14 @@ export type SessionState =
   | 'ERROR';
 
 export type AutoPauseReason = 'USER' | 'LOW_VISIBILITY' | 'TAB_HIDDEN' | null;
-export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'WEED' | 'WEEKLY';
+export type BattleMode =
+  | 'CAMPAIGN'
+  | 'ENDLESS'
+  | 'CIRCUIT'
+  | 'WEED'
+  | 'WEEKLY'
+  | 'TABATA'
+  | 'BENCHMARK';
 
 export interface CombatEvent {
   id: number;
@@ -140,6 +166,11 @@ export interface VictorySummary {
   programBonus?: { completedProgram: boolean; bonusCoins: number; bonusXp: number } | null;
   weeklyBonus?: { firstCompletion: boolean; bonusCoins: number; bonusXp: number } | null;
   mutatorsApplied?: MutatorId[];
+  avgCadenceRpm?: number;
+  tabataRoundsCompleted?: number;
+  benchmarkEntry?: BenchmarkEntry | null;
+  benchmarkIsNewBest?: boolean;
+  exerciseSwitchesCount?: number;
 }
 
 export interface SessionStatus {
@@ -175,6 +206,18 @@ export interface SessionStatus {
   toxicSurgeStacks: number;
   activeMutators: MutatorId[];
   isScriptedPose: boolean;
+  exerciseId?: ExerciseId;
+  cadenceMode: CadenceMode;
+  currentCadenceRpm: number;
+  tabata: TabataTickSnapshot | null;
+  warmUpActive: boolean;
+  warmUpRemainingSec: number;
+  warmUpReps: number;
+  warmUpTargetReps: number;
+  warmUpCompleted: boolean;
+  benchmarkRemainingSec: number | null;
+  freshSwitchRemainingSec: number;
+  exerciseSwitchesCount: number;
 }
 
 export type SessionStateChangeCallback = (status: SessionStatus) => void;
@@ -208,6 +251,8 @@ export interface SoundFXLike {
       | 'DAMAGE'
       | 'WARNING'
       | 'VICTORY'
+      | 'METRONOME_TICK'
+      | 'INTERVAL_BELL'
   ): void;
   speak?(text: string, options?: { rate?: number; pitch?: number }): void;
   configure(config: { enabled?: boolean; voiceEnabled?: boolean }): void;
@@ -225,6 +270,7 @@ export interface WorkoutSessionConfig {
   endlessWave?: number;
   circuitId?: string;
   circuitRoomIndex?: number;
+  customCircuitRooms?: CustomCircuitRoom[];
   gardenPlotId?: number;
   loadout?: EquipmentLoadout;
   enableSound?: boolean;
@@ -236,6 +282,9 @@ export interface WorkoutSessionConfig {
   weeklyWeekKey?: string;
   programDayIndex?: number;
   scriptedPoseEnabled?: boolean;
+  tabataConfig?: TabataConfig;
+  warmUpEnabled?: boolean;
+  cadenceMode?: CadenceMode;
   /** Optional dependency injection for testing */
   poseTracker?: PoseTrackerLike;
   soundFX?: SoundFXLike;
@@ -264,12 +313,16 @@ export class WorkoutSession {
   private endlessWave: number;
   private circuitId?: string;
   private circuitRoomIndex: number;
+  private customCircuitRooms?: CustomCircuitRoom[];
   private gardenPlotId?: number;
   private loadoutOverride?: EquipmentLoadout;
   private activeMutators: MutatorId[];
   private weeklyWeekKey?: string;
   private programDayIndex?: number;
   private scriptedPoseEnabled: boolean;
+  private tabataConfig: TabataConfig;
+  private warmUpEnabled: boolean;
+  private cadenceMode: CadenceMode;
 
   private videoElement: HTMLVideoElement;
   private canvasElement: HTMLCanvasElement;
@@ -310,6 +363,19 @@ export class WorkoutSession {
   private battleTonnageKg = 0;
   private bestHitDamageInBattle = 0;
   private lastRecordedTimestamp = 0;
+  private lastFrameTimestamp: number | null = null;
+
+  private tabataElapsedMs = 0;
+  private lastTabataPhase: TabataPhase | null = null;
+  private warmUpActive = false;
+  private warmUpElapsedMs = 0;
+  private warmUpReps = 0;
+  private warmUpCompleted = false;
+  private benchmarkElapsedMs = 0;
+  private freshSwitchRemainingMs = 0;
+  private exerciseSwitchesCount = 0;
+  private repTimestampsMs: number[] = [];
+  private lastMetronomeBeatTimestamp: number | null = null;
 
   private lastCombatEvent: CombatEvent | null = null;
   private combatEventCounter = 0;
@@ -350,12 +416,19 @@ export class WorkoutSession {
     this.endlessWave = config.endlessWave ?? 1;
     this.circuitId = config.circuitId;
     this.circuitRoomIndex = config.circuitRoomIndex ?? 0;
+    this.customCircuitRooms = config.customCircuitRooms;
     this.gardenPlotId = config.gardenPlotId;
     this.loadoutOverride = config.loadout;
     this.activeMutators = config.activeMutators ? [...config.activeMutators] : [];
     this.weeklyWeekKey = config.weeklyWeekKey;
     this.programDayIndex = config.programDayIndex;
     this.scriptedPoseEnabled = Boolean(config.scriptedPoseEnabled);
+    this.tabataConfig = config.tabataConfig ?? DEFAULT_TABATA_CONFIG;
+    this.warmUpEnabled =
+      Boolean(config.warmUpEnabled) &&
+      this.mode !== 'BENCHMARK' &&
+      this.mode !== 'WEED';
+    this.cadenceMode = config.cadenceMode ?? 'OFF';
     this.enableSound = config.enableSound ?? true;
     this.enableVoice = config.enableVoice ?? false;
     this.requestedPoseDelegate = config.poseDelegate ?? 'GPU';
@@ -492,6 +565,8 @@ export class WorkoutSession {
     this.isAttackWarning = false;
     this.attackWarningTriggered = false;
     this.battleActiveStartTs = null;
+    this.lastFrameTimestamp = null;
+    this.lastMetronomeBeatTimestamp = null;
     void this.requestWakeLock();
     this.setState('ACTIVE');
   }
@@ -554,20 +629,80 @@ export class WorkoutSession {
     }
     this.circuitRoomIndex = params.roomIndex;
 
-    this.resetTrackingCounters();
+    this.resetTrackingCounters(true);
     this.ultimateCharge = savedUlt;
 
     store.startCombat(params.nextEnemy);
     store.recordMonsterBestiary({
       monsterId: params.nextEnemy.id,
       defeated: false,
-      weaknessDiscovered: params.nextEnemy.weakTo === params.exerciseId,
+      weaknessDiscovered: params.nextEnemy.weakTo === this.exerciseId,
     });
 
     if (this.state === 'VICTORY' || this.state === 'DEFEAT' || this.state === 'PAUSED') {
       void this.requestWakeLock();
       this.setState('ACTIVE');
     }
+  }
+
+  /**
+   * Switch exercise mid-battle without losing combo, Ultimate charge, or enemy HP.
+   * Grants a temporary Freshness Damage Bonus when changing to a different exercise.
+   */
+  switchExerciseMidBattle(nextExerciseId: ExerciseId): void {
+    if (this.state !== 'ACTIVE' && this.state !== 'PAUSED') {
+      return;
+    }
+    if (this.exerciseId === nextExerciseId) {
+      return;
+    }
+
+    const store = useGameStore.getState();
+    this.exerciseId = nextExerciseId;
+    this.exerciseDamageMultiplier = EXERCISES[nextExerciseId].damageMultiplier;
+    this.exerciseDetector = createExerciseDetector(
+      nextExerciseId,
+      store.settings.exerciseCalibration
+    );
+    if (this.scriptedPoseEnabled) {
+      this.poseTracker.setScriptedPoseGenerator?.(createScriptedPoseGenerator(nextExerciseId));
+    }
+
+    this.lastExerciseState = null;
+    this.lastRepCount = 0;
+    this.lastHoldTickSeconds = 0;
+    this.consecutiveHoldTicks = 0;
+    this.lastPhaseForAudio = 'IDLE';
+    this.freshSwitchRemainingMs = FRESH_SWITCH_BONUS_DURATION_MS;
+    this.exerciseSwitchesCount += 1;
+
+    if (store.currentEnemy) {
+      store.recordMonsterBestiary({
+        monsterId: store.currentEnemy.id,
+        defeated: false,
+        weaknessDiscovered: store.currentEnemy.weakTo === nextExerciseId,
+      });
+    }
+
+    if (this.enableSound) {
+      this.soundFX.play('POWER_UP');
+    }
+    this.notifyStateChange();
+  }
+
+  skipWarmUp(): void {
+    if (!this.warmUpActive) return;
+    this.warmUpActive = false;
+    this.warmUpElapsedMs = 0;
+    this.lastMonsterAttackTime = null;
+    this.nextAttackProgress = 0;
+    this.notifyStateChange();
+  }
+
+  setCadenceMode(mode: CadenceMode): void {
+    this.cadenceMode = mode;
+    this.lastMetronomeBeatTimestamp = null;
+    this.notifyStateChange();
   }
 
   async unlockAudio(): Promise<boolean> {
@@ -603,6 +738,22 @@ export class WorkoutSession {
       store.sanctuary?.labTier ?? 1
     );
 
+    const tabataSnapshot =
+      this.mode === 'TABATA'
+        ? computeTabataSnapshot(this.tabataElapsedMs, this.tabataConfig)
+        : null;
+    const warmUpRemainingSec = this.warmUpActive
+      ? Math.max(0, Math.ceil((WARMUP_DURATION_SEC * 1000 - this.warmUpElapsedMs) / 1000))
+      : 0;
+    const benchmarkRemainingSec =
+      this.mode === 'BENCHMARK'
+        ? Math.max(0, Math.ceil((BENCHMARK_DURATION_SEC * 1000 - this.benchmarkElapsedMs) / 1000))
+        : null;
+    const freshSwitchRemainingSec =
+      this.freshSwitchRemainingMs > 0 ? Math.ceil(this.freshSwitchRemainingMs / 1000) : 0;
+    const cadenceRefTs = this.lastRecordedTimestamp || 0;
+    const currentCadenceRpm = calculateSlidingCadenceRpm(this.repTimestampsMs, cadenceRefTs);
+
     return {
       state: this.state,
       exerciseState: this.lastExerciseState,
@@ -634,6 +785,18 @@ export class WorkoutSession {
       toxicSurgeStacks: this.toxicSurgeStacks,
       activeMutators: [...this.activeMutators],
       isScriptedPose: this.poseTracker.isScriptedMode?.() ?? this.scriptedPoseEnabled,
+      exerciseId: this.exerciseId,
+      cadenceMode: this.cadenceMode,
+      currentCadenceRpm,
+      tabata: tabataSnapshot,
+      warmUpActive: this.warmUpActive,
+      warmUpRemainingSec,
+      warmUpReps: this.warmUpReps,
+      warmUpTargetReps: WARMUP_TARGET_REPS,
+      warmUpCompleted: this.warmUpCompleted,
+      benchmarkRemainingSec,
+      freshSwitchRemainingSec,
+      exerciseSwitchesCount: this.exerciseSwitchesCount,
     };
   }
 
@@ -652,7 +815,7 @@ export class WorkoutSession {
     return this.loadoutOverride ?? useGameStore.getState().loadout;
   }
 
-  private resetTrackingCounters(): void {
+  private resetTrackingCounters(skipWarmUp = false): void {
     this.exerciseDetector.reset();
     this.lastRepCount = 0;
     this.lastHoldTickSeconds = 0;
@@ -695,6 +858,25 @@ export class WorkoutSession {
     this.battleTonnageKg = 0;
     this.bestHitDamageInBattle = 0;
     this.lastRecordedTimestamp = 0;
+    this.lastFrameTimestamp = null;
+
+    this.tabataElapsedMs = 0;
+    this.lastTabataPhase = this.mode === 'TABATA' ? 'WORK' : null;
+    this.warmUpActive =
+      !skipWarmUp &&
+      this.warmUpEnabled &&
+      this.mode !== 'BENCHMARK' &&
+      this.mode !== 'WEED';
+    this.warmUpElapsedMs = 0;
+    this.warmUpReps = 0;
+    this.warmUpCompleted = false;
+    this.benchmarkElapsedMs = 0;
+    this.freshSwitchRemainingMs = 0;
+    if (!skipWarmUp) {
+      this.exerciseSwitchesCount = 0;
+    }
+    this.repTimestampsMs = [];
+    this.lastMetronomeBeatTimestamp = null;
 
     this.lastHudNotifyTime = -Infinity;
     this.lastNotifiedRepCount = -1;
@@ -722,9 +904,18 @@ export class WorkoutSession {
     if (this.battleActiveStartTs === null) {
       this.battleActiveStartTs = timestamp;
     }
+    const dtMs =
+      this.lastFrameTimestamp !== null
+        ? Math.max(0, Math.min(2000, timestamp - this.lastFrameTimestamp))
+        : 0;
+    this.lastFrameTimestamp = timestamp;
     this.lastRecordedTimestamp = timestamp;
 
-    if (!this.initialToxicApplied) {
+    if (this.freshSwitchRemainingMs > 0 && dtMs > 0) {
+      this.freshSwitchRemainingMs = Math.max(0, this.freshSwitchRemainingMs - dtMs);
+    }
+
+    if (!this.initialToxicApplied && !this.warmUpActive && this.mode !== 'BENCHMARK') {
       this.initialToxicApplied = true;
       const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
       if (mutatorEffects.startsToxic) {
@@ -737,6 +928,88 @@ export class WorkoutSession {
           this.debuffExpiresAt = timestamp + TOXIC_DEBUFF_DURATION_MS;
           this.debuffRemainingSec = Math.ceil(TOXIC_DEBUFF_DURATION_MS / 1000);
         }
+      }
+    }
+
+    // Tabata active timer & rest phase detection
+    let tabataInRest = false;
+    if (this.mode === 'TABATA' && !this.warmUpActive && dtMs > 0) {
+      this.tabataElapsedMs += dtMs;
+      const tabataSnap = computeTabataSnapshot(this.tabataElapsedMs, this.tabataConfig);
+      if (this.lastTabataPhase !== null && this.lastTabataPhase !== tabataSnap.phase) {
+        if (this.enableSound) {
+          this.soundFX.play('INTERVAL_BELL');
+        }
+      }
+      this.lastTabataPhase = tabataSnap.phase;
+      tabataInRest = tabataSnap.phase === 'REST';
+
+      if (tabataInRest) {
+        if (this.lastMonsterAttackTime !== null) {
+          this.lastMonsterAttackTime += dtMs;
+        }
+        if (this.lastComboTimestamp !== null) {
+          this.lastComboTimestamp += dtMs;
+        }
+      }
+
+      if (tabataSnap.finished) {
+        const store = useGameStore.getState();
+        const enemy = store.currentEnemy;
+        if (this.enableSound) {
+          this.soundFX.play('INTERVAL_BELL');
+        }
+        if (enemy) {
+          const presetKey = this.tabataConfig.presetId ?? 'CLASSIC_20_10';
+          const preset = TABATA_PRESETS[presetKey];
+          const tabataXp = Math.round(
+            enemy.xpReward * (preset?.xpBonusMultiplier ?? 1.25) * 0.5
+          );
+          let nextPlayer = { ...store.player, xp: store.player.xp + tabataXp };
+          let leveled = false;
+          while (nextPlayer.xp >= nextPlayer.xpToNextLevel) {
+            nextPlayer = levelUp(nextPlayer);
+            leveled = true;
+          }
+          store.updatePlayer(nextPlayer);
+          this.onVictory(enemy, tabataXp, leveled, timestamp, { tabataFinished: true });
+          return;
+        }
+      }
+    }
+
+    // Cadence Metronome beat trigger
+    if (this.cadenceMode !== 'OFF' && !tabataInRest) {
+      const spec = CADENCE_MODES[this.cadenceMode];
+      if (spec.beatIntervalMs > 0) {
+        if (this.lastMetronomeBeatTimestamp === null) {
+          this.lastMetronomeBeatTimestamp = timestamp;
+        } else if (timestamp - this.lastMetronomeBeatTimestamp >= spec.beatIntervalMs) {
+          const steps = Math.floor(
+            (timestamp - this.lastMetronomeBeatTimestamp) / spec.beatIntervalMs
+          );
+          this.lastMetronomeBeatTimestamp += steps * spec.beatIntervalMs;
+          if (this.enableSound) {
+            this.soundFX.play('METRONOME_TICK');
+          }
+        }
+      }
+    }
+
+    // 60s Fitness Benchmark timer
+    if (this.mode === 'BENCHMARK' && dtMs > 0) {
+      this.benchmarkElapsedMs += dtMs;
+      if (this.benchmarkElapsedMs >= BENCHMARK_DURATION_SEC * 1000) {
+        this.completeBenchmark(timestamp);
+        return;
+      }
+    }
+
+    // Pre-battle Warm-up timer progression
+    if (this.warmUpActive && dtMs > 0) {
+      this.warmUpElapsedMs += dtMs;
+      if (this.warmUpElapsedMs >= WARMUP_DURATION_SEC * 1000) {
+        this.finishWarmUp(timestamp);
       }
     }
 
@@ -775,11 +1048,16 @@ export class WorkoutSession {
     const activeLoadout = this.getActiveLoadout();
     const loadoutWeightKg = activeLoadout.mode === 'DUMBBELLS' ? activeLoadout.weightKg : 0;
 
-    // Rep-based damage
+    // Rep-based damage / benchmark / warm-up
     const newReps = exerciseState.repCount - this.lastRepCount;
     if (newReps > 0) {
       this.lastRepCount = exerciseState.repCount;
-      this.battleReps += newReps;
+      for (let r = 0; r < newReps; r++) {
+        this.repTimestampsMs.push(timestamp);
+      }
+      if (this.repTimestampsMs.length > 200) {
+        this.repTimestampsMs = this.repTimestampsMs.slice(-200);
+      }
 
       const store = useGameStore.getState();
       const repKcal = this.exerciseId
@@ -795,9 +1073,26 @@ export class WorkoutSession {
         tonnageKg: repTonnage,
       });
 
-      this.applyCombatHits(newReps, timestamp, false);
-      if (this.state !== 'ACTIVE') {
-        return;
+      if (this.warmUpActive) {
+        this.warmUpReps += newReps;
+        if (this.enableSound) {
+          this.soundFX.play('REP_COMPLETE');
+        }
+        if (this.warmUpReps >= WARMUP_TARGET_REPS) {
+          this.finishWarmUp(timestamp);
+        }
+      } else {
+        this.battleReps += newReps;
+        if (this.mode === 'BENCHMARK') {
+          if (this.enableSound) {
+            this.soundFX.play('REP_COMPLETE');
+          }
+        } else {
+          this.applyCombatHits(newReps, timestamp, false);
+          if (this.state !== 'ACTIVE') {
+            return;
+          }
+        }
       }
 
       const unlocked = store.syncAchievements();
@@ -806,32 +1101,14 @@ export class WorkoutSession {
       }
     }
 
-    // Hold-based damage (ticks every 1000ms of valid form hold)
+    // Hold-based damage / benchmark / warm-up (ticks every 1000ms of valid form hold)
     if (typeof exerciseState.holdDurationMs === 'number') {
       const totalHoldSeconds = Math.floor(exerciseState.holdDurationMs / HOLD_TICK_MS);
       const newHoldTicks = totalHoldSeconds - this.lastHoldTickSeconds;
       if (newHoldTicks > 0) {
         this.lastHoldTickSeconds = totalHoldSeconds;
-        this.battleHoldSeconds += newHoldTicks;
-        this.consecutiveHoldTicks += newHoldTicks;
 
         const store = useGameStore.getState();
-        const holdSanctuaryBuffs = getAggregatedSanctuaryBuffs(
-          store.sanctuary?.activeBuffs ?? [],
-          store.sanctuary?.labTier ?? 1
-        );
-        const cleanseThreshold =
-          holdSanctuaryBuffs.toxicCleanseHoldTicksOverride ?? TOXIC_CLEANSE_HOLD_TICKS;
-
-        // Static hold seconds cleanse active Toxic debuff (3s default, 1s with Monolith Elixir)
-        if (this.debuffExpiresAt !== null && this.consecutiveHoldTicks >= cleanseThreshold) {
-          this.debuffExpiresAt = null;
-          this.debuffRemainingSec = 0;
-          this.debuffCleansedId++;
-          if (this.enableSound) {
-            this.soundFX.play('POWER_UP');
-          }
-        }
         const holdKcal = this.exerciseId
           ? estimateWorkoutKcal(
               { [this.exerciseId]: { holdSeconds: newHoldTicks } },
@@ -848,9 +1125,45 @@ export class WorkoutSession {
           tonnageKg: holdTonnage,
         });
 
-        this.applyCombatHits(newHoldTicks, timestamp, true);
-        if (this.state !== 'ACTIVE') {
-          return;
+        if (this.warmUpActive) {
+          this.warmUpReps += newHoldTicks;
+          if (this.enableSound) {
+            this.soundFX.play('REP_COMPLETE');
+          }
+          if (this.warmUpReps >= WARMUP_TARGET_REPS) {
+            this.finishWarmUp(timestamp);
+          }
+        } else {
+          this.battleHoldSeconds += newHoldTicks;
+          this.consecutiveHoldTicks += newHoldTicks;
+
+          if (this.mode === 'BENCHMARK') {
+            if (this.enableSound) {
+              this.soundFX.play('REP_COMPLETE');
+            }
+          } else {
+            const holdSanctuaryBuffs = getAggregatedSanctuaryBuffs(
+              store.sanctuary?.activeBuffs ?? [],
+              store.sanctuary?.labTier ?? 1
+            );
+            const cleanseThreshold =
+              holdSanctuaryBuffs.toxicCleanseHoldTicksOverride ?? TOXIC_CLEANSE_HOLD_TICKS;
+
+            // Static hold seconds cleanse active Toxic debuff (3s default, 1s with Monolith Elixir)
+            if (this.debuffExpiresAt !== null && this.consecutiveHoldTicks >= cleanseThreshold) {
+              this.debuffExpiresAt = null;
+              this.debuffRemainingSec = 0;
+              this.debuffCleansedId++;
+              if (this.enableSound) {
+                this.soundFX.play('POWER_UP');
+              }
+            }
+
+            this.applyCombatHits(newHoldTicks, timestamp, true);
+            if (this.state !== 'ACTIVE') {
+              return;
+            }
+          }
         }
 
         const unlocked = store.syncAchievements();
@@ -860,10 +1173,12 @@ export class WorkoutSession {
       }
     }
 
-    // Monster counter-attack timer (Static holds act as a defensive block)
-    this.processMonsterCounterAttack(timestamp, Boolean(exerciseState.isHolding));
-    if (this.state !== 'ACTIVE') {
-      return;
+    // Monster counter-attack timer (skipped during Warm-up, Tabata REST, or 60s Benchmark)
+    if (!this.warmUpActive && !tabataInRest && this.mode !== 'BENCHMARK') {
+      this.processMonsterCounterAttack(timestamp, Boolean(exerciseState.isHolding));
+      if (this.state !== 'ACTIVE') {
+        return;
+      }
     }
 
     const isDebuffedNow = this.debuffExpiresAt !== null && this.debuffRemainingSec > 0;
@@ -895,6 +1210,102 @@ export class WorkoutSession {
       this.lastNotifiedDebuffed = isDebuffedNow;
       this.notifyStateChange();
     }
+  }
+
+  private finishWarmUp(timestamp: number): void {
+    if (!this.warmUpActive) return;
+    this.warmUpActive = false;
+    this.warmUpCompleted = true;
+    this.ultimateCharge = Math.min(
+      ULTIMATE_CHARGE_MAX,
+      this.ultimateCharge + WARMUP_ULTIMATE_BONUS
+    );
+    this.lastMonsterAttackTime = timestamp;
+    this.nextAttackProgress = 0;
+    if (this.enableSound) {
+      this.soundFX.play('INTERVAL_BELL');
+    }
+  }
+
+  private completeBenchmark(timestamp: number): void {
+    const store = useGameStore.getState();
+    const exId: ExerciseId = this.exerciseId ?? 'SQUAT';
+    const exDef = EXERCISES[exId];
+    const score = exDef.trackingType === 'hold' ? this.battleHoldSeconds : this.battleReps;
+    const avgCadenceRpm =
+      Math.round((this.battleReps / (BENCHMARK_DURATION_SEC / 60)) * 10) / 10;
+
+    const { entry, isNewBest } = store.recordBenchmarkResult({
+      exerciseId: exId,
+      score,
+      avgCadenceRpm,
+    });
+
+    const xpGained = Math.max(20, score * 2);
+    let nextPlayer = { ...store.player, xp: store.player.xp + xpGained };
+    let leveledUp = false;
+    while (nextPlayer.xp >= nextPlayer.xpToNextLevel) {
+      nextPlayer = levelUp(nextPlayer);
+      leveledUp = true;
+    }
+    store.updatePlayer(nextPlayer);
+
+    const activeLoadout = this.getActiveLoadout();
+    const loadoutWeightKg = activeLoadout.mode === 'DUMBBELLS' ? activeLoadout.weightKg : 0;
+    const estimatedKcal = estimateWorkoutKcal(
+      { [exId]: { reps: this.battleReps, holdSeconds: this.battleHoldSeconds } },
+      loadoutWeightKg
+    );
+
+    store.recordWorkoutProgress({
+      durationSec: BENCHMARK_DURATION_SEC,
+      coinsEarned: 20,
+    });
+
+    const unlockedOnBenchmark = store.syncAchievements();
+    if (unlockedOnBenchmark.length > 0) {
+      this.sessionAchievements.push(...unlockedOnBenchmark);
+    }
+
+    const rank =
+      entry.rating === 'ELITE'
+        ? 'S'
+        : entry.rating === 'GOLD'
+          ? 'A'
+          : entry.rating === 'SILVER'
+            ? 'B'
+            : 'C';
+
+    this.victorySummary = {
+      xpGained,
+      coinsEarned: 20,
+      rank,
+      maxCombo: 0,
+      durationSec: BENCHMARK_DURATION_SEC,
+      estimatedKcal,
+      tonnageKg: this.battleTonnageKg,
+      ultimateCount: 0,
+      leveledUp,
+      droppedItemId: null,
+      droppedTrophy: null,
+      unlockedLevelId: null,
+      newlyUnlockedAchievements: Array.from(new Set(this.sessionAchievements)),
+      mode: 'BENCHMARK',
+      avgCadenceRpm,
+      benchmarkEntry: entry,
+      benchmarkIsNewBest: isNewBest,
+      exerciseSwitchesCount: this.exerciseSwitchesCount,
+    };
+
+    if (this.enableSound) {
+      this.soundFX.play('INTERVAL_BELL');
+      this.soundFX.play('VICTORY');
+    }
+
+    void timestamp;
+    void this.releaseWakeLock();
+    store.endCombat();
+    this.setState('VICTORY');
   }
 
   private updateComboAndDebuffTimers(timestamp: number): void {
@@ -1199,11 +1610,15 @@ export class WorkoutSession {
       );
 
       const isDebuffed = this.debuffExpiresAt !== null && timestamp < this.debuffExpiresAt;
-      const sanctuaryDamageMultiplier = getSanctuaryDamageMultiplierForExercise(
+      const baseSanctuaryMultiplier = getSanctuaryDamageMultiplierForExercise(
         sanctuaryBuffs,
         this.exerciseId,
         this.toxicSurgeStacks * sanctuaryBuffs.toxicCatalystProcDamageBonus
       );
+      const sanctuaryDamageMultiplier =
+        this.freshSwitchRemainingMs > 0
+          ? baseSanctuaryMultiplier * FRESH_SWITCH_DAMAGE_MULTIPLIER
+          : baseSanctuaryMultiplier;
       const extraCritChance = this.comboCount >= 6 ? sanctuaryBuffs.highComboCritBonus : 0;
 
       const { monster: hitMonster, player: updatedEffective, result } = applyDamageToMonster(
@@ -1217,7 +1632,12 @@ export class WorkoutSession {
           loadout: activeLoadout,
           isUltimate,
           xpMultiplier:
-            sanctuaryBuffs.xpMultiplier * talentMods.xpMultiplier * mutatorEffects.xpMultiplier,
+            sanctuaryBuffs.xpMultiplier *
+            talentMods.xpMultiplier *
+            mutatorEffects.xpMultiplier *
+            (this.mode === 'TABATA'
+              ? TABATA_PRESETS[this.tabataConfig.presetId ?? 'CLASSIC_20_10']?.xpBonusMultiplier ?? 1.25
+              : 1),
           sanctuaryDamageMultiplier,
           armorPierceRatio: sanctuaryBuffs.armorPierceRatio,
           shieldBreakBonus: sanctuaryBuffs.shieldBreakBonus + artifactEffects.shieldBreakBonus,
@@ -1302,7 +1722,8 @@ export class WorkoutSession {
     defeatedEnemy: MonsterStats,
     xpGained: number,
     leveledUp: boolean,
-    timestamp: number
+    timestamp: number,
+    options?: { tabataFinished?: boolean }
   ): void {
     const store = useGameStore.getState();
     const activeLoadout = this.getActiveLoadout();
@@ -1396,17 +1817,30 @@ export class WorkoutSession {
         store.addItem(droppedItemId, 1);
       }
     } else if (this.mode === 'CIRCUIT' && this.circuitId) {
-      const circuit = getCircuitById(this.circuitId);
-      if (circuit) {
-        circuitTotalRooms = circuit.rooms.length;
+      const builtInCircuit = getCircuitById(this.circuitId);
+      const customCircuit = !builtInCircuit
+        ? store.customCircuits.find((c) => c.id === this.circuitId)
+        : undefined;
+      const rooms = builtInCircuit?.rooms ?? this.customCircuitRooms ?? customCircuit?.rooms;
+      if (rooms && rooms.length > 0) {
+        circuitTotalRooms = rooms.length;
         circuitRoomNumber = this.circuitRoomIndex + 1;
-        if (this.circuitRoomIndex >= circuit.rooms.length - 1) {
+        if (this.circuitRoomIndex >= rooms.length - 1) {
           circuitCompleted = true;
           circuitsDelta = 1;
-          coinsEarned += circuit.bonusCoins;
-          totalXpGained += circuit.bonusXp;
+          const bonusRewards = builtInCircuit
+            ? { bonusCoins: builtInCircuit.bonusCoins, bonusXp: builtInCircuit.bonusXp }
+            : computeCustomCircuitRewards(rooms.length);
+          const lootPool = builtInCircuit?.guaranteedLootPool ?? [
+            'WEIGHT_BELT',
+            'FITNESS_WRISTBANDS',
+            'PROTEIN_SHAKE',
+          ];
 
-          let updatedPlayer = { ...store.player, xp: store.player.xp + circuit.bonusXp };
+          coinsEarned += bonusRewards.bonusCoins;
+          totalXpGained += bonusRewards.bonusXp;
+
+          let updatedPlayer = { ...store.player, xp: store.player.xp + bonusRewards.bonusXp };
           while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
             updatedPlayer = levelUp(updatedPlayer);
             finalLeveledUp = true;
@@ -1417,14 +1851,19 @@ export class WorkoutSession {
             unlockedArtifactId = 'CHRONO_HOURGLASS';
           }
 
-          if (circuit.guaranteedLootPool.length > 0) {
-            const idx = Math.floor(Math.random() * circuit.guaranteedLootPool.length);
-            droppedItemId = circuit.guaranteedLootPool[idx];
+          if (lootPool.length > 0) {
+            const idx = Math.floor(Math.random() * lootPool.length);
+            droppedItemId = lootPool[idx];
             if (droppedItemId) {
               store.addItem(droppedItemId, 1);
             }
           }
         }
+      }
+    } else if (this.mode === 'TABATA') {
+      droppedItemId = rollItemDrop(ENDLESS_DROP_TABLE);
+      if (droppedItemId) {
+        store.addItem(droppedItemId, 1);
       }
     }
 
@@ -1514,11 +1953,22 @@ export class WorkoutSession {
       weaknessDiscovered: true,
     });
 
+    const tabataSnap =
+      this.mode === 'TABATA'
+        ? computeTabataSnapshot(this.tabataElapsedMs, this.tabataConfig)
+        : null;
+    const tabataDelta = this.mode === 'TABATA' ? 1 : 0;
+    const avgCadenceRpm =
+      durationSec > 0
+        ? Math.round((this.battleReps / Math.max(0.1, durationSec / 60)) * 10) / 10
+        : 0;
+
     store.recordWorkoutProgress({
       monstersDefeated: 1,
       maxCombo: this.maxComboInBattle,
       coinsEarned,
       circuitsCompleted: circuitsDelta,
+      tabataCompleted: tabataDelta,
       durationSec,
       suppressWeedSpawn: this.mode === 'WEED',
     });
@@ -1557,6 +2007,14 @@ export class WorkoutSession {
       programBonus,
       weeklyBonus,
       mutatorsApplied: this.activeMutators.length > 0 ? [...this.activeMutators] : undefined,
+      avgCadenceRpm,
+      tabataRoundsCompleted:
+        this.mode === 'TABATA'
+          ? options?.tabataFinished
+            ? this.tabataConfig.rounds
+            : tabataSnap?.round ?? 1
+          : undefined,
+      exerciseSwitchesCount: this.exerciseSwitchesCount,
     };
 
     if (this.enableSound) {
@@ -1567,6 +2025,7 @@ export class WorkoutSession {
       this.mode === 'CAMPAIGN' ||
       this.mode === 'WEED' ||
       this.mode === 'WEEKLY' ||
+      this.mode === 'TABATA' ||
       (this.mode === 'CIRCUIT' && circuitCompleted);
     if (shouldConsumeBuffs) {
       store.consumeActiveSanctuaryBuffs();
@@ -1778,11 +2237,15 @@ export function createWorkoutSessionForBattle(params: {
   endlessWave?: number;
   circuitId?: string;
   circuitRoomIndex?: number;
+  customCircuitRooms?: CustomCircuitRoom[];
   gardenPlotId?: number;
   activeMutators?: MutatorId[];
   weeklyWeekKey?: string;
   programDayIndex?: number;
   scriptedPoseEnabled?: boolean;
+  tabataConfig?: TabataConfig;
+  warmUpEnabled?: boolean;
+  cadenceMode?: CadenceMode;
 }): WorkoutSession {
   const store = useGameStore.getState();
   const exerciseDef = EXERCISES[params.exerciseId];
@@ -1801,11 +2264,15 @@ export function createWorkoutSessionForBattle(params: {
     endlessWave: params.endlessWave ?? 1,
     circuitId: params.circuitId,
     circuitRoomIndex: params.circuitRoomIndex,
+    customCircuitRooms: params.customCircuitRooms,
     gardenPlotId: params.gardenPlotId,
     activeMutators: params.activeMutators ?? store.activeMutators,
     weeklyWeekKey: params.weeklyWeekKey,
     programDayIndex: params.programDayIndex,
     scriptedPoseEnabled: params.scriptedPoseEnabled ?? store.settings.scriptedPoseEnabled,
+    tabataConfig: params.tabataConfig,
+    warmUpEnabled: params.warmUpEnabled ?? store.settings.warmUpEnabled,
+    cadenceMode: params.cadenceMode ?? store.settings.cadenceMode,
     loadout: store.loadout,
     enableSound: store.settings.soundEnabled,
     enableVoice: store.settings.voiceEnabled,

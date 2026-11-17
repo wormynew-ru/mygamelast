@@ -120,6 +120,8 @@ describe('VoiceCommandEngine parser', () => {
     expect(parseVoiceCommand('полить все')?.command).toEqual({ type: 'GARDEN_WATER' });
     expect(parseVoiceCommand('собрать урожай')?.command).toEqual({ type: 'GARDEN_HARVEST' });
     expect(parseVoiceCommand('битва с сорняками')?.command).toEqual({ type: 'GARDEN_WEED' });
+    expect(parseVoiceCommand('табата')?.command).toEqual({ type: 'NAV_TABATA' });
+    expect(parseVoiceCommand('фитнес тест')?.command).toEqual({ type: 'START_BENCHMARK' });
     expect(parseVoiceCommand('вы')).toBeNull();
     expect(parseVoiceCommand('просто случайный шум')).toBeNull();
   });

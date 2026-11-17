@@ -35,7 +35,13 @@ describe('Store v3.5 Meta Progression & Migration v13 -> v14', () => {
     expect(migrated.settings.exerciseCalibration.highKneesLiftAngle).toBe(110);
     expect(migrated.settings.exerciseCalibration.frontRaisePeakAngle).toBe(85);
     expect(migrated.settings.scriptedPoseEnabled).toBe(false);
-    expect(SAVE_SCHEMA_VERSION).toBe(14);
+    expect(migrated.settings.cadenceMode).toBe('OFF');
+    expect(migrated.settings.warmUpEnabled).toBe(false);
+    expect(migrated.customCircuits).toEqual([]);
+    expect(migrated.benchmarks).toEqual([]);
+    expect(migrated.bestBenchmarkByExercise).toEqual({});
+    expect(migrated.workoutStats.tabataCompleted).toBe(0);
+    expect(SAVE_SCHEMA_VERSION).toBe(15);
   });
 
   it('supports talent upgrades, effective stats boost, and Fit-Coin respec', () => {
@@ -148,5 +154,71 @@ describe('Store v3.5 Meta Progression & Migration v13 -> v14', () => {
     const orderResult = useGameStore.getState().completeAlchemyOrder('2026-04-08');
     expect(orderResult).not.toBeNull();
     expect(useGameStore.getState().sanctuary.completedOrdersCount).toBe(1);
+  });
+
+  it('migrates v14 -> v15 and manages custom circuits and 60s Fitness Benchmarks', () => {
+    const migratedV15 = migrateGameState(
+      {
+        coins: 500,
+        settings: { soundEnabled: true, cadenceMode: 'STEADY_60', warmUpEnabled: true },
+      },
+      14
+    );
+    expect(migratedV15.coins).toBe(500);
+    expect(migratedV15.settings.cadenceMode).toBe('STEADY_60');
+    expect(migratedV15.settings.warmUpEnabled).toBe(true);
+    expect(migratedV15.customCircuits).toEqual([]);
+    expect(migratedV15.benchmarks).toEqual([]);
+
+    const store = useGameStore.getState();
+    // Rejects < 2 rooms
+    expect(
+      store.saveCustomCircuit('Too short', [
+        { exerciseId: 'SQUAT', monsterId: 'BURGER', restAfterSec: 0 },
+      ])
+    ).toBeNull();
+
+    // Saves up to 6 circuits and unlocks CUSTOM_ARCHITECT
+    for (let i = 0; i < 6; i++) {
+      const created = useGameStore.getState().saveCustomCircuit(`Split ${i + 1}`, [
+        { exerciseId: 'LUNGE', monsterId: 'DONUT', restAfterSec: 10 },
+        { exerciseId: 'HIGH_KNEES', monsterId: 'SODA', restAfterSec: 0 },
+      ]);
+      expect(created).not.toBeNull();
+    }
+    expect(useGameStore.getState().customCircuits).toHaveLength(6);
+    expect(useGameStore.getState().unlockedAchievements).toContain('CUSTOM_ARCHITECT');
+
+    // 7th fails until one is deleted
+    expect(
+      useGameStore.getState().saveCustomCircuit('Extra', [
+        { exerciseId: 'SQUAT', monsterId: 'BURGER', restAfterSec: 10 },
+        { exerciseId: 'PLANK', monsterId: 'PIZZA', restAfterSec: 0 },
+      ])
+    ).toBeNull();
+    const firstId = useGameStore.getState().customCircuits[0].id;
+    useGameStore.getState().deleteCustomCircuit(firstId);
+    expect(useGameStore.getState().customCircuits).toHaveLength(5);
+
+    // Records 60s Fitness Benchmark and tracks personal bests + BENCHMARK_TESTED achievement
+    const bm1 = useGameStore.getState().recordBenchmarkResult({
+      exerciseId: 'SQUAT',
+      score: 26,
+      avgCadenceRpm: 26,
+      dateKey: '2026-11-17',
+    });
+    expect(bm1.isNewBest).toBe(true);
+    expect(bm1.entry.rating).toBe('SILVER');
+    expect(useGameStore.getState().bestBenchmarkByExercise.SQUAT).toBe(26);
+    expect(useGameStore.getState().unlockedAchievements).toContain('BENCHMARK_TESTED');
+
+    const bm2 = useGameStore.getState().recordBenchmarkResult({
+      exerciseId: 'SQUAT',
+      score: 24,
+      avgCadenceRpm: 24,
+      dateKey: '2026-11-17',
+    });
+    expect(bm2.isNewBest).toBe(false);
+    expect(useGameStore.getState().bestBenchmarkByExercise.SQUAT).toBe(26);
   });
 });
