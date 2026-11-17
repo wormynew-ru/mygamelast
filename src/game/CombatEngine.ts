@@ -18,6 +18,9 @@ import type {
 } from './types';
 import { EXERCISES, type ExerciseId } from './data/exercises';
 import { getAggregatedSanctuaryBuffs } from './data/sanctuary';
+import type { AggregatedTalentModifiers } from './data/talents';
+import { getAggregatedArtifactEffects, type AggregatedArtifactEffects } from './data/artifacts';
+import type { ArtifactId } from './types';
 
 export const COMBO_WINDOW_BASE_MS = 3800;
 export const TOXIC_DEBUFF_DURATION_MS = 6000;
@@ -174,6 +177,7 @@ export interface CombatAttackOptions {
   ultimateDamageMultiplier?: number;
   extraCritChance?: number;
   dumbbellDamageBonus?: number;
+  executeBonusRatio?: number;
 }
 
 /**
@@ -205,6 +209,11 @@ export function applyDamageToMonster(
   const armorPierceRatio = Math.min(0.9, Math.max(0, options.armorPierceRatio ?? 0));
   const effectiveMonsterDefense = Math.floor(monster.defense * (1 - armorPierceRatio));
 
+  const executeMultiplier =
+    (options.executeBonusRatio ?? 0) > 0 && monster.maxHp > 0 && monster.hp / monster.maxHp <= 0.3
+      ? 1 + (options.executeBonusRatio ?? 0)
+      : 1.0;
+
   // Calculate base + tactical damage
   let damage = calculateBaseDamage(player.attack, effectiveMonsterDefense, exerciseMultiplier);
   damage = Math.max(
@@ -216,7 +225,8 @@ export function applyDamageToMonster(
         debuffMultiplier *
         loadoutMultiplier *
         ultimateMultiplier *
-        sanctuaryDamageMultiplier
+        sanctuaryDamageMultiplier *
+        executeMultiplier
     )
   );
 
@@ -417,15 +427,48 @@ export function getEffectivePlayerStats(
   equippedItemIds: string[],
   itemsCatalog: Record<string, Item>,
   activeSanctuaryBuffs: readonly SanctuaryMixId[] = [],
-  labTier: SanctuaryLabTier = 1
+  labTier: SanctuaryLabTier = 1,
+  talentModifiers?: Partial<AggregatedTalentModifiers>,
+  equippedArtifactIds: readonly ArtifactId[] = [],
+  mutatorDefenseDelta: number = 0
 ): PlayerStats {
   const sanctuaryBonuses = getAggregatedSanctuaryBuffs(activeSanctuaryBuffs, labTier);
-  let attackBonus = sanctuaryBonuses.attackBonus;
-  let defenseBonus = sanctuaryBonuses.defenseBonus;
-  let maxHpBonus = 0;
-  let critChanceBonus = sanctuaryBonuses.critChanceBonus;
+  const artifactBonuses: AggregatedArtifactEffects =
+    equippedArtifactIds.length > 0
+      ? getAggregatedArtifactEffects(equippedArtifactIds)
+      : {
+          attackBonus: 0,
+          defenseBonus: 0,
+          maxHpBonus: 0,
+          critChanceBonus: 0,
+          critMultiplierBonus: 0,
+          executeBonusRatio: 0,
+          healOnOverdrive: 0,
+          shieldBreakBonus: 0,
+          thornsReflectDamage: 0,
+          ultimateChargeMultiplier: 1.0,
+          comboWindowBonusMs: 0,
+        };
+
+  let attackBonus =
+    sanctuaryBonuses.attackBonus +
+    (talentModifiers?.attackBonus ?? 0) +
+    artifactBonuses.attackBonus;
+  let defenseBonus =
+    sanctuaryBonuses.defenseBonus +
+    (talentModifiers?.defenseBonus ?? 0) +
+    artifactBonuses.defenseBonus +
+    mutatorDefenseDelta;
+  let maxHpBonus = (talentModifiers?.maxHpBonus ?? 0) + artifactBonuses.maxHpBonus;
+  let critChanceBonus =
+    sanctuaryBonuses.critChanceBonus +
+    (talentModifiers?.critChanceBonus ?? 0) +
+    artifactBonuses.critChanceBonus;
   let comboWindowBonusMs =
-    (player.comboWindowBonusMs ?? 0) + sanctuaryBonuses.comboWindowBonusMs;
+    (player.comboWindowBonusMs ?? 0) +
+    sanctuaryBonuses.comboWindowBonusMs +
+    (talentModifiers?.comboWindowBonusMs ?? 0) +
+    artifactBonuses.comboWindowBonusMs;
 
   for (const itemId of equippedItemIds) {
     const item = itemsCatalog[itemId];
@@ -441,6 +484,10 @@ export function getEffectivePlayerStats(
 
   const baseMaxHp = player.maxHp + maxHpBonus;
   const scaledMaxHp = Math.max(10, Math.round(baseMaxHp * sanctuaryBonuses.maxHpMultiplier));
+  const critMultiplierBonus =
+    sanctuaryBonuses.critMultiplierBonus +
+    (talentModifiers?.critMultiplierBonus ?? 0) +
+    artifactBonuses.critMultiplierBonus;
 
   return {
     ...player,
@@ -449,7 +496,7 @@ export function getEffectivePlayerStats(
     maxHp: scaledMaxHp,
     hp: Math.min(player.hp, scaledMaxHp),
     critChance: Math.min(1, Math.max(0, player.critChance + critChanceBonus)),
-    critMultiplier: Math.round((player.critMultiplier + sanctuaryBonuses.critMultiplierBonus) * 100) / 100,
+    critMultiplier: Math.round((player.critMultiplier + critMultiplierBonus) * 100) / 100,
     comboWindowBonusMs,
   };
 }
@@ -605,9 +652,16 @@ export function estimateWorkoutKcal(
   const pushups = (totals.PUSH_UP?.reps ?? 0) * 0.45;
   const jacks = (totals.JUMPING_JACK?.reps ?? 0) * 0.25;
   const overhead = (totals.OVERHEAD_PRESS?.reps ?? 0) * 0.4 * weightFactor;
+  const lunges = (totals.LUNGE?.reps ?? 0) * 0.42 * weightFactor;
+  const highKnees = (totals.HIGH_KNEES?.reps ?? 0) * 0.28;
+  const frontRaises = (totals.FRONT_RAISE?.reps ?? 0) * 0.34 * weightFactor;
   const plank = (totals.PLANK?.holdSeconds ?? 0) * 0.08;
   const armHold = (totals.ARM_HOLD?.holdSeconds ?? 0) * 0.09 * weightFactor;
   const wallSit = (totals.WALL_SIT?.holdSeconds ?? 0) * 0.11;
 
-  return Math.round((squats + pushups + jacks + overhead + plank + armHold + wallSit) * 10) / 10;
+  return (
+    Math.round(
+      (squats + pushups + jacks + overhead + lunges + highKnees + frontRaises + plank + armHold + wallSit) * 10
+    ) / 10
+  );
 }

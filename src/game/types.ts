@@ -236,6 +236,7 @@ export interface GardenPlotState {
   seedId: SeedId | null;
   growth: number;
   weedId: WeedId | null;
+  isMutant?: boolean;
 }
 
 export interface GardenState {
@@ -249,6 +250,28 @@ export interface GardenState {
   weedsDefeated: number;
 }
 
+export interface SanctuaryPreset {
+  id: string;
+  name: string;
+  buffs: SanctuaryMixId[];
+}
+
+export interface AlchemyOrderRequirement {
+  seedId?: SeedId;
+  trophyId?: MonsterTrophyId;
+  mixId?: SanctuaryMixId;
+  qty: number;
+}
+
+export interface AlchemyOrder {
+  dateKey: string;
+  orderIndex: number;
+  requirements: AlchemyOrderRequirement[];
+  rewardCoins: number;
+  rewardXp: number;
+  completed: boolean;
+}
+
 export interface SanctuaryState {
   labTier: SanctuaryLabTier;
   mixInventory: Record<SanctuaryMixId, number>;
@@ -257,6 +280,83 @@ export interface SanctuaryState {
   healedBuffIds: SanctuaryMixId[];
   totalCrafted: number;
   totalSynergiesActivated: number;
+  presets?: SanctuaryPreset[];
+  alchemyOrder?: AlchemyOrder | null;
+  completedOrdersCount?: number;
+}
+
+export type TalentBranch = 'MIGHT' | 'BASTION' | 'BOTANY';
+
+export type TalentId =
+  | 'MIGHT_STRIKE'
+  | 'MIGHT_CRIT_EDGE'
+  | 'MIGHT_EXECUTIONER'
+  | 'MIGHT_OVERDRIVE'
+  | 'BASTION_VITALITY'
+  | 'BASTION_AEGIS'
+  | 'BASTION_TEMPO'
+  | 'BASTION_THORNS'
+  | 'BOTANY_SCHOLAR'
+  | 'BOTANY_FORTUNE'
+  | 'BOTANY_GREEN_THUMB'
+  | 'BOTANY_ALCHEMIST';
+
+export interface PlayerTalentState {
+  ranks: Partial<Record<TalentId, number>>;
+  spentPoints: number;
+}
+
+export type ArtifactId =
+  | 'PHOENIX_BAND'
+  | 'TITAN_CORE'
+  | 'BERSERKER_SIGIL'
+  | 'VAMPIRIC_FANG'
+  | 'SHIELD_BREAKER_PRISM'
+  | 'CHRONO_HOURGLASS';
+
+export interface ArtifactState {
+  unlockedIds: ArtifactId[];
+  equippedIds: ArtifactId[];
+}
+
+export type ProgramId =
+  | 'STARTER_3D'
+  | 'HYPERTROPHY_5D'
+  | 'ENDURANCE_5D'
+  | 'TITAN_WEEK_7D';
+
+export interface ActiveProgramState {
+  programId: ProgramId;
+  currentDayIndex: number;
+  completedDays: number[];
+  startedAtDate: string;
+}
+
+export interface ProgramProgressState {
+  active: ActiveProgramState | null;
+  completedProgramIds: ProgramId[];
+  totalProgramsFinished: number;
+}
+
+export interface ExercisePersonalRecord {
+  bestBattleReps: number;
+  bestHoldSec: number;
+  bestCombo: number;
+  maxWeightKg: number;
+  bestHitDamage: number;
+}
+
+export type MutatorId =
+  | 'GLASS_CANNON'
+  | 'IRON_FOES'
+  | 'BLITZ_CLOCK'
+  | 'TOXIC_MIST'
+  | 'NO_ITEMS';
+
+export interface WeeklyChallengeState {
+  completedWeekKeys: string[];
+  bestRankByWeek: Record<string, BattleRank>;
+  totalCompleted: number;
 }
 
 export interface ExerciseCalibrationSettings {
@@ -267,6 +367,9 @@ export interface ExerciseCalibrationSettings {
   armHoldMinShoulderAngle: number;
   wallSitMaxKneeAngle: number;
   overheadPressTopAngle: number;
+  lungeBottomAngle: number;
+  highKneesLiftAngle: number;
+  frontRaisePeakAngle: number;
 }
 
 export type PoseComputeDelegate = 'GPU' | 'CPU';
@@ -298,6 +401,15 @@ export interface GameState {
   garden: GardenState;
   sanctuary: SanctuaryState;
 
+  /** v3.5 Meta Progression & Challenges */
+  talents: PlayerTalentState;
+  artifacts: ArtifactState;
+  programs: ProgramProgressState;
+  personalRecords: Record<ExerciseId, ExercisePersonalRecord>;
+  bestSingleHitDamage: number;
+  activeMutators: MutatorId[];
+  weeklyChallenge: WeeklyChallengeState;
+
   /** Settings and calibration */
   settings: {
     soundEnabled: boolean;
@@ -309,5 +421,6 @@ export interface GameState {
     exerciseConfigs: Record<string, unknown>; // exerciseId -> ExerciseConfig
     exerciseCalibration: ExerciseCalibrationSettings;
     language: 'ru' | 'en'; // UI language
+    scriptedPoseEnabled: boolean;
   };
 }

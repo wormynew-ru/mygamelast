@@ -7,6 +7,7 @@
 
 import type { ExerciseId } from './exercises';
 import type {
+  AlchemyOrder,
   ExerciseDiscipline,
   ItemRarity,
   MonsterArchetype,
@@ -14,6 +15,7 @@ import type {
   SanctuaryLabTier,
   SanctuaryMixCategory,
   SanctuaryMixId,
+  SanctuaryPreset,
   SanctuaryState,
   SanctuarySynergyId,
   SeedId,
@@ -92,12 +94,15 @@ export function getExerciseDiscipline(exerciseId?: ExerciseId): ExerciseDiscipli
     case 'SQUAT':
     case 'PUSH_UP':
     case 'OVERHEAD_PRESS':
+    case 'LUNGE':
+    case 'FRONT_RAISE':
       return 'STRENGTH';
     case 'PLANK':
     case 'ARM_HOLD':
     case 'WALL_SIT':
       return 'STATIC';
     case 'JUMPING_JACK':
+    case 'HIGH_KNEES':
       return 'CARDIO';
     default:
       return null;
@@ -642,6 +647,51 @@ export function createInitialMixInventory(): Record<SanctuaryMixId, number> {
   };
 }
 
+export const MAX_SANCTUARY_PRESETS = 3;
+
+const ALCHEMY_ORDER_TEMPLATES: readonly Omit<AlchemyOrder, 'dateKey' | 'completed'>[] = [
+  {
+    orderIndex: 0,
+    requirements: [{ seedId: 'PROTEIN_MINT', qty: 3 }, { trophyId: 'TROPHY_FIZZ_CORE', qty: 1 }],
+    rewardCoins: 95,
+    rewardXp: 70,
+  },
+  {
+    orderIndex: 1,
+    requirements: [{ seedId: 'IRON_BAMBOO', qty: 2 }, { mixId: 'MINT_ISOTONIC', qty: 1 }],
+    rewardCoins: 110,
+    rewardXp: 85,
+  },
+  {
+    orderIndex: 2,
+    requirements: [{ seedId: 'CHILI_PEPPER', qty: 2 }, { trophyId: 'TROPHY_GLAZE_SHELL', qty: 1 }],
+    rewardCoins: 135,
+    rewardXp: 100,
+  },
+  {
+    orderIndex: 3,
+    requirements: [{ mixId: 'BAMBOO_FORTIFIER', qty: 1 }, { trophyId: 'TROPHY_CAPSAICIN_DROP', qty: 1 }],
+    rewardCoins: 155,
+    rewardXp: 120,
+  },
+];
+
+export function generateDailyAlchemyOrder(dateKey: string, seedOffset = 0): AlchemyOrder {
+  let hash = seedOffset;
+  for (let i = 0; i < dateKey.length; i++) {
+    hash = (hash * 31 + dateKey.charCodeAt(i)) >>> 0;
+  }
+  const tpl = ALCHEMY_ORDER_TEMPLATES[hash % ALCHEMY_ORDER_TEMPLATES.length];
+  return {
+    dateKey,
+    orderIndex: tpl.orderIndex,
+    requirements: tpl.requirements.map((r) => ({ ...r })),
+    rewardCoins: tpl.rewardCoins,
+    rewardXp: tpl.rewardXp,
+    completed: false,
+  };
+}
+
 export function createInitialSanctuaryState(): SanctuaryState {
   return {
     labTier: 1,
@@ -651,6 +701,9 @@ export function createInitialSanctuaryState(): SanctuaryState {
     healedBuffIds: [],
     totalCrafted: 0,
     totalSynergiesActivated: 0,
+    presets: [],
+    alchemyOrder: null,
+    completedOrdersCount: 0,
   };
 }
 
@@ -696,6 +749,36 @@ export function normalizeSanctuaryState(raw?: Partial<SanctuaryState> | null): S
     }
   }
 
+  const presets: SanctuaryPreset[] = [];
+  if (Array.isArray(raw.presets)) {
+    for (const p of raw.presets.slice(0, MAX_SANCTUARY_PRESETS)) {
+      if (!p || typeof p !== 'object') continue;
+      const validBuffs = Array.isArray(p.buffs)
+        ? Array.from(new Set(p.buffs.filter(isValidMixId))).slice(0, maxSlots)
+        : [];
+      presets.push({
+        id: typeof p.id === 'string' ? p.id : `preset-${presets.length + 1}`,
+        name: typeof p.name === 'string' && p.name.trim() ? p.name.trim() : `Loadout ${presets.length + 1}`,
+        buffs: validBuffs,
+      });
+    }
+  }
+
+  const alchemyOrder: AlchemyOrder | null =
+    raw.alchemyOrder &&
+    typeof raw.alchemyOrder === 'object' &&
+    typeof raw.alchemyOrder.dateKey === 'string' &&
+    Array.isArray(raw.alchemyOrder.requirements)
+      ? {
+          dateKey: raw.alchemyOrder.dateKey,
+          orderIndex: Math.max(0, Math.floor(raw.alchemyOrder.orderIndex ?? 0)),
+          requirements: raw.alchemyOrder.requirements,
+          rewardCoins: Math.max(10, Math.floor(raw.alchemyOrder.rewardCoins ?? 95)),
+          rewardXp: Math.max(10, Math.floor(raw.alchemyOrder.rewardXp ?? 70)),
+          completed: Boolean(raw.alchemyOrder.completed),
+        }
+      : null;
+
   return {
     labTier,
     mixInventory,
@@ -704,6 +787,9 @@ export function normalizeSanctuaryState(raw?: Partial<SanctuaryState> | null): S
     healedBuffIds,
     totalCrafted: Math.max(0, Math.floor(raw.totalCrafted ?? 0)),
     totalSynergiesActivated: Math.max(0, Math.floor(raw.totalSynergiesActivated ?? 0)),
+    presets,
+    alchemyOrder,
+    completedOrdersCount: Math.max(0, Math.floor(raw.completedOrdersCount ?? 0)),
   };
 }
 

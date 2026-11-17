@@ -43,6 +43,13 @@ import {
 import { evaluateNewAchievements } from './data/achievements';
 import { createInitialGardenState } from './data/garden';
 import { createInitialSanctuaryState } from './data/sanctuary';
+import { createInitialTalentState } from './data/talents';
+import { createInitialArtifactState } from './data/artifacts';
+import {
+  createInitialPersonalRecords,
+  createInitialProgramState,
+  createInitialWeeklyChallengeState,
+} from './data/programs';
 import type { PlayerStats, MonsterStats, GameState } from './types';
 
 describe('CombatEngine', () => {
@@ -584,6 +591,9 @@ describe('CombatEngine', () => {
           ARM_HOLD: { reps: 0, holdSeconds: 20 },
           WALL_SIT: { reps: 0, holdSeconds: 10 },
           OVERHEAD_PRESS: { reps: 0, holdSeconds: 0 },
+          LUNGE: { reps: 0, holdSeconds: 0 },
+          HIGH_KNEES: { reps: 0, holdSeconds: 0 },
+          FRONT_RAISE: { reps: 0, holdSeconds: 0 },
         },
         streak: { current: 3, best: 3, lastActiveDate: '2026-11-15' },
         dailyHistory: {},
@@ -604,6 +614,13 @@ describe('CombatEngine', () => {
         endlessStats: { bestWave: 5, totalArenaWins: 5 },
         garden: createInitialGardenState(),
         sanctuary: createInitialSanctuaryState(),
+        talents: createInitialTalentState(),
+        artifacts: createInitialArtifactState(),
+        programs: createInitialProgramState(),
+        personalRecords: createInitialPersonalRecords(),
+        bestSingleHitDamage: 0,
+        activeMutators: [],
+        weeklyChallenge: createInitialWeeklyChallengeState(),
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
@@ -611,6 +628,7 @@ describe('CombatEngine', () => {
           cameraFacingMode: 'user',
           targetPoseFps: 60,
           poseDelegate: 'GPU',
+          scriptedPoseEnabled: false,
           exerciseConfigs: {},
           exerciseCalibration: {
             squatBottomAngle: 90,
@@ -620,6 +638,9 @@ describe('CombatEngine', () => {
             armHoldMinShoulderAngle: 65,
             wallSitMaxKneeAngle: 115,
             overheadPressTopAngle: 155,
+            lungeBottomAngle: 95,
+            highKneesLiftAngle: 110,
+            frontRaisePeakAngle: 80,
           },
           language: 'ru',
         },

@@ -13,9 +13,15 @@ import {
   getTotalCropCount,
   getTotalTrophyCount,
 } from '../game/data/sanctuary';
+import {
+  ARTIFACTS,
+  ARTIFACT_ORDER,
+  MAX_EQUIPPED_ARTIFACTS,
+} from '../game/data/artifacts';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
+  ARTIFACT_KEYS,
   ITEM_DESC_KEYS,
   ITEM_NAME_KEYS,
   MONSTER_TROPHY_KEYS,
@@ -38,10 +44,13 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
   const equippedItems = useGameStore((state) => state.inventory.equippedItems);
   const cropInventory = useGameStore((state) => state.garden.cropInventory);
   const trophyInventory = useGameStore((state) => state.sanctuary.trophyInventory);
+  const artifacts = useGameStore((state) => state.artifacts);
   const equipItem = useGameStore((state) => state.equipItem);
   const unequipItem = useGameStore((state) => state.unequipItem);
   const useConsumable = useGameStore((state) => state.useConsumable);
   const buyItem = useGameStore((state) => state.buyItem);
+  const equipArtifact = useGameStore((state) => state.equipArtifact);
+  const unequipArtifact = useGameStore((state) => state.unequipArtifact);
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const totalCrops = getTotalCropCount(cropInventory);
@@ -345,6 +354,96 @@ export function InventoryScreen({ onBack }: InventoryScreenProps) {
                 )}
               </>
             )}
+
+            {/* Dedicated 2-Slot Endgame Artifacts */}
+            <section className="space-y-4 pt-4 border-t border-slate-800">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-white">{t('artifacts.title')}</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{t('artifacts.subtitle')}</p>
+                </div>
+                <span className="font-numeric text-xs font-semibold text-amber-400">
+                  {t('artifacts.slotsUsed')}: {artifacts.equippedIds.length}/{MAX_EQUIPPED_ARTIFACTS}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {ARTIFACT_ORDER.map((artifactId) => {
+                  const def = ARTIFACTS[artifactId];
+                  const isUnlocked = artifacts.unlockedIds.includes(artifactId);
+                  const isEquipped = artifacts.equippedIds.includes(artifactId);
+                  const slotsFull =
+                    !isEquipped && artifacts.equippedIds.length >= MAX_EQUIPPED_ARTIFACTS;
+                  const unlockHint = def.unlockWave
+                    ? `${t('artifacts.unlockWave')} ${def.unlockWave}`
+                    : def.unlockViaWeekly
+                      ? t('artifacts.unlockWeekly')
+                      : t('artifacts.unlockCircuit');
+
+                  return (
+                    <div
+                      key={artifactId}
+                      className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                        isEquipped
+                          ? 'bg-slate-900 border-amber-500'
+                          : isUnlocked
+                            ? 'bg-slate-900 border-slate-800'
+                            : 'bg-slate-900/50 border-slate-800/70 opacity-75'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="text-2xl shrink-0" aria-hidden="true">
+                          {def.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-white text-sm truncate">
+                            {t(ARTIFACT_KEYS[artifactId].name)}
+                          </div>
+                          <div className="text-xs mt-0.5 flex items-center gap-2">
+                            <span className={`font-medium ${RARITY_TEXT_CLASS[def.rarity]}`}>
+                              {t(RARITY_KEYS[def.rarity])}
+                            </span>
+                            {!isUnlocked && (
+                              <>
+                                <span aria-hidden="true" className="text-slate-600">
+                                  ·
+                                </span>
+                                <span className="text-slate-400">{unlockHint}</span>
+                              </>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {t(ARTIFACT_KEYS[artifactId].desc)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {isUnlocked ? (
+                        <button
+                          onClick={() =>
+                            isEquipped ? unequipArtifact(artifactId) : equipArtifact(artifactId)
+                          }
+                          disabled={slotsFull}
+                          className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                            isEquipped
+                              ? 'bg-slate-800 hover:bg-slate-700 text-amber-400'
+                              : slotsFull
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          }`}
+                        >
+                          {isEquipped ? t('artifacts.unequip') : t('artifacts.equip')}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500 font-semibold shrink-0">
+                          {t('artifacts.lockedHint')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
         ) : (
           /* Shop View */

@@ -7,12 +7,17 @@ import type { CircuitId } from '../game/data/circuits';
 import type { ExerciseId } from '../game/data/exercises';
 import type { SanctuaryMixId, SanctuarySynergyId, MonsterTrophyId } from '../game/data/sanctuary';
 import type {
+  ArtifactId,
   ExerciseDiscipline,
   ItemRarity,
   MonsterArchetype,
+  MutatorId,
+  ProgramId,
   SanctuaryLabTier,
   SanctuaryMixCategory,
   SeedId,
+  TalentBranch,
+  TalentId,
   WateringCanTier,
 } from '../game/types';
 import type { TranslationKey } from '../i18n/useTranslation';
@@ -28,6 +33,9 @@ export const MONSTER_NAME_KEYS: Record<string, TranslationKey> = {
   PIZZA: 'monster.PIZZA.name',
   BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.name',
   BOSS_PIZZA_EMPEROR: 'monster.BOSS_PIZZA_EMPEROR.name',
+  BOSS_DONUT_TITAN: 'monster.BOSS_DONUT_TITAN.name',
+  BOSS_SODA_OVERLORD: 'monster.BOSS_SODA_OVERLORD.name',
+  BOSS_FRIES_EMPEROR: 'monster.BOSS_FRIES_EMPEROR.name',
   WEED_DANDELION: 'monster.WEED_DANDELION.name',
   WEED_THISTLE: 'monster.WEED_THISTLE.name',
   WEED_VINE: 'monster.WEED_VINE.name',
@@ -44,6 +52,9 @@ export const MONSTER_DESC_KEYS: Record<string, TranslationKey> = {
   PIZZA: 'monster.PIZZA.description',
   BOSS_KING_BURGER: 'monster.BOSS_KING_BURGER.description',
   BOSS_PIZZA_EMPEROR: 'monster.BOSS_PIZZA_EMPEROR.description',
+  BOSS_DONUT_TITAN: 'monster.BOSS_DONUT_TITAN.description',
+  BOSS_SODA_OVERLORD: 'monster.BOSS_SODA_OVERLORD.description',
+  BOSS_FRIES_EMPEROR: 'monster.BOSS_FRIES_EMPEROR.description',
   WEED_DANDELION: 'monster.WEED_DANDELION.description',
   WEED_THISTLE: 'monster.WEED_THISTLE.description',
   WEED_VINE: 'monster.WEED_VINE.description',
@@ -71,6 +82,9 @@ export const EXERCISE_NAME_KEYS: Record<ExerciseId, TranslationKey> = {
   ARM_HOLD: 'exercise.ARM_HOLD.name',
   WALL_SIT: 'exercise.WALL_SIT.name',
   OVERHEAD_PRESS: 'exercise.OVERHEAD_PRESS.name',
+  LUNGE: 'exercise.LUNGE.name',
+  HIGH_KNEES: 'exercise.HIGH_KNEES.name',
+  FRONT_RAISE: 'exercise.FRONT_RAISE.name',
 };
 
 export const EXERCISE_DESC_KEYS: Record<ExerciseId, TranslationKey> = {
@@ -81,6 +95,9 @@ export const EXERCISE_DESC_KEYS: Record<ExerciseId, TranslationKey> = {
   ARM_HOLD: 'exercise.ARM_HOLD.description',
   WALL_SIT: 'exercise.WALL_SIT.description',
   OVERHEAD_PRESS: 'exercise.OVERHEAD_PRESS.description',
+  LUNGE: 'exercise.LUNGE.description',
+  HIGH_KNEES: 'exercise.HIGH_KNEES.description',
+  FRONT_RAISE: 'exercise.FRONT_RAISE.description',
 };
 
 export const CIRCUIT_KEYS: Record<
@@ -220,6 +237,30 @@ export const ACHIEVEMENT_KEYS: Record<
   MASTER_ALCHEMIST: {
     name: 'achievement.MASTER_ALCHEMIST.name',
     description: 'achievement.MASTER_ALCHEMIST.description',
+  },
+  TALENT_AWAKENED: {
+    name: 'achievement.TALENT_AWAKENED.name',
+    description: 'achievement.TALENT_AWAKENED.description',
+  },
+  APEX_CHALLENGER: {
+    name: 'achievement.APEX_CHALLENGER.name',
+    description: 'achievement.APEX_CHALLENGER.description',
+  },
+  ARTIFACT_KEEPER: {
+    name: 'achievement.ARTIFACT_KEEPER.name',
+    description: 'achievement.ARTIFACT_KEEPER.description',
+  },
+  WEEKLY_CONQUEROR: {
+    name: 'achievement.WEEKLY_CONQUEROR.name',
+    description: 'achievement.WEEKLY_CONQUEROR.description',
+  },
+  PROGRAM_FINISHER: {
+    name: 'achievement.PROGRAM_FINISHER.name',
+    description: 'achievement.PROGRAM_FINISHER.description',
+  },
+  MUTANT_BOTANIST: {
+    name: 'achievement.MUTANT_BOTANIST.name',
+    description: 'achievement.MUTANT_BOTANIST.description',
   },
 };
 
@@ -384,4 +425,67 @@ export const SANCTUARY_LAB_KEYS: Record<
   1: { name: 'sanctuary.labTier1Name', perk: 'sanctuary.labTier1Perk' },
   2: { name: 'sanctuary.labTier2Name', perk: 'sanctuary.labTier2Perk' },
   3: { name: 'sanctuary.labTier3Name', perk: 'sanctuary.labTier3Perk' },
+};
+
+export const TALENT_BRANCH_KEYS: Record<TalentBranch, TranslationKey> = {
+  MIGHT: 'talents.branch.MIGHT',
+  BASTION: 'talents.branch.BASTION',
+  BOTANY: 'talents.branch.BOTANY',
+};
+
+export const TALENT_KEYS: Record<
+  TalentId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  MIGHT_STRIKE: { name: 'talents.MIGHT_STRIKE.name', desc: 'talents.MIGHT_STRIKE.desc' },
+  MIGHT_CRIT_EDGE: { name: 'talents.MIGHT_CRIT_EDGE.name', desc: 'talents.MIGHT_CRIT_EDGE.desc' },
+  MIGHT_EXECUTIONER: { name: 'talents.MIGHT_EXECUTIONER.name', desc: 'talents.MIGHT_EXECUTIONER.desc' },
+  MIGHT_OVERDRIVE: { name: 'talents.MIGHT_OVERDRIVE.name', desc: 'talents.MIGHT_OVERDRIVE.desc' },
+  BASTION_VITALITY: { name: 'talents.BASTION_VITALITY.name', desc: 'talents.BASTION_VITALITY.desc' },
+  BASTION_AEGIS: { name: 'talents.BASTION_AEGIS.name', desc: 'talents.BASTION_AEGIS.desc' },
+  BASTION_TEMPO: { name: 'talents.BASTION_TEMPO.name', desc: 'talents.BASTION_TEMPO.desc' },
+  BASTION_THORNS: { name: 'talents.BASTION_THORNS.name', desc: 'talents.BASTION_THORNS.desc' },
+  BOTANY_SCHOLAR: { name: 'talents.BOTANY_SCHOLAR.name', desc: 'talents.BOTANY_SCHOLAR.desc' },
+  BOTANY_FORTUNE: { name: 'talents.BOTANY_FORTUNE.name', desc: 'talents.BOTANY_FORTUNE.desc' },
+  BOTANY_GREEN_THUMB: { name: 'talents.BOTANY_GREEN_THUMB.name', desc: 'talents.BOTANY_GREEN_THUMB.desc' },
+  BOTANY_ALCHEMIST: { name: 'talents.BOTANY_ALCHEMIST.name', desc: 'talents.BOTANY_ALCHEMIST.desc' },
+};
+
+export const ARTIFACT_KEYS: Record<
+  ArtifactId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  PHOENIX_BAND: { name: 'artifacts.PHOENIX_BAND.name', desc: 'artifacts.PHOENIX_BAND.desc' },
+  TITAN_CORE: { name: 'artifacts.TITAN_CORE.name', desc: 'artifacts.TITAN_CORE.desc' },
+  BERSERKER_SIGIL: { name: 'artifacts.BERSERKER_SIGIL.name', desc: 'artifacts.BERSERKER_SIGIL.desc' },
+  VAMPIRIC_FANG: { name: 'artifacts.VAMPIRIC_FANG.name', desc: 'artifacts.VAMPIRIC_FANG.desc' },
+  SHIELD_BREAKER_PRISM: {
+    name: 'artifacts.SHIELD_BREAKER_PRISM.name',
+    desc: 'artifacts.SHIELD_BREAKER_PRISM.desc',
+  },
+  CHRONO_HOURGLASS: {
+    name: 'artifacts.CHRONO_HOURGLASS.name',
+    desc: 'artifacts.CHRONO_HOURGLASS.desc',
+  },
+};
+
+export const PROGRAM_KEYS: Record<
+  ProgramId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  STARTER_3D: { name: 'programs.STARTER_3D.name', desc: 'programs.STARTER_3D.desc' },
+  HYPERTROPHY_5D: { name: 'programs.HYPERTROPHY_5D.name', desc: 'programs.HYPERTROPHY_5D.desc' },
+  ENDURANCE_5D: { name: 'programs.ENDURANCE_5D.name', desc: 'programs.ENDURANCE_5D.desc' },
+  TITAN_WEEK_7D: { name: 'programs.TITAN_WEEK_7D.name', desc: 'programs.TITAN_WEEK_7D.desc' },
+};
+
+export const MUTATOR_KEYS: Record<
+  MutatorId,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  GLASS_CANNON: { name: 'mutators.GLASS_CANNON.name', desc: 'mutators.GLASS_CANNON.desc' },
+  IRON_FOES: { name: 'mutators.IRON_FOES.name', desc: 'mutators.IRON_FOES.desc' },
+  BLITZ_CLOCK: { name: 'mutators.BLITZ_CLOCK.name', desc: 'mutators.BLITZ_CLOCK.desc' },
+  TOXIC_MIST: { name: 'mutators.TOXIC_MIST.name', desc: 'mutators.TOXIC_MIST.desc' },
+  NO_ITEMS: { name: 'mutators.NO_ITEMS.name', desc: 'mutators.NO_ITEMS.desc' },
 };

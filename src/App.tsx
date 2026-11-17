@@ -14,6 +14,7 @@ import { BattleScreen } from './ui/BattleScreen';
 import { CalibrationSandbox } from './ui/CalibrationSandbox';
 import { GardenScreen } from './ui/GardenScreen';
 import { SanctuaryScreen } from './ui/SanctuaryScreen';
+import { TalentTreeScreen } from './ui/TalentTreeScreen';
 import { SettingsScreen } from './ui/SettingsScreen';
 import { OfflineIndicator } from './ui/PWAInstallButton';
 import { VoiceControlProvider, useVoiceCommandHandler } from './ui/VoiceControl';
@@ -21,8 +22,13 @@ import { useGameStore } from './game/store';
 import { createEndlessWaveMonster, createMonster, MONSTERS } from './game/data/monsters';
 import { getCircuitById, type CircuitId } from './game/data/circuits';
 import { getLevelById } from './game/data/levels';
+import {
+  getAggregatedMutatorEffects,
+  getISOWeekKey,
+  getWeeklyChallengeForWeek,
+} from './game/data/programs';
 import type { ExerciseId } from './game/data/exercises';
-import type { WeedId } from './game/types';
+import type { MonsterStats, MutatorId, WeedId } from './game/types';
 import type { BattleMode } from './session/WorkoutSession';
 import { setCurrentLanguage } from './i18n';
 
@@ -31,6 +37,7 @@ type Screen =
   | 'CAMPAIGN'
   | 'GARDEN'
   | 'SANCTUARY'
+  | 'TALENTS'
   | 'INVENTORY'
   | 'BESTIARY'
   | 'BATTLE'
@@ -47,6 +54,22 @@ interface ActiveEncounter {
   circuitId?: CircuitId;
   gardenPlotId?: number;
   weedId?: WeedId;
+  activeMutatorsOverride?: MutatorId[];
+  weeklyWeekKey?: string;
+  programDayIndex?: number;
+}
+
+function scaleEnemyForMutators(monster: MonsterStats, mutatorIds: readonly MutatorId[]): MonsterStats {
+  if (mutatorIds.length === 0) return monster;
+  const fx = getAggregatedMutatorEffects(mutatorIds);
+  const maxHp = Math.max(10, Math.round(monster.maxHp * fx.enemyHpMultiplier));
+  const attack = Math.max(1, Math.round(monster.attack * fx.enemyAttackMultiplier));
+  return {
+    ...monster,
+    hp: maxHp,
+    maxHp,
+    attack,
+  };
 }
 
 function AppContent() {
@@ -71,14 +94,21 @@ function AppContent() {
   }, [language]);
 
   const handleStartEncounter = useCallback(
-    (levelId: string, exerciseId: ExerciseId) => {
+    (levelId: string, exerciseId: ExerciseId, programDayIndex?: number) => {
       const level = getLevelById(levelId);
       const monsterTemplate = level ? MONSTERS[level.monsterId] : MONSTERS.BURGER;
-      const monster = createMonster(monsterTemplate);
+      const mutators = useGameStore.getState().activeMutators;
+      const monster = scaleEnemyForMutators(createMonster(monsterTemplate), mutators);
 
       setCurrentLevel(levelId);
       startCombat(monster);
-      setActiveEncounter({ levelId, exerciseId, mode: 'CAMPAIGN', wave: 1 });
+      setActiveEncounter({
+        levelId,
+        exerciseId,
+        mode: 'CAMPAIGN',
+        wave: 1,
+        programDayIndex,
+      });
       setCurrentScreen('BATTLE');
     },
     [setCurrentLevel, startCombat]
@@ -86,7 +116,8 @@ function AppContent() {
 
   const handleStartEndless = useCallback(
     (exerciseId: ExerciseId) => {
-      const wave1Enemy = createEndlessWaveMonster(1);
+      const mutators = useGameStore.getState().activeMutators;
+      const wave1Enemy = scaleEnemyForMutators(createEndlessWaveMonster(1), mutators);
       setCurrentLevel(null);
       startCombat(wave1Enemy);
       setActiveEncounter({ exerciseId, mode: 'ENDLESS', wave: 1 });
@@ -101,7 +132,8 @@ function AppContent() {
       if (!circuit || circuit.rooms.length === 0) return;
       const firstRoom = circuit.rooms[0];
       const monsterTemplate = MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER;
-      const monster = createMonster(monsterTemplate);
+      const mutators = useGameStore.getState().activeMutators;
+      const monster = scaleEnemyForMutators(createMonster(monsterTemplate), mutators);
 
       setCurrentLevel(null);
       startCombat(monster);
@@ -129,11 +161,30 @@ function AppContent() {
         wave: 1,
         gardenPlotId: plotId,
         weedId,
+        activeMutatorsOverride: [],
       });
       setCurrentScreen('BATTLE');
     },
     [setCurrentLevel, startCombat]
   );
+
+  const handleStartWeeklyChallenge = useCallback(() => {
+    const weekKey = getISOWeekKey();
+    const spec = getWeeklyChallengeForWeek(weekKey);
+    const bossTemplate = MONSTERS[spec.monsterId] ?? MONSTERS.BOSS_KING_BURGER;
+    const monster = scaleEnemyForMutators(createMonster(bossTemplate), spec.mutators);
+
+    setCurrentLevel(null);
+    startCombat(monster);
+    setActiveEncounter({
+      exerciseId: spec.recommendedExerciseId,
+      mode: 'WEEKLY',
+      wave: 1,
+      activeMutatorsOverride: spec.mutators,
+      weeklyWeekKey: weekKey,
+    });
+    setCurrentScreen('BATTLE');
+  }, [setCurrentLevel, startCombat]);
 
   const handleQuickBattle = useCallback(() => {
     const unlocked = useGameStore.getState().unlockedLevels;
@@ -186,6 +237,9 @@ function AppContent() {
       case 'NAV_SANCTUARY':
         setCurrentScreen('SANCTUARY');
         return true;
+      case 'NAV_TALENTS':
+        setCurrentScreen('TALENTS');
+        return true;
       case 'NAV_CALIBRATION':
         setCurrentScreen('CALIBRATION');
         return true;
@@ -225,8 +279,13 @@ function AppContent() {
             setCurrentScreen('CAMPAIGN');
           }}
           onQuickBattle={handleQuickBattle}
+          onStartWeeklyChallenge={handleStartWeeklyChallenge}
+          onStartProgramDay={(levelId, exId, dayIndex) =>
+            handleStartEncounter(levelId, exId, dayIndex)
+          }
           onGarden={() => setCurrentScreen('GARDEN')}
           onSanctuary={() => setCurrentScreen('SANCTUARY')}
+          onTalents={() => setCurrentScreen('TALENTS')}
           onInventory={() => setCurrentScreen('INVENTORY')}
           onBestiary={() => setCurrentScreen('BESTIARY')}
           onCalibration={() => setCurrentScreen('CALIBRATION')}
@@ -251,6 +310,10 @@ function AppContent() {
             setCurrentScreen('CAMPAIGN');
           }}
         />
+      )}
+
+      {currentScreen === 'TALENTS' && (
+        <TalentTreeScreen onBack={() => setCurrentScreen('MENU')} />
       )}
 
       {currentScreen === 'CAMPAIGN' && (
@@ -281,6 +344,9 @@ function AppContent() {
           circuitId={activeEncounter.circuitId}
           gardenPlotId={activeEncounter.gardenPlotId}
           weedId={activeEncounter.weedId}
+          activeMutatorsOverride={activeEncounter.activeMutatorsOverride}
+          weeklyWeekKey={activeEncounter.weeklyWeekKey}
+          programDayIndex={activeEncounter.programDayIndex}
           onExit={handleExitBattle}
           onBackToGarden={handleBackToGarden}
           onStartNextLevel={handleStartEncounter}

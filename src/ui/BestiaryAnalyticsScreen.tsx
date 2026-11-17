@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   BookOpen,
   Clock,
+  Download,
   Flame,
   BarChart3,
   Heart,
@@ -15,6 +16,7 @@ import {
   Shield,
   Sparkles,
   Swords,
+  Trophy,
 } from 'lucide-react';
 import { CIRCUITS } from '../game/data/circuits';
 import { LEVELS } from '../game/data/levels';
@@ -26,6 +28,7 @@ import {
   type AnalyticsChartMetric,
   type AnalyticsPeriod,
 } from '../game/data/analytics';
+import { exportActivityToCsv } from '../game/portability';
 import { useGameStore } from '../game/store';
 import type { MonsterArchetype } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
@@ -119,6 +122,21 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
   const streak = useGameStore((state) => state.streak);
   const bestiary = useGameStore((state) => state.bestiary);
   const endlessStats = useGameStore((state) => state.endlessStats);
+  const personalRecords = useGameStore((state) => state.personalRecords);
+  const bestSingleHitDamage = useGameStore((state) => state.bestSingleHitDamage);
+
+  const handleExportCsv = () => {
+    const csv = exportActivityToCsv(dailyHistory);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `junk-slayer-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const summary = useMemo(
     () =>
@@ -238,22 +256,33 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
               <h2 className="text-lg font-semibold text-white">{t('bestiary.analyticsTitle')}</h2>
             </div>
 
-            {/* Period Selector Tabs */}
-            <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-950 border border-slate-800 rounded-lg max-w-full">
-              {PERIOD_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setPeriod(opt.id)}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                    period === opt.id
-                      ? 'bg-emerald-500 text-slate-950'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {t(opt.labelKey)}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2.5 max-w-full">
+              {/* Period Selector Tabs */}
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-950 border border-slate-800 rounded-lg max-w-full">
+                {PERIOD_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setPeriod(opt.id)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                      period === opt.id
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {t(opt.labelKey)}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{t('bestiary.exportCsv')}</span>
+              </button>
             </div>
           </div>
 
@@ -519,8 +548,92 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
                     {workoutStats.circuitsCompleted ?? 0}
                   </div>
                 </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                  <div className="text-xs text-slate-400">{t('pr.hit')}</div>
+                  <div className="font-numeric text-xl font-bold text-rose-400 mt-0.5">
+                    {bestSingleHitDamage ?? 0}
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+
+          {/* Personal Records Table (All 10 Exercises) */}
+          <div className="space-y-3 pt-4 border-t border-slate-800">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
+                <h3 className="text-sm font-semibold text-white">{t('pr.title')}</h3>
+              </div>
+              <span className="font-numeric text-xs text-slate-400">
+                {t('pr.hit')}: <strong className="text-amber-300">{bestSingleHitDamage ?? 0}</strong>
+              </span>
+            </div>
+
+            {exerciseList.every((ex) => {
+              const rec = personalRecords[ex.id as ExerciseId];
+              return (
+                !rec ||
+                (rec.bestBattleReps === 0 &&
+                  rec.bestHoldSec === 0 &&
+                  rec.bestCombo === 0 &&
+                  rec.maxWeightKg === 0 &&
+                  rec.bestHitDamage === 0)
+              );
+            }) ? (
+              <p className="text-xs text-slate-400">{t('pr.noRecords')}</p>
+            ) : (
+              <div className="overflow-x-auto border border-slate-800 rounded-lg bg-slate-950">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400">
+                      <th className="py-2.5 px-3 font-semibold">{t('pr.exercise')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('pr.reps')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('pr.holdSec')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('pr.combo')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('pr.weight')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('pr.hit')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {exerciseList.map((ex) => {
+                      const rec = personalRecords[ex.id as ExerciseId];
+                      return (
+                        <tr key={ex.id} className="hover:bg-slate-900/60">
+                          <td className="py-2 px-3 text-slate-200 font-medium whitespace-nowrap">
+                            <span className="mr-1.5" aria-hidden="true">
+                              {ex.icon}
+                            </span>
+                            {t(EXERCISE_NAME_KEYS[ex.id])}
+                          </td>
+                          <td className="py-2 px-3 text-right font-numeric text-white">
+                            {ex.trackingType === 'hold'
+                              ? '—'
+                              : rec?.bestBattleReps
+                                ? rec.bestBattleReps
+                                : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-numeric text-emerald-400">
+                            {ex.trackingType === 'hold' && rec?.bestHoldSec
+                              ? `${rec.bestHoldSec}s`
+                              : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-numeric text-amber-300">
+                            {rec?.bestCombo ? `×${rec.bestCombo}` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-numeric text-sky-300">
+                            {rec?.maxWeightKg ? `${rec.maxWeightKg}` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-numeric font-bold text-rose-300">
+                            {rec?.bestHitDamage ? rec.bestHitDamage : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </section>
 

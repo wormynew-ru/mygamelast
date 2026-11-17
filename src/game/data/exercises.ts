@@ -10,7 +10,10 @@ export type ExerciseId =
   | 'JUMPING_JACK'
   | 'ARM_HOLD'
   | 'WALL_SIT'
-  | 'OVERHEAD_PRESS';
+  | 'OVERHEAD_PRESS'
+  | 'LUNGE'
+  | 'HIGH_KNEES'
+  | 'FRONT_RAISE';
 
 export type ExerciseTrackingType = 'rep' | 'hold';
 
@@ -124,5 +127,41 @@ export const EXERCISES: Record<ExerciseId, ExerciseDefinition> = {
     supportsDumbbellWeight: true,
     difficulty: 'MEDIUM',
     icon: '🏋️',
+  },
+
+  LUNGE: {
+    id: 'LUNGE',
+    name: 'Lunge',
+    description: 'Single-leg split squat. Heavy single-target strike, supports dumbbells.',
+    trackingType: 'rep',
+    baseDamage: 18,
+    damageMultiplier: 1.25,
+    supportsDumbbellWeight: true,
+    difficulty: 'MEDIUM',
+    icon: '🏃',
+  },
+
+  HIGH_KNEES: {
+    id: 'HIGH_KNEES',
+    name: 'High Knees',
+    description: 'Rapid alternating cardio knee drives. Builds combos quickly.',
+    trackingType: 'rep',
+    baseDamage: 9,
+    damageMultiplier: 0.85,
+    supportsDumbbellWeight: false,
+    difficulty: 'EASY',
+    icon: '👟',
+  },
+
+  FRONT_RAISE: {
+    id: 'FRONT_RAISE',
+    name: 'Front Raise',
+    description: 'Controlled anterior shoulder raise. Works bodyweight or with dumbbells.',
+    trackingType: 'rep',
+    baseDamage: 14,
+    damageMultiplier: 1.15,
+    supportsDumbbellWeight: true,
+    difficulty: 'MEDIUM',
+    icon: '🙌',
   },
 };

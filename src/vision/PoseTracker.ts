@@ -18,6 +18,7 @@ import {
   type NormalizedLandmark,
 } from '@mediapipe/tasks-vision';
 import { PoseLandmark } from './types';
+import type { ScriptedPoseGenerator } from './ScriptedPoseSource';
 
 const POSE_CONNECTIONS: ReadonlyArray<readonly [PoseLandmark, PoseLandmark]> = [
   // Face
@@ -108,6 +109,9 @@ export interface ModelConfig {
 
   /** Target FPS for MediaPipe inference (default: 30) */
   targetInferenceFPS?: number;
+
+  /** Optional deterministic scripted pose generator (bypasses camera/MediaPipe) */
+  scriptedPoseGenerator?: ScriptedPoseGenerator | null;
 }
 
 /**
@@ -160,6 +164,7 @@ const DEFAULT_MODEL_CONFIG: Required<ModelConfig> = {
   minDetectionConfidence: 0.5,
   minTrackingConfidence: 0.5,
   targetInferenceFPS: 60, // Up to 60 FPS on desktop GPU; adaptive + new-frame guard prevents waste
+  scriptedPoseGenerator: null,
 };
 
 /**
@@ -207,6 +212,7 @@ export class PoseTracker {
 
   private poseCallback: PoseCallback | null = null;
   private statusCallback: StatusCallback | null = null;
+  private scriptedPoseGenerator: ScriptedPoseGenerator | null = null;
 
   constructor(
     cameraConfig: Partial<CameraConfig> = {},
@@ -218,12 +224,33 @@ export class PoseTracker {
     // Calculate inference interval from target FPS (e.g., 30 FPS = 33.33ms)
     this.inferenceInterval = 1000 / this.modelConfig.targetInferenceFPS;
     this.adaptiveInferenceInterval = this.inferenceInterval;
+    this.scriptedPoseGenerator = this.modelConfig.scriptedPoseGenerator ?? null;
   }
 
   /**
-   * Initialize MediaPipe PoseLandmarker.
+   * Enable or switch deterministic scripted pose mode (pass null to return to camera mode).
+   */
+  setScriptedPoseGenerator(generator: ScriptedPoseGenerator | null): void {
+    this.scriptedPoseGenerator = generator;
+  }
+
+  /**
+   * Returns true if PoseTracker is currently driving poses from a scripted source.
+   */
+  isScriptedMode(): boolean {
+    return this.scriptedPoseGenerator !== null;
+  }
+
+  /**
+   * Initialize MediaPipe PoseLandmarker (or short-circuit cleanly in scripted mode).
    */
   async loadModel(): Promise<void> {
+    if (this.scriptedPoseGenerator) {
+      this.activeDelegate = 'CPU';
+      this.fallbackUsed = false;
+      this.setStatus('READY');
+      return;
+    }
     if (this.poseLandmarker) {
       return; // Already loaded
     }
@@ -339,6 +366,12 @@ export class PoseTracker {
   async startCamera(videoElement: HTMLVideoElement): Promise<void> {
     const token = this.lifecycleToken;
     this.videoElement = videoElement;
+
+    if (this.scriptedPoseGenerator) {
+      this.setStatus('READY');
+      return;
+    }
+
     this.setStatus('REQUESTING_CAMERA');
 
     try {
@@ -497,7 +530,8 @@ export class PoseTracker {
       return; // Already running
     }
 
-    if (!this.poseLandmarker || !this.videoElement) {
+    const isScripted = this.scriptedPoseGenerator !== null;
+    if (!isScripted && (!this.poseLandmarker || !this.videoElement)) {
       throw new Error('Call loadModel() and startCamera() first');
     }
 
@@ -507,9 +541,10 @@ export class PoseTracker {
       this.canvasCtx = canvasElement.getContext('2d', { alpha: false, desynchronized: true });
 
       if (this.canvasCtx) {
-        // Match canvas size to video
-        this.canvasElement.width = this.videoElement.videoWidth || this.cameraConfig.width;
-        this.canvasElement.height = this.videoElement.videoHeight || this.cameraConfig.height;
+        this.canvasElement.width =
+          this.videoElement?.videoWidth || this.cameraConfig.width;
+        this.canvasElement.height =
+          this.videoElement?.videoHeight || this.cameraConfig.height;
       }
     }
 
@@ -646,7 +681,54 @@ export class PoseTracker {
    * Canvas rendering: 60 FPS, MediaPipe inference: throttled to targetInferenceFPS.
    */
   private detectLoop = (): void => {
-    if (!this.isRunning || !this.videoElement || !this.poseLandmarker) {
+    if (!this.isRunning) {
+      return;
+    }
+
+    const now = performance.now();
+
+    if (this.scriptedPoseGenerator) {
+      const timeSinceLastInference = now - this.lastInferenceTime;
+      const budgetWithJitterMs = Math.max(0, this.inferenceInterval - 2);
+      const shouldStep = this.lastInferenceTime === 0 || timeSinceLastInference >= budgetWithJitterMs;
+
+      if (shouldStep) {
+        const frame = this.scriptedPoseGenerator(now);
+        this.lastLandmarks = frame.landmarks;
+        this.lastWorldLandmarks = frame.worldLandmarks;
+        this.lastInferenceTime = now;
+
+        if (this.canvasCtx && this.canvasElement) {
+          const ctx = this.canvasCtx;
+          const cw = this.canvasElement.width;
+          const ch = this.canvasElement.height;
+          ctx.fillStyle = '#090f1d';
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let gx = 40; gx < cw; gx += 40) {
+            ctx.moveTo(gx, 0);
+            ctx.lineTo(gx, ch);
+          }
+          for (let gy = 40; gy < ch; gy += 40) {
+            ctx.moveTo(0, gy);
+            ctx.lineTo(cw, gy);
+          }
+          ctx.stroke();
+          this.drawSkeleton(frame.landmarks);
+        }
+
+        if (this.poseCallback) {
+          this.poseCallback(frame.landmarks, now, frame.worldLandmarks);
+        }
+      }
+
+      this.animationFrameId = requestAnimationFrame(this.detectLoop);
+      return;
+    }
+
+    if (!this.videoElement || !this.poseLandmarker) {
       return;
     }
 
@@ -667,8 +749,6 @@ export class PoseTracker {
       this.canvasElement.width = video.videoWidth;
       this.canvasElement.height = video.videoHeight;
     }
-
-    const now = performance.now();
 
     // Adaptive FPS throttling + duplicate frame guard:
     // - 2ms jitter tolerance avoids dropping 60Hz vsync to 30Hz

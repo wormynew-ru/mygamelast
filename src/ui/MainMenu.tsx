@@ -16,9 +16,20 @@ import {
   CalendarCheck,
   Sprout,
   FlaskConical,
+  Sparkles,
+  Calendar,
 } from 'lucide-react';
 import { isPlotReadyToHarvest } from '../game/data/garden';
 import { getActiveSanctuarySynergies, getTotalMixCount } from '../game/data/sanctuary';
+import { getAvailableTalentPoints } from '../game/data/talents';
+import {
+  PROGRAM_MAP,
+  TRAINING_PROGRAMS,
+  getISOWeekKey,
+  getWeeklyChallengeForWeek,
+} from '../game/data/programs';
+import { MONSTERS } from '../game/data/monsters';
+import type { ExerciseId } from '../game/data/exercises';
 import { useGameStore, selectEffectivePlayerStats } from '../game/store';
 import { ACHIEVEMENTS } from '../game/data/achievements';
 import {
@@ -31,13 +42,22 @@ import {
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import { PWAInstallButton } from './PWAInstallButton';
 import { VoiceToggleButton } from './VoiceControl';
-import { ACHIEVEMENT_KEYS } from './gameKeys';
+import {
+  ACHIEVEMENT_KEYS,
+  EXERCISE_NAME_KEYS,
+  MONSTER_NAME_KEYS,
+  MUTATOR_KEYS,
+  PROGRAM_KEYS,
+} from './gameKeys';
 
 interface MainMenuProps {
   onOpenCampaign: () => void;
   onQuickBattle: () => void;
+  onStartWeeklyChallenge: () => void;
+  onStartProgramDay: (levelId: string, exerciseId: ExerciseId, dayIndex: number) => void;
   onGarden: () => void;
   onSanctuary: () => void;
+  onTalents: () => void;
   onInventory: () => void;
   onBestiary: () => void;
   onCalibration: () => void;
@@ -53,8 +73,11 @@ const QUEST_TITLE_KEYS: Record<DailyQuestMetric, TranslationKey> = {
 export function MainMenu({
   onOpenCampaign,
   onQuickBattle,
+  onStartWeeklyChallenge,
+  onStartProgramDay,
   onGarden,
   onSanctuary,
+  onTalents,
   onInventory,
   onBestiary,
   onCalibration,
@@ -74,6 +97,11 @@ export function MainMenu({
   const endlessStats = useGameStore((state) => state.endlessStats);
   const garden = useGameStore((state) => state.garden);
   const sanctuary = useGameStore((state) => state.sanctuary);
+  const talents = useGameStore((state) => state.talents);
+  const programs = useGameStore((state) => state.programs);
+  const weeklyChallenge = useGameStore((state) => state.weeklyChallenge);
+  const startProgram = useGameStore((state) => state.startProgram);
+  const abandonProgram = useGameStore((state) => state.abandonProgram);
   const claimDailyQuest = useGameStore((state) => state.claimDailyQuest);
   const syncAchievements = useGameStore((state) => state.syncAchievements);
 
@@ -85,6 +113,13 @@ export function MainMenu({
     .filter((p) => p.weedId !== null).length;
   const totalMixes = getTotalMixCount(sanctuary.mixInventory);
   const activeSynergies = getActiveSanctuarySynergies(sanctuary.activeBuffs);
+  const availableTalentPoints = getAvailableTalentPoints(basePlayer.level, talents);
+
+  const weekKey = getISOWeekKey();
+  const weeklySpec = getWeeklyChallengeForWeek(weekKey);
+  const weeklyBoss = MONSTERS[weeklySpec.monsterId] ?? MONSTERS.BOSS_KING_BURGER;
+  const weeklyCompletedThisWeek = weeklyChallenge.completedWeekKeys.includes(weekKey);
+  const weeklyBestRank = weeklyChallenge.bestRankByWeek[weekKey];
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const attackBonus = effectivePlayer.attack - basePlayer.attack;
@@ -141,6 +176,12 @@ export function MainMenu({
               className="hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
             >
               {t('menu.sanctuary')}
+            </button>
+            <button
+              onClick={onTalents}
+              className="hover:text-amber-300 transition-colors whitespace-nowrap shrink-0"
+            >
+              {t('menu.talents')}
             </button>
             <button
               onClick={onInventory}
@@ -362,6 +403,31 @@ export function MainMenu({
             </button>
 
             <button
+              onClick={onTalents}
+              className={`flex-1 bg-slate-900 hover:bg-slate-800/80 border rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                availableTalentPoints > 0 ? 'border-amber-500/60' : 'border-slate-800'
+              }`}
+            >
+              <div>
+                <div className="text-base font-semibold text-white">{t('menu.talents')}</div>
+                <div className="text-xs text-slate-400 mt-0.5 font-numeric">
+                  {availableTalentPoints > 0 ? (
+                    <span className="text-amber-400 font-semibold">
+                      {t('talents.availablePoints')}: {availableTalentPoints}
+                    </span>
+                  ) : (
+                    t('menu.talentsDesc')
+                  )}
+                </div>
+              </div>
+              <Sparkles
+                className={`w-5 h-5 shrink-0 ${
+                  availableTalentPoints > 0 ? 'text-amber-400' : 'text-slate-400'
+                }`}
+              />
+            </button>
+
+            <button
               onClick={onInventory}
               className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-4 text-left transition-colors flex items-center justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
@@ -407,6 +473,199 @@ export function MainMenu({
               </div>
               <Settings className="w-5 h-5 text-slate-400 shrink-0" />
             </button>
+          </section>
+        </div>
+
+        {/* Weekly Challenge & Training Programs Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          {/* Weekly Challenge */}
+          <section className="lg:col-span-5 bg-slate-900 border border-amber-500/40 rounded-xl p-6 flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Swords className="w-4 h-4 text-amber-400" />
+                  <h2 className="text-base font-semibold text-white">{t('weekly.title')}</h2>
+                </div>
+                <span className="font-numeric text-xs font-semibold text-amber-400">
+                  {t('weekly.weekLabel')} {weeklySpec.weekKey}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3.5 bg-slate-950 border border-slate-800 rounded-lg p-3.5">
+                <span className="text-3xl shrink-0" aria-hidden="true">
+                  {weeklyBoss.sprite}
+                </span>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-sm font-bold text-white truncate">
+                    {MONSTER_NAME_KEYS[weeklySpec.monsterId]
+                      ? t(MONSTER_NAME_KEYS[weeklySpec.monsterId])
+                      : weeklyBoss.name}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {t('weekly.exerciseLabel')}:{' '}
+                    <span className="text-emerald-400 font-medium">
+                      {t(EXERCISE_NAME_KEYS[weeklySpec.recommendedExerciseId])}
+                    </span>
+                  </div>
+                  <div className="text-xs text-rose-300">
+                    {t('weekly.mutatorsLabel')}:{' '}
+                    {weeklySpec.mutators.map((m) => t(MUTATOR_KEYS[m].name)).join(' · ')}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-400">
+                {weeklyCompletedThisWeek ? t('weekly.repeatRewardNote') : t('weekly.firstRewardNote')}
+              </p>
+
+              {weeklyCompletedThisWeek && (
+                <div className="text-xs font-numeric text-emerald-400 font-semibold">
+                  {t('weekly.completed')}
+                  {weeklyBestRank ? ` · ${t('weekly.bestRank')}: ${weeklyBestRank}` : ''}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={onStartWeeklyChallenge}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Swords className="w-4 h-4" />
+              <span>{t('weekly.launch')}</span>
+            </button>
+          </section>
+
+          {/* 3-7 Day Training Programs */}
+          <section className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-sky-400" />
+                <h2 className="text-base font-semibold text-white">{t('programs.title')}</h2>
+              </div>
+              <span className="font-numeric text-xs text-slate-400">
+                {t('programs.completedCount')}:{' '}
+                <span className="text-white font-semibold">{programs.totalProgramsFinished}</span>
+              </span>
+            </div>
+
+            {programs.active && PROGRAM_MAP[programs.active.programId] ? (
+              (() => {
+                const activeState = programs.active;
+                const def = PROGRAM_MAP[activeState.programId];
+                const dayPlan = def.days[activeState.currentDayIndex] ?? def.days[0];
+                return (
+                  <div className="space-y-4 flex-1 flex flex-col justify-between">
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <div className="text-sm font-bold text-white">
+                          {def.icon} {t(PROGRAM_KEYS[def.id].name)}
+                        </div>
+                        <span className="font-numeric text-xs text-sky-400 font-semibold">
+                          {t('programs.dayLabel')} {activeState.currentDayIndex + 1}/{def.durationDays}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1.5">
+                        {def.days.map((day, idx) => {
+                          const done = activeState.completedDays.includes(idx);
+                          const isCurrent = idx === activeState.currentDayIndex;
+                          return (
+                            <div
+                              key={day.dayNumber}
+                              className={`text-center py-1.5 rounded text-xs font-numeric font-semibold border ${
+                                done
+                                  ? 'bg-emerald-950/60 border-emerald-600 text-emerald-300'
+                                  : isCurrent
+                                    ? 'bg-sky-950/60 border-sky-500 text-sky-300'
+                                    : 'bg-slate-900 border-slate-800 text-slate-500'
+                              }`}
+                            >
+                              {day.dayNumber}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+                        <span>
+                          {t(EXERCISE_NAME_KEYS[dayPlan.exerciseId])} ·{' '}
+                          <span className="text-slate-400">{dayPlan.levelId}</span>
+                        </span>
+                        <span className="font-numeric text-amber-400">
+                          +{dayPlan.bonusCoins} {t('stats.coins')} · +{dayPlan.bonusXp} XP
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() =>
+                          onStartProgramDay(
+                            dayPlan.levelId,
+                            dayPlan.exerciseId,
+                            activeState.currentDayIndex
+                          )
+                        }
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>
+                          {t('programs.launchToday')} {activeState.currentDayIndex + 1}
+                        </span>
+                      </button>
+                      <button
+                        onClick={abandonProgram}
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        {t('programs.abandon')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">{t('programs.chooseHint')}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {TRAINING_PROGRAMS.map((prog) => {
+                    const isFinishedBefore = programs.completedProgramIds.includes(prog.id);
+                    return (
+                      <div
+                        key={prog.id}
+                        className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between gap-2.5"
+                      >
+                        <div>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="text-sm font-semibold text-white">
+                              {prog.icon} {t(PROGRAM_KEYS[prog.id].name)}
+                            </span>
+                            {isFinishedBefore && (
+                              <span className="text-[11px] font-semibold text-emerald-400 shrink-0">
+                                {t('programs.doneTag')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {t(PROGRAM_KEYS[prog.id].desc)}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="font-numeric text-[11px] text-amber-400">
+                            +{prog.completionCoins} {t('stats.coins')} · +{prog.completionXp} XP
+                          </span>
+                          <button
+                            onClick={() => startProgram(prog.id)}
+                            className="px-3 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs rounded-md transition-colors whitespace-nowrap"
+                          >
+                            {t('programs.start')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         </div>
 

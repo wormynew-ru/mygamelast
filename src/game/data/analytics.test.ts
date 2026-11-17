@@ -13,6 +13,9 @@ function createExerciseTotals(): Record<ExerciseId, ExerciseTotals> {
     ARM_HOLD: { reps: 0, holdSeconds: 0 },
     WALL_SIT: { reps: 0, holdSeconds: 0 },
     OVERHEAD_PRESS: { reps: 0, holdSeconds: 0 },
+    LUNGE: { reps: 0, holdSeconds: 0 },
+    HIGH_KNEES: { reps: 0, holdSeconds: 0 },
+    FRONT_RAISE: { reps: 0, holdSeconds: 0 },
   };
 }
 

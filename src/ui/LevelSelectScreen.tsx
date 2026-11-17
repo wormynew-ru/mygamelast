@@ -20,6 +20,12 @@ import { MONSTERS } from '../game/data/monsters';
 import { EXERCISES, type ExerciseId } from '../game/data/exercises';
 import { CIRCUITS, type CircuitId } from '../game/data/circuits';
 import { SANCTUARY_MIX_MAP, SANCTUARY_SYNERGY_MAP, getActiveSanctuarySynergies } from '../game/data/sanctuary';
+import {
+  MAX_ACTIVE_MUTATORS,
+  MUTATOR_ORDER,
+  MUTATORS,
+  getAggregatedMutatorEffects,
+} from '../game/data/programs';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
@@ -29,6 +35,7 @@ import {
   EXERCISE_NAME_KEYS,
   MONSTER_DESC_KEYS,
   MONSTER_NAME_KEYS,
+  MUTATOR_KEYS,
   SANCTUARY_MIX_KEYS,
   SANCTUARY_SYNERGY_KEYS,
 } from './gameKeys';
@@ -60,7 +67,11 @@ export function LevelSelectScreen({
   const loadout = useGameStore((state) => state.loadout);
   const activeBuffs = useGameStore((state) => state.sanctuary.activeBuffs);
   const activeSynergies = getActiveSanctuarySynergies(activeBuffs);
+  const activeMutators = useGameStore((state) => state.activeMutators);
+  const toggleMutator = useGameStore((state) => state.toggleMutator);
+  const clearMutators = useGameStore((state) => state.clearMutators);
   const setLoadout = useGameStore((state) => state.setLoadout);
+  const mutatorEffects = getAggregatedMutatorEffects(activeMutators);
 
   const defaultLevel =
     LEVELS.find((lvl) => unlockedLevels.includes(lvl.id) && !completedLevels.includes(lvl.id)) ??
@@ -296,6 +307,71 @@ export function LevelSelectScreen({
                 </button>
               </>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Run Mutators Selector Bar */}
+      <div className="border-b border-slate-800/80 bg-slate-950/60">
+        <div className="max-w-5xl mx-auto px-6 py-3 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="font-semibold text-white">{t('mutators.title')}</span>
+              <span className="text-slate-400">{t('mutators.subtitle')}</span>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-numeric">
+              <span className="text-slate-400">
+                {t('mutators.activeCount')}:{' '}
+                <span className="font-semibold text-white">
+                  {activeMutators.length}/{MAX_ACTIVE_MUTATORS}
+                </span>
+              </span>
+              {activeMutators.length > 0 && (
+                <>
+                  <span className="text-amber-400 font-semibold">
+                    ×{mutatorEffects.xpMultiplier.toFixed(2)} XP · ×
+                    {mutatorEffects.coinMultiplier.toFixed(2)} {t('stats.coins')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={clearMutators}
+                    className="text-slate-400 hover:text-white underline transition-colors"
+                  >
+                    {t('mutators.clear')}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+            {MUTATOR_ORDER.map((id) => {
+              const def = MUTATORS[id];
+              const isArmed = activeMutators.includes(id);
+              const isCapped = !isArmed && activeMutators.length >= MAX_ACTIVE_MUTATORS;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => toggleMutator(id)}
+                  disabled={isCapped}
+                  className={`p-2.5 rounded-lg border text-left transition-colors ${
+                    isArmed
+                      ? 'bg-rose-950/40 border-rose-500/80 text-white'
+                      : isCapped
+                        ? 'bg-slate-900/40 border-slate-800/60 text-slate-500 opacity-50 cursor-not-allowed'
+                        : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-semibold text-white">
+                    {def.icon} {t(MUTATOR_KEYS[id].name)}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                    {t(MUTATOR_KEYS[id].desc)}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

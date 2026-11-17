@@ -4,12 +4,14 @@
  * combine 2-3 Lab slots for Combo Synergies, recover HP, and arm/swap pre-battle buffs.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowUpCircle,
+  Bookmark,
   Check,
+  ClipboardCheck,
   Coins,
   FlaskConical,
   Heart,
@@ -24,6 +26,7 @@ import {
 } from 'lucide-react';
 import { SEEDS, SEED_ORDER } from '../game/data/garden';
 import {
+  MAX_SANCTUARY_PRESETS,
   MONSTER_TROPHIES,
   MONSTER_TROPHY_ORDER,
   SANCTUARY_LAB_TIERS,
@@ -89,6 +92,14 @@ export function SanctuaryScreen({
   const activateMixBuff = useGameStore((state) => state.activateMixBuff);
   const deactivateMixBuff = useGameStore((state) => state.deactivateMixBuff);
   const upgradeSanctuaryLab = useGameStore((state) => state.upgradeSanctuaryLab);
+  const saveSanctuaryPreset = useGameStore((state) => state.saveSanctuaryPreset);
+  const applySanctuaryPreset = useGameStore((state) => state.applySanctuaryPreset);
+  const ensureDailyAlchemyOrder = useGameStore((state) => state.ensureDailyAlchemyOrder);
+  const completeAlchemyOrder = useGameStore((state) => state.completeAlchemyOrder);
+
+  useEffect(() => {
+    ensureDailyAlchemyOrder();
+  }, [ensureDailyAlchemyOrder]);
 
   const trophyInventory = sanctuary.trophyInventory ?? {
     TROPHY_FIZZ_CORE: 0,
@@ -96,6 +107,19 @@ export function SanctuaryScreen({
     TROPHY_CAPSAICIN_DROP: 0,
     TROPHY_CROWN_SPICE: 0,
   };
+  const presets = sanctuary.presets ?? [];
+  const alchemyOrder = sanctuary.alchemyOrder ?? null;
+  const completedOrdersCount = sanctuary.completedOrdersCount ?? 0;
+
+  const canFulfillOrder = useMemo(() => {
+    if (!alchemyOrder || alchemyOrder.completed) return false;
+    return alchemyOrder.requirements.every((req) => {
+      if (req.seedId) return (cropInventory[req.seedId] ?? 0) >= req.qty;
+      if (req.trophyId) return (trophyInventory[req.trophyId] ?? 0) >= req.qty;
+      if (req.mixId) return (sanctuary.mixInventory[req.mixId] ?? 0) >= req.qty;
+      return true;
+    });
+  }, [alchemyOrder, cropInventory, trophyInventory, sanctuary.mixInventory]);
 
   const effectivePlayer = selectEffectivePlayerStats(useGameStore.getState());
   const currentLab = SANCTUARY_LAB_TIERS[sanctuary.labTier];
@@ -653,6 +677,203 @@ export function SanctuaryScreen({
               <div className="text-center text-xs font-semibold text-emerald-400 py-2">
                 {t('garden.maxTier')}
               </div>
+            )}
+          </section>
+        </div>
+
+        {/* Mix Loadout Presets & Daily Alchemy Order */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          {/* 3-Slot Mix Loadout Presets */}
+          <section className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Bookmark className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <h2 className="text-base font-semibold text-white">
+                    {t('sanctuary.presetsTitle')}
+                  </h2>
+                </div>
+                <span className="font-numeric text-xs text-slate-400">
+                  {presets.filter((p) => p.buffs.length > 0).length} / {MAX_SANCTUARY_PRESETS}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">{t('sanctuary.presetsHint')}</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {Array.from({ length: MAX_SANCTUARY_PRESETS }, (_, slotIdx) => {
+                const preset = presets[slotIdx];
+                const hasBuffs = Boolean(preset && preset.buffs.length > 0);
+                return (
+                  <div
+                    key={slotIdx}
+                    className={`rounded-lg border p-3.5 flex flex-col justify-between gap-3 ${
+                      hasBuffs
+                        ? 'bg-slate-950 border-slate-700'
+                        : 'bg-slate-950/60 border-dashed border-slate-800'
+                    }`}
+                  >
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-white font-numeric">
+                          #{slotIdx + 1}
+                        </span>
+                        {hasBuffs && preset && (
+                          <span className="text-[11px] font-numeric text-emerald-400">
+                            {preset.buffs.length} {t('sanctuary.slotsLabel')}
+                          </span>
+                        )}
+                      </div>
+
+                      {hasBuffs && preset ? (
+                        <div className="space-y-1">
+                          {preset.buffs.map((mixId) => {
+                            const bp = SANCTUARY_MIX_MAP[mixId];
+                            if (!bp) return null;
+                            return (
+                              <div
+                                key={mixId}
+                                className="flex items-center gap-1.5 text-[11px] text-slate-200 truncate"
+                              >
+                                <span aria-hidden="true">{bp.icon}</span>
+                                <span className="truncate">{t(SANCTUARY_MIX_KEYS[mixId].name)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-500 py-2">
+                          {t('sanctuary.emptyPreset')}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (applySanctuaryPreset(slotIdx)) {
+                            showToast(`${t('sanctuary.presetAppliedToast')} #${slotIdx + 1}`);
+                          }
+                        }}
+                        disabled={!hasBuffs}
+                        className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded-md transition-colors whitespace-nowrap"
+                      >
+                        {t('sanctuary.applyPreset')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (saveSanctuaryPreset(slotIdx)) {
+                            showToast(`${t('sanctuary.presetSavedToast')} #${slotIdx + 1}`);
+                          }
+                        }}
+                        disabled={sanctuary.activeBuffs.length === 0}
+                        className="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap"
+                      >
+                        {t('sanctuary.savePreset')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Daily Alchemy Order */}
+          <section className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                  <h2 className="text-base font-semibold text-white">
+                    {t('sanctuary.orderTitle')}
+                  </h2>
+                </div>
+                <span className="font-numeric text-xs text-slate-400">
+                  {t('sanctuary.orderTotal')}: <strong className="text-amber-400">{completedOrdersCount}</strong>
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-400">{t('sanctuary.orderHint')}</p>
+
+              {alchemyOrder && (
+                <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                  {alchemyOrder.requirements.map((req, idx) => {
+                    let icon = '🌿';
+                    let label = '';
+                    let have = 0;
+
+                    if (req.seedId) {
+                      icon = SEEDS[req.seedId].icon;
+                      label = t(SEED_KEYS[req.seedId].name);
+                      have = cropInventory[req.seedId] ?? 0;
+                    } else if (req.trophyId) {
+                      icon = MONSTER_TROPHIES[req.trophyId].icon;
+                      label = t(MONSTER_TROPHY_KEYS[req.trophyId].name);
+                      have = trophyInventory[req.trophyId] ?? 0;
+                    } else if (req.mixId) {
+                      icon = SANCTUARY_MIX_MAP[req.mixId].icon;
+                      label = t(SANCTUARY_MIX_KEYS[req.mixId].name);
+                      have = sanctuary.mixInventory[req.mixId] ?? 0;
+                    }
+
+                    const enough = have >= req.qty;
+                    return (
+                      <div
+                        key={idx}
+                        className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-2 text-xs ${
+                          enough
+                            ? 'bg-slate-950 border-emerald-500/40 text-emerald-300'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-2 min-w-0">
+                          <span aria-hidden="true">{icon}</span>
+                          <span className="truncate font-medium">{label}</span>
+                        </span>
+                        <span className="font-numeric font-bold shrink-0">
+                          {Math.min(have, req.qty)}/{req.qty}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex items-center justify-between text-xs font-numeric text-amber-300 pt-1">
+                    <span>{t('bestiary.statReward')}:</span>
+                    <span className="font-bold">
+                      +{alchemyOrder.rewardCoins} {t('stats.coins')} · +{alchemyOrder.rewardXp} XP
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {alchemyOrder?.completed ? (
+              <div className="w-full py-2.5 px-4 bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 text-xs font-bold rounded-lg text-center inline-flex items-center justify-center gap-1.5">
+                <Check className="w-4 h-4" />
+                <span>{t('sanctuary.orderCompleted')}</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  const res = completeAlchemyOrder();
+                  if (res) {
+                    const parts = [
+                      t('sanctuary.orderCompletedToast'),
+                      `+${res.rewardCoins} ${t('stats.coins')}`,
+                      `+${res.rewardXp} XP`,
+                    ];
+                    if (res.leveledUp) parts.push(t('battle.levelUp'));
+                    showToast(parts.join(' · '));
+                  }
+                }}
+                disabled={!canFulfillOrder}
+                className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+              >
+                {t('sanctuary.orderSubmit')}
+              </button>
             )}
           </section>
         </div>

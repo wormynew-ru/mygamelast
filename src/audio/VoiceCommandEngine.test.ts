@@ -95,6 +95,28 @@ describe('VoiceCommandEngine parser', () => {
     expect(parseVoiceCommand('убежище')?.command).toEqual({ type: 'NAV_SANCTUARY' });
     expect(parseVoiceCommand('фито лаборатория')?.command).toEqual({ type: 'NAV_SANCTUARY' });
     expect(parseVoiceCommand('sanctuary')?.command).toEqual({ type: 'NAV_SANCTUARY' });
+    expect(parseVoiceCommand('таланты')?.command).toEqual({ type: 'NAV_TALENTS' });
+    expect(parseVoiceCommand('talent tree')?.command).toEqual({ type: 'NAV_TALENTS' });
+    expect(parseVoiceCommand('выпады')?.command).toEqual({
+      type: 'SELECT_EXERCISE',
+      exerciseId: 'LUNGE',
+    });
+    expect(parseVoiceCommand('lunges')?.command).toEqual({
+      type: 'SELECT_EXERCISE',
+      exerciseId: 'LUNGE',
+    });
+    expect(parseVoiceCommand('высокое поднимание бедра')?.command).toEqual({
+      type: 'SELECT_EXERCISE',
+      exerciseId: 'HIGH_KNEES',
+    });
+    expect(parseVoiceCommand('подъем рук вперед')?.command).toEqual({
+      type: 'SELECT_EXERCISE',
+      exerciseId: 'FRONT_RAISE',
+    });
+    expect(parseVoiceCommand('front raises')?.command).toEqual({
+      type: 'SELECT_EXERCISE',
+      exerciseId: 'FRONT_RAISE',
+    });
     expect(parseVoiceCommand('полить все')?.command).toEqual({ type: 'GARDEN_WATER' });
     expect(parseVoiceCommand('собрать урожай')?.command).toEqual({ type: 'GARDEN_HARVEST' });
     expect(parseVoiceCommand('битва с сорняками')?.command).toEqual({ type: 'GARDEN_WEED' });

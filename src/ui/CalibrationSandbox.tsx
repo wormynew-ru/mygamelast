@@ -1,12 +1,13 @@
 /**
- * CalibrationSandbox - Test & calibration screen for all 7 exercise detectors.
+ * CalibrationSandbox - Test & calibration screen for all 10 exercise detectors.
  * Supports live angle threshold tuning persisted in Zustand store
- * and applied across both calibration and live battles.
+ * and applied across both calibration and live battles (plus camera-free scripted poses).
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, RotateCcw, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
 import { PoseTracker, type PoseDelegate } from '../vision/PoseTracker';
+import { createScriptedPoseGenerator } from '../vision/ScriptedPoseSource';
 import { SoundFX } from '../audio/SoundFX';
 import { applyExerciseCalibration, createExerciseDetector } from '../session/WorkoutSession';
 import type { ExerciseDetector, ExerciseState, VisibilityStatus } from '../vision/types';
@@ -79,6 +80,27 @@ const EXERCISE_THRESHOLD_DESCRIPTORS: Record<ExerciseId, ThresholdDescriptor> = 
     max: 170,
     step: 5,
   },
+  LUNGE: {
+    field: 'lungeBottomAngle',
+    labelKey: 'calibration.lungeBottomAngle',
+    min: 70,
+    max: 125,
+    step: 5,
+  },
+  HIGH_KNEES: {
+    field: 'highKneesLiftAngle',
+    labelKey: 'calibration.highKneesLiftAngle',
+    min: 85,
+    max: 140,
+    step: 5,
+  },
+  FRONT_RAISE: {
+    field: 'frontRaisePeakAngle',
+    labelKey: 'calibration.frontRaisePeakAngle',
+    min: 60,
+    max: 115,
+    step: 5,
+  },
 };
 
 const EXERCISE_FORM_KEYS: Record<ExerciseId, TranslationKey> = {
@@ -89,6 +111,9 @@ const EXERCISE_FORM_KEYS: Record<ExerciseId, TranslationKey> = {
   ARM_HOLD: 'calibration.formArmHold',
   WALL_SIT: 'calibration.formWallSit',
   OVERHEAD_PRESS: 'calibration.formOverheadPress',
+  LUNGE: 'calibration.formLunge',
+  HIGH_KNEES: 'calibration.formHighKnees',
+  FRONT_RAISE: 'calibration.formFrontRaise',
 };
 
 const PHASE_KEYS: Record<string, TranslationKey> = {
@@ -103,6 +128,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const cameraFacingMode = useGameStore((state) => state.settings.cameraFacingMode);
   const targetPoseFps = useGameStore((state) => state.settings.targetPoseFps);
   const poseDelegate = useGameStore((state) => state.settings.poseDelegate);
+  const scriptedPoseEnabled = useGameStore((state) => state.settings.scriptedPoseEnabled);
   const exerciseCalibration = useGameStore((state) => state.settings.exerciseCalibration);
   const updateExerciseCalibration = useGameStore((state) => state.updateExerciseCalibration);
   const resetExerciseCalibration = useGameStore((state) => state.resetExerciseCalibration);
@@ -128,14 +154,19 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const [activeDelegate, setActiveDelegate] = useState<PoseDelegate>(poseDelegate);
   const [delegateFallback, setDelegateFallback] = useState(false);
 
-  // Switch detector cleanly when user changes exercise
+  // Switch detector and scripted pose source cleanly when user changes exercise
   useEffect(() => {
     const newDetector = createExerciseDetector(selectedExercise, exerciseCalibration);
     detectorRef.current = newDetector;
     lastRepCountRef.current = 0;
     lastPhaseRef.current = 'IDLE';
     setDetectorState(null);
-  }, [selectedExercise]);
+    if (trackerRef.current) {
+      trackerRef.current.setScriptedPoseGenerator(
+        scriptedPoseEnabled ? createScriptedPoseGenerator(selectedExercise) : null
+      );
+    }
+  }, [selectedExercise, scriptedPoseEnabled]);
 
   // Apply updated angle threshold live without resetting camera or rep counter
   useEffect(() => {
@@ -157,7 +188,13 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
             height: 480,
             frameRate: Math.max(30, targetPoseFps),
           },
-          { delegate: poseDelegate, targetInferenceFPS: targetPoseFps }
+          {
+            delegate: poseDelegate,
+            targetInferenceFPS: targetPoseFps,
+            scriptedPoseGenerator: scriptedPoseEnabled
+              ? createScriptedPoseGenerator(selectedExercise)
+              : null,
+          }
         );
         const soundFX = new SoundFX({ volume: 0.7, enabled: true });
 
@@ -250,7 +287,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
       trackerRef.current?.dispose();
       soundFXRef.current?.dispose();
     };
-  }, [cameraFacingMode, targetPoseFps, poseDelegate]);
+  }, [cameraFacingMode, targetPoseFps, poseDelegate, scriptedPoseEnabled]);
 
   const handleReset = () => {
     detectorRef.current?.reset();
@@ -304,6 +341,11 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
   const primaryAngle =
     typeof detectorState?.debug?.kneeAngle === 'number'
       ? detectorState.debug.kneeAngle
+      : typeof detectorState?.debug?.raiseAngle === 'number'
+      ? detectorState.debug.raiseAngle
+      : typeof detectorState?.debug?.leftHipAngle === 'number' &&
+          typeof detectorState?.debug?.rightHipAngle === 'number'
+      ? Math.min(detectorState.debug.leftHipAngle, detectorState.debug.rightHipAngle)
       : typeof detectorState?.debug?.armAngle === 'number'
       ? detectorState.debug.armAngle
       : typeof detectorState?.debug?.elbowAngle === 'number'
@@ -396,7 +438,7 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
               )}
 
               {isInitialized && (
-                <div className="absolute bottom-3 left-3 bg-slate-950/85 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-numeric">
+                <div className="absolute bottom-3 left-3 bg-slate-950/85 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-numeric inline-flex items-center gap-2">
                   <span
                     className={
                       delegateFallback
@@ -408,6 +450,11 @@ export function CalibrationSandbox({ onBack }: CalibrationSandboxProps) {
                   >
                     {delegateFallback ? t('battle.delegateFallback') : activeDelegate}
                   </span>
+                  {scriptedPoseEnabled && (
+                    <span className="text-amber-300 font-semibold">
+                      · {t('calibration.scriptedBadge')}
+                    </span>
+                  )}
                 </div>
               )}
 

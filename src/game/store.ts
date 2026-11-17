@@ -7,21 +7,28 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
+  AlchemyOrder,
+  ArtifactId,
+  BattleRank,
   BestiaryEntry,
   DailyActivityEntry,
   DailyQuestState,
   EndlessArenaStats,
   EquipmentLoadout,
   ExerciseCalibrationSettings,
+  ExercisePersonalRecord,
   ExerciseTotals,
   GameState,
   Inventory,
   MonsterStats,
   MonsterTrophyId,
+  MutatorId,
   PlayerStats,
+  ProgramId,
   SanctuaryMixId,
   SeedId,
   StreakState,
+  TalentId,
   WorkoutStats,
 } from './types';
 import { createPlayer, getEffectivePlayerStats, levelUp, useConsumableItem } from './CombatEngine';
@@ -46,9 +53,11 @@ import {
   type HarvestReward,
 } from './data/garden';
 import {
+  MAX_SANCTUARY_PRESETS,
   SANCTUARY_LAB_TIERS,
   SANCTUARY_MIX_MAP,
   createInitialSanctuaryState,
+  generateDailyAlchemyOrder,
   getActiveSanctuarySynergies,
   getMixEffectiveHeal,
   getNextSanctuaryLabTier,
@@ -61,7 +70,36 @@ import {
   getQuestProgress,
   updateStreakForDate,
 } from './data/dailyQuests';
+import {
+  TALENT_RESPEC_COST,
+  canUpgradeTalent,
+  createInitialTalentState,
+  getAggregatedTalentModifiers,
+  normalizeTalentState,
+} from './data/talents';
+import {
+  MAX_EQUIPPED_ARTIFACTS,
+  createInitialArtifactState,
+  normalizeArtifactState,
+} from './data/artifacts';
+import {
+  MAX_ACTIVE_MUTATORS,
+  MUTATORS,
+  PROGRAM_MAP,
+  createEmptyExercisePR,
+  createInitialPersonalRecords,
+  createInitialProgramState,
+  createInitialWeeklyChallengeState,
+  getISOWeekKey,
+  getWeeklyChallengeForWeek,
+  normalizeProgramState,
+  normalizeWeeklyChallengeState,
+  pickBetterRank,
+} from './data/programs';
+import { isSerializedMap, type SerializedMap } from './portability';
 import { setCurrentLanguage, type Language } from '../i18n';
+
+export const SAVE_SCHEMA_VERSION = 14;
 
 export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
   squatBottomAngle: 90,
@@ -71,6 +109,9 @@ export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
   armHoldMinShoulderAngle: 65,
   wallSitMaxKneeAngle: 115,
   overheadPressTopAngle: 155,
+  lungeBottomAngle: 95,
+  highKneesLiftAngle: 110,
+  frontRaisePeakAngle: 85,
 };
 
 function createInitialInventory(): Inventory {
@@ -110,6 +151,9 @@ function createInitialExerciseTotals(): Record<ExerciseId, ExerciseTotals> {
     ARM_HOLD: { reps: 0, holdSeconds: 0 },
     WALL_SIT: { reps: 0, holdSeconds: 0 },
     OVERHEAD_PRESS: { reps: 0, holdSeconds: 0 },
+    LUNGE: { reps: 0, holdSeconds: 0 },
+    HIGH_KNEES: { reps: 0, holdSeconds: 0 },
+    FRONT_RAISE: { reps: 0, holdSeconds: 0 },
   };
 }
 
@@ -158,6 +202,13 @@ function createInitialState(): GameState {
     endlessStats: createInitialEndlessStats(),
     garden: createInitialGardenState(),
     sanctuary: createInitialSanctuaryState(),
+    talents: createInitialTalentState(),
+    artifacts: createInitialArtifactState(),
+    programs: createInitialProgramState(),
+    personalRecords: createInitialPersonalRecords(),
+    bestSingleHitDamage: 0,
+    activeMutators: [],
+    weeklyChallenge: createInitialWeeklyChallengeState(),
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
@@ -168,6 +219,7 @@ function createInitialState(): GameState {
       exerciseConfigs: {},
       exerciseCalibration: { ...DEFAULT_EXERCISE_CALIBRATION },
       language: 'ru',
+      scriptedPoseEnabled: false,
     },
   };
 }
@@ -262,30 +314,82 @@ interface GameStore extends GameState {
   upgradeSanctuaryLab: () => boolean;
   consumeActiveSanctuaryBuffs: () => void;
 
+  upgradeTalent: (talentId: TalentId) => boolean;
+  respecTalents: () => boolean;
+  unlockArtifact: (artifactId: ArtifactId) => boolean;
+  equipArtifact: (artifactId: ArtifactId) => boolean;
+  unequipArtifact: (artifactId: ArtifactId) => boolean;
+
+  startProgram: (programId: ProgramId, dateKey?: string) => void;
+  advanceProgramDay: (dayIndex?: number) => {
+    completedProgram: boolean;
+    bonusCoins: number;
+    bonusXp: number;
+    leveledUp: boolean;
+  } | null;
+  abandonProgram: () => void;
+
+  toggleMutator: (mutatorId: MutatorId) => void;
+  clearMutators: () => void;
+  completeWeeklyChallenge: (
+    weekKey?: string,
+    rank?: BattleRank
+  ) => {
+    firstCompletion: boolean;
+    bonusCoins: number;
+    bonusXp: number;
+    unlockedArtifactId: ArtifactId | null;
+    leveledUp: boolean;
+  };
+  recordPersonalRecords: (params: {
+    exerciseId: ExerciseId;
+    battleReps: number;
+    holdSec: number;
+    maxCombo: number;
+    weightKg: number;
+    bestHitDamage: number;
+  }) => string[];
+
+  saveSanctuaryPreset: (slotIndex: number, name?: string) => boolean;
+  applySanctuaryPreset: (slotIndex: number) => boolean;
+  ensureDailyAlchemyOrder: (dateKey?: string) => AlchemyOrder;
+  completeAlchemyOrder: (dateKey?: string) => {
+    rewardCoins: number;
+    rewardXp: number;
+    leveledUp: boolean;
+  } | null;
+
   updateSettings: (settings: Partial<GameState['settings']>) => void;
   updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
   resetExerciseCalibration: () => void;
   setLanguage: (language: Language) => void;
+  importGameState: (nextState: GameState) => void;
 
   resetGame: () => void;
 }
 
-interface SerializedMap {
-  __type: 'Map';
-  entries: [string, number][];
+function normalizePersonalRecords(
+  raw?: Partial<Record<ExerciseId, Partial<ExercisePersonalRecord>>>
+): Record<ExerciseId, ExercisePersonalRecord> {
+  const base = createInitialPersonalRecords();
+  if (!raw || typeof raw !== 'object') return base;
+  for (const key of Object.keys(base) as ExerciseId[]) {
+    const src = raw[key];
+    if (!src) continue;
+    base[key] = {
+      ...createEmptyExercisePR(),
+      bestBattleReps: Math.max(0, Math.floor(src.bestBattleReps ?? 0)),
+      bestHoldSec: Math.max(0, Math.floor(src.bestHoldSec ?? 0)),
+      bestCombo: Math.max(0, Math.floor(src.bestCombo ?? 0)),
+      maxWeightKg: Math.max(0, Number(src.maxWeightKg ?? 0) || 0),
+      bestHitDamage: Math.max(0, Math.floor(src.bestHitDamage ?? 0)),
+    };
+  }
+  return base;
 }
 
-function isSerializedMap(value: unknown): value is SerializedMap {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as Partial<SerializedMap>).__type === 'Map' &&
-    Array.isArray((value as Partial<SerializedMap>).entries)
-  );
-}
-
-function migrateGameState(persistedState: unknown, version: number): GameState {
-  if (version >= 0 && version <= 13) {
+export function migrateGameState(persistedState: unknown, version: number): GameState {
+  if (version >= 0 && version <= SAVE_SCHEMA_VERSION) {
     const state = (persistedState ?? {}) as Partial<GameState>;
 
     let itemsMap = new Map<string, number>();
@@ -294,7 +398,7 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
       if (items instanceof Map) {
         itemsMap = items;
       } else if (isSerializedMap(items)) {
-        itemsMap = new Map(items.entries);
+        itemsMap = new Map(items.entries as [string, number][]);
       } else if (typeof items === 'object' && items !== null) {
         itemsMap = new Map(
           Object.entries(items as Record<string, number>).filter(
@@ -310,15 +414,24 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
         ? { mode: 'DUMBBELLS', weightKg: Math.max(1, state.loadout.weightKg ?? 2) }
         : { mode: 'BODYWEIGHT', weightKg: 0 };
 
+    const migratedPlayer: PlayerStats = {
+      ...base.player,
+      ...(state.player ?? {}),
+    };
+
+    const migratedMutators: MutatorId[] = Array.isArray(state.activeMutators)
+      ? Array.from(new Set(state.activeMutators.filter((id): id is MutatorId => id in MUTATORS))).slice(
+          0,
+          MAX_ACTIVE_MUTATORS
+        )
+      : [];
+
     return {
       ...base,
       ...state,
       coins: typeof state.coins === 'number' ? state.coins : 0,
       loadout: migratedLoadout,
-      player: {
-        ...base.player,
-        ...(state.player ?? {}),
-      },
+      player: migratedPlayer,
       inventory: {
         items: itemsMap,
         equippedItems: state.inventory?.equippedItems || [],
@@ -350,10 +463,18 @@ function migrateGameState(persistedState: unknown, version: number): GameState {
       },
       garden: normalizeGardenState(state.garden),
       sanctuary: normalizeSanctuaryState(state.sanctuary),
+      talents: normalizeTalentState(state.talents, migratedPlayer.level),
+      artifacts: normalizeArtifactState(state.artifacts),
+      programs: normalizeProgramState(state.programs),
+      personalRecords: normalizePersonalRecords(state.personalRecords),
+      bestSingleHitDamage: Math.max(0, Math.floor(state.bestSingleHitDamage ?? 0)),
+      activeMutators: migratedMutators,
+      weeklyChallenge: normalizeWeeklyChallengeState(state.weeklyChallenge),
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
         voiceControlEnabled: Boolean(state.settings?.voiceControlEnabled),
+        scriptedPoseEnabled: Boolean(state.settings?.scriptedPoseEnabled),
         targetPoseFps:
           state.settings?.targetPoseFps === 15 || state.settings?.targetPoseFps === 30
             ? state.settings.targetPoseFps
@@ -377,7 +498,7 @@ const customStorage = createJSONStorage(() => localStorage, {
       return {
         __type: 'Map',
         entries: Array.from(value.entries()),
-      } satisfies SerializedMap;
+      } satisfies SerializedMap<unknown, unknown>;
     }
     return value;
   },
@@ -663,10 +784,12 @@ export const useGameStore = create<GameStore>()(
               ? updateStreakForDate(state.streak, todayKey)
               : state.streak;
 
+          const talentMods = getAggregatedTalentModifiers(state.talents);
           const nextGarden =
             winsDelta > 0
               ? applyWorkoutVictoryToGarden(state.garden, {
                   suppressWeedSpawn: delta.suppressWeedSpawn,
+                  mutationBonusChance: talentMods.gardenMutationBonusChance,
                 })
               : state.garden;
 
@@ -895,7 +1018,7 @@ export const useGameStore = create<GameStore>()(
         const plot = state.garden.plots[plotId];
         if (!plot || !plot.seedId || !isPlotReadyToHarvest(plot)) return null;
 
-        const reward = computeHarvestReward(plot.seedId);
+        const reward = computeHarvestReward(plot.seedId, Math.random, Boolean(plot.isMutant));
 
         let updatedPlayer = { ...state.player, xp: state.player.xp + reward.xp };
         let leveledUp = false;
@@ -905,11 +1028,7 @@ export const useGameStore = create<GameStore>()(
         }
 
         if (reward.healHp > 0) {
-          const eff = getEffectivePlayerStats(
-            updatedPlayer,
-            state.inventory.equippedItems,
-            ITEMS
-          );
+          const eff = selectEffectivePlayerStats({ ...state, player: updatedPlayer });
           const maxGain = Math.max(0, eff.maxHp - eff.hp);
           const actualHeal = Math.min(reward.healHp, maxGain);
           updatedPlayer = {
@@ -942,7 +1061,7 @@ export const useGameStore = create<GameStore>()(
             },
             totalHarvested: state.garden.totalHarvested + 1,
             plots: state.garden.plots.map((p) =>
-              p.id === plotId ? { ...p, seedId: null, growth: 0 } : p
+              p.id === plotId ? { ...p, seedId: null, growth: 0, isMutant: false } : p
             ),
           },
         });
@@ -1041,6 +1160,12 @@ export const useGameStore = create<GameStore>()(
           }
         }
 
+        const talentMods = getAggregatedTalentModifiers(state.talents);
+        const bonusQty =
+          talentMods.sanctuaryCraftBonusChance > 0 && Math.random() < talentMods.sanctuaryCraftBonusChance
+            ? 1
+            : 0;
+
         set({
           garden: {
             ...state.garden,
@@ -1051,7 +1176,7 @@ export const useGameStore = create<GameStore>()(
             trophyInventory: nextTrophyInventory,
             mixInventory: {
               ...state.sanctuary.mixInventory,
-              [mixId]: (state.sanctuary.mixInventory[mixId] ?? 0) + 1,
+              [mixId]: (state.sanctuary.mixInventory[mixId] ?? 0) + 1 + bonusQty,
             },
             totalCrafted: state.sanctuary.totalCrafted + 1,
           },
@@ -1192,6 +1317,405 @@ export const useGameStore = create<GameStore>()(
           };
         }),
 
+      upgradeTalent: (talentId) => {
+        const state = get();
+        if (!canUpgradeTalent(state.player.level, state.talents, talentId)) {
+          return false;
+        }
+        const nextRank = (state.talents.ranks[talentId] ?? 0) + 1;
+        set({
+          talents: {
+            ranks: {
+              ...state.talents.ranks,
+              [talentId]: nextRank,
+            },
+            spentPoints: state.talents.spentPoints + 1,
+          },
+        });
+        get().syncAchievements();
+        return true;
+      },
+
+      respecTalents: () => {
+        const state = get();
+        if (state.talents.spentPoints <= 0 || state.coins < TALENT_RESPEC_COST) {
+          return false;
+        }
+        set({
+          coins: state.coins - TALENT_RESPEC_COST,
+          talents: createInitialTalentState(),
+        });
+        return true;
+      },
+
+      unlockArtifact: (artifactId) => {
+        const state = get();
+        if (state.artifacts.unlockedIds.includes(artifactId)) {
+          return false;
+        }
+        set({
+          artifacts: {
+            ...state.artifacts,
+            unlockedIds: [...state.artifacts.unlockedIds, artifactId],
+          },
+        });
+        get().syncAchievements();
+        return true;
+      },
+
+      equipArtifact: (artifactId) => {
+        const state = get();
+        if (
+          !state.artifacts.unlockedIds.includes(artifactId) ||
+          state.artifacts.equippedIds.includes(artifactId) ||
+          state.artifacts.equippedIds.length >= MAX_EQUIPPED_ARTIFACTS
+        ) {
+          return false;
+        }
+        set({
+          artifacts: {
+            ...state.artifacts,
+            equippedIds: [...state.artifacts.equippedIds, artifactId],
+          },
+        });
+        return true;
+      },
+
+      unequipArtifact: (artifactId) => {
+        const state = get();
+        if (!state.artifacts.equippedIds.includes(artifactId)) {
+          return false;
+        }
+        set({
+          artifacts: {
+            ...state.artifacts,
+            equippedIds: state.artifacts.equippedIds.filter((id) => id !== artifactId),
+          },
+        });
+        return true;
+      },
+
+      startProgram: (programId, dateKey = getLocalDateKey()) => {
+        if (!(programId in PROGRAM_MAP)) return;
+        set((state) => ({
+          programs: {
+            ...state.programs,
+            active: {
+              programId,
+              currentDayIndex: 0,
+              completedDays: [],
+              startedAtDate: dateKey,
+            },
+          },
+        }));
+      },
+
+      advanceProgramDay: (dayIndex) => {
+        const state = get();
+        const active = state.programs.active;
+        if (!active) return null;
+        const def = PROGRAM_MAP[active.programId];
+        if (!def) return null;
+
+        const targetIndex =
+          typeof dayIndex === 'number' ? dayIndex : active.currentDayIndex;
+        if (targetIndex < 0 || targetIndex >= def.durationDays) return null;
+        if (active.completedDays.includes(targetIndex)) return null;
+
+        const dayPlan = def.days[targetIndex];
+        const nextCompletedDays = [...active.completedDays, targetIndex];
+        const completedProgram = nextCompletedDays.length >= def.durationDays;
+
+        const bonusCoins = dayPlan.bonusCoins + (completedProgram ? def.completionCoins : 0);
+        const bonusXp = dayPlan.bonusXp + (completedProgram ? def.completionXp : 0);
+
+        let updatedPlayer = { ...state.player, xp: state.player.xp + bonusXp };
+        let leveledUp = false;
+        while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+          updatedPlayer = levelUp(updatedPlayer);
+          leveledUp = true;
+        }
+
+        const nextCompletedPrograms =
+          completedProgram && !state.programs.completedProgramIds.includes(active.programId)
+            ? [...state.programs.completedProgramIds, active.programId]
+            : state.programs.completedProgramIds;
+
+        set({
+          coins: state.coins + bonusCoins,
+          player: updatedPlayer,
+          programs: {
+            active: completedProgram
+              ? null
+              : {
+                  ...active,
+                  currentDayIndex: Math.min(def.durationDays - 1, targetIndex + 1),
+                  completedDays: nextCompletedDays,
+                },
+            completedProgramIds: nextCompletedPrograms,
+            totalProgramsFinished:
+              state.programs.totalProgramsFinished + (completedProgram ? 1 : 0),
+          },
+        });
+
+        get().syncAchievements();
+        return {
+          completedProgram,
+          bonusCoins,
+          bonusXp,
+          leveledUp,
+        };
+      },
+
+      abandonProgram: () =>
+        set((state) => ({
+          programs: {
+            ...state.programs,
+            active: null,
+          },
+        })),
+
+      toggleMutator: (mutatorId) =>
+        set((state) => {
+          if (!(mutatorId in MUTATORS)) return state;
+          const exists = state.activeMutators.includes(mutatorId);
+          if (exists) {
+            return {
+              activeMutators: state.activeMutators.filter((id) => id !== mutatorId),
+            };
+          }
+          if (state.activeMutators.length >= MAX_ACTIVE_MUTATORS) {
+            return state;
+          }
+          return {
+            activeMutators: [...state.activeMutators, mutatorId],
+          };
+        }),
+
+      clearMutators: () => set({ activeMutators: [] }),
+
+      completeWeeklyChallenge: (weekKey = getISOWeekKey(), rank = 'B') => {
+        const state = get();
+        const spec = getWeeklyChallengeForWeek(weekKey);
+        const alreadyDone = state.weeklyChallenge.completedWeekKeys.includes(weekKey);
+        const bonusCoins = alreadyDone ? 40 : spec.bonusCoins;
+        const bonusXp = alreadyDone ? 35 : spec.bonusXp;
+
+        let updatedPlayer = { ...state.player, xp: state.player.xp + bonusXp };
+        let leveledUp = false;
+        while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+          updatedPlayer = levelUp(updatedPlayer);
+          leveledUp = true;
+        }
+
+        const nextWeekKeys = alreadyDone
+          ? state.weeklyChallenge.completedWeekKeys
+          : [...state.weeklyChallenge.completedWeekKeys, weekKey];
+
+        set({
+          coins: state.coins + bonusCoins,
+          player: updatedPlayer,
+          weeklyChallenge: {
+            completedWeekKeys: nextWeekKeys,
+            bestRankByWeek: {
+              ...state.weeklyChallenge.bestRankByWeek,
+              [weekKey]: pickBetterRank(state.weeklyChallenge.bestRankByWeek[weekKey], rank),
+            },
+            totalCompleted: alreadyDone
+              ? state.weeklyChallenge.totalCompleted
+              : state.weeklyChallenge.totalCompleted + 1,
+          },
+        });
+
+        let unlockedArtifactId: ArtifactId | null = null;
+        if (!alreadyDone && get().unlockArtifact('VAMPIRIC_FANG')) {
+          unlockedArtifactId = 'VAMPIRIC_FANG';
+        }
+        get().syncAchievements();
+
+        return {
+          firstCompletion: !alreadyDone,
+          bonusCoins,
+          bonusXp,
+          unlockedArtifactId,
+          leveledUp,
+        };
+      },
+
+      recordPersonalRecords: ({
+        exerciseId,
+        battleReps,
+        holdSec,
+        maxCombo,
+        weightKg,
+        bestHitDamage,
+      }) => {
+        const state = get();
+        const prev = state.personalRecords[exerciseId] ?? createEmptyExercisePR();
+        const broken: string[] = [];
+
+        const nextReps = Math.max(prev.bestBattleReps, Math.floor(battleReps));
+        if (battleReps > prev.bestBattleReps && battleReps > 0) broken.push('REPS');
+
+        const nextHold = Math.max(prev.bestHoldSec, Math.floor(holdSec));
+        if (holdSec > prev.bestHoldSec && holdSec > 0) broken.push('HOLD');
+
+        const nextCombo = Math.max(prev.bestCombo, Math.floor(maxCombo));
+        if (maxCombo > prev.bestCombo && maxCombo > 0) broken.push('COMBO');
+
+        const nextWeight = Math.max(prev.maxWeightKg, weightKg);
+        if (weightKg > prev.maxWeightKg && weightKg > 0) broken.push('WEIGHT');
+
+        const nextHit = Math.max(prev.bestHitDamage, Math.floor(bestHitDamage));
+        if (bestHitDamage > prev.bestHitDamage && bestHitDamage > 0) broken.push('HIT');
+
+        set({
+          bestSingleHitDamage: Math.max(state.bestSingleHitDamage, Math.floor(bestHitDamage)),
+          personalRecords: {
+            ...state.personalRecords,
+            [exerciseId]: {
+              bestBattleReps: nextReps,
+              bestHoldSec: nextHold,
+              bestCombo: nextCombo,
+              maxWeightKg: nextWeight,
+              bestHitDamage: nextHit,
+            },
+          },
+        });
+
+        return broken;
+      },
+
+      saveSanctuaryPreset: (slotIndex, name) => {
+        if (slotIndex < 0 || slotIndex >= MAX_SANCTUARY_PRESETS) return false;
+        const state = get();
+        const currentPresets = [...(state.sanctuary.presets ?? [])];
+        while (currentPresets.length <= slotIndex) {
+          currentPresets.push({
+            id: `preset-${currentPresets.length + 1}`,
+            name: `Loadout ${currentPresets.length + 1}`,
+            buffs: [],
+          });
+        }
+        currentPresets[slotIndex] = {
+          id: `preset-${slotIndex + 1}`,
+          name: name?.trim() || currentPresets[slotIndex].name || `Loadout ${slotIndex + 1}`,
+          buffs: [...state.sanctuary.activeBuffs],
+        };
+        set({
+          sanctuary: {
+            ...state.sanctuary,
+            presets: currentPresets,
+          },
+        });
+        return true;
+      },
+
+      applySanctuaryPreset: (slotIndex) => {
+        const state = get();
+        const preset = state.sanctuary.presets?.[slotIndex];
+        if (!preset || preset.buffs.length === 0) return false;
+
+        // First deactivate current buffs cleanly back to mixInventory
+        const activeCopy = [...state.sanctuary.activeBuffs];
+        for (const id of activeCopy) {
+          get().deactivateMixBuff(id);
+        }
+
+        let appliedAny = false;
+        const maxSlots = SANCTUARY_LAB_TIERS[get().sanctuary.labTier].maxBuffSlots;
+        for (const mixId of preset.buffs.slice(0, maxSlots)) {
+          if (get().activateMixBuff(mixId)) {
+            appliedAny = true;
+          }
+        }
+        return appliedAny;
+      },
+
+      ensureDailyAlchemyOrder: (dateKey = getLocalDateKey()) => {
+        const state = get();
+        const existing = state.sanctuary.alchemyOrder;
+        if (existing && existing.dateKey === dateKey) {
+          return existing;
+        }
+        const generated = generateDailyAlchemyOrder(
+          dateKey,
+          state.sanctuary.completedOrdersCount ?? 0
+        );
+        set({
+          sanctuary: {
+            ...state.sanctuary,
+            alchemyOrder: generated,
+          },
+        });
+        return generated;
+      },
+
+      completeAlchemyOrder: (dateKey = getLocalDateKey()) => {
+        const order = get().ensureDailyAlchemyOrder(dateKey);
+        if (order.completed) return null;
+
+        const state = get();
+        // Verify ingredients
+        for (const req of order.requirements) {
+          if (req.seedId && (state.garden.cropInventory[req.seedId] ?? 0) < req.qty) {
+            return null;
+          }
+          if (req.trophyId && (state.sanctuary.trophyInventory[req.trophyId] ?? 0) < req.qty) {
+            return null;
+          }
+          if (req.mixId && (state.sanctuary.mixInventory[req.mixId] ?? 0) < req.qty) {
+            return null;
+          }
+        }
+
+        const nextCrops = { ...state.garden.cropInventory };
+        const nextTrophies = { ...state.sanctuary.trophyInventory };
+        const nextMixes = { ...state.sanctuary.mixInventory };
+
+        for (const req of order.requirements) {
+          if (req.seedId) {
+            nextCrops[req.seedId] = Math.max(0, (nextCrops[req.seedId] ?? 0) - req.qty);
+          }
+          if (req.trophyId) {
+            nextTrophies[req.trophyId] = Math.max(0, (nextTrophies[req.trophyId] ?? 0) - req.qty);
+          }
+          if (req.mixId) {
+            nextMixes[req.mixId] = Math.max(0, (nextMixes[req.mixId] ?? 0) - req.qty);
+          }
+        }
+
+        let updatedPlayer = { ...state.player, xp: state.player.xp + order.rewardXp };
+        let leveledUp = false;
+        while (updatedPlayer.xp >= updatedPlayer.xpToNextLevel) {
+          updatedPlayer = levelUp(updatedPlayer);
+          leveledUp = true;
+        }
+
+        set({
+          coins: state.coins + order.rewardCoins,
+          player: updatedPlayer,
+          garden: {
+            ...state.garden,
+            cropInventory: nextCrops,
+          },
+          sanctuary: {
+            ...state.sanctuary,
+            trophyInventory: nextTrophies,
+            mixInventory: nextMixes,
+            alchemyOrder: { ...order, completed: true },
+            completedOrdersCount: (state.sanctuary.completedOrdersCount ?? 0) + 1,
+          },
+        });
+
+        get().syncAchievements();
+        return {
+          rewardCoins: order.rewardCoins,
+          rewardXp: order.rewardXp,
+          leveledUp,
+        };
+      },
+
       updateSettings: (settingsUpdate) =>
         set((state) => ({
           settings: { ...state.settings, ...settingsUpdate },
@@ -1224,6 +1748,12 @@ export const useGameStore = create<GameStore>()(
           };
         }),
 
+      importGameState: (nextState) => {
+        const normalized = migrateGameState(nextState, SAVE_SCHEMA_VERSION);
+        setCurrentLanguage(normalized.settings.language);
+        set(normalized);
+      },
+
       resetGame: () => {
         const fresh = createInitialState();
         setCurrentLanguage(fresh.settings.language);
@@ -1232,7 +1762,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'junk-slayer-game-state',
-      version: 13,
+      version: SAVE_SCHEMA_VERSION,
       migrate: migrateGameState,
       storage: customStorage,
       onRehydrateStorage: () => (state) => {
@@ -1250,6 +1780,8 @@ export function selectEffectivePlayerStats(state: GameState): PlayerStats {
     state.inventory.equippedItems,
     ITEMS,
     state.sanctuary?.activeBuffs ?? [],
-    state.sanctuary?.labTier ?? 1
+    state.sanctuary?.labTier ?? 1,
+    getAggregatedTalentModifiers(state.talents),
+    state.artifacts?.equippedIds ?? []
   );
 }

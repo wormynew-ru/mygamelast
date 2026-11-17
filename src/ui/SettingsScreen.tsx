@@ -1,11 +1,12 @@
 /**
  * SettingsScreen - Language switcher, audio/voice toggles, camera selector,
- * and in-app confirmation modal for resetting saved progress (no window.confirm).
+ * scripted pose driver toggle, JSON save export/import, and in-app reset modal.
  */
 
-import { useState } from 'react';
-import { ArrowLeft, Cpu, Mic, Trash2 } from 'lucide-react';
-import { useGameStore } from '../game/store';
+import { useRef, useState, type ChangeEvent } from 'react';
+import { ArrowLeft, Cpu, Download, Mic, Sparkles, Trash2, Upload } from 'lucide-react';
+import { exportSaveToJson, parseAndValidateSaveJson } from '../game/portability';
+import { SAVE_SCHEMA_VERSION, migrateGameState, useGameStore } from '../game/store';
 import { AVAILABLE_LANGUAGES } from '../i18n';
 import { useTranslation } from '../i18n/useTranslation';
 import { useVoiceControl } from './VoiceControl';
@@ -19,14 +20,51 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
   const { t, language, setLanguage } = useTranslation();
   const settings = useGameStore((state) => state.settings);
   const updateSettings = useGameStore((state) => state.updateSettings);
+  const importGameState = useGameStore((state) => state.importGameState);
   const resetGame = useGameStore((state) => state.resetGame);
   const { snapshot: voiceSnapshot, toggleVoiceControl } = useVoiceControl();
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [portabilityStatus, setPortabilityStatus] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
 
   const handleConfirmReset = () => {
     resetGame();
     setShowResetConfirm(false);
+  };
+
+  const handleExportSave = () => {
+    const json = exportSaveToJson(useGameStore.getState(), SAVE_SCHEMA_VERSION);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'junk-slayer-save.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const result = parseAndValidateSaveJson(text, migrateGameState);
+      if (!result.ok) {
+        setPortabilityStatus({ ok: false, message: t('settings.importError') });
+        return;
+      }
+      importGameState(result.state);
+      setPortabilityStatus({ ok: true, message: t('settings.importSuccess') });
+    } catch {
+      setPortabilityStatus({ ok: false, message: t('settings.importError') });
+    }
   };
 
   return (
@@ -168,6 +206,29 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
             </div>
           </div>
 
+          {/* Scripted Pose Driver (Camera-Free Demo / Testing) */}
+          <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>{t('settings.scriptedPose')}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">{t('settings.scriptedPoseDesc')}</p>
+            </div>
+            <button
+              onClick={() =>
+                updateSettings({ scriptedPoseEnabled: !settings.scriptedPoseEnabled })
+              }
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 self-start sm:self-center ${
+                settings.scriptedPoseEnabled
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              }`}
+            >
+              {settings.scriptedPoseEnabled ? t('settings.audioOn') : t('settings.audioOff')}
+            </button>
+          </div>
+
           {/* Pose Detection Target FPS */}
           <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <span className="text-sm font-semibold text-white">{t('settings.poseFps')}</span>
@@ -241,6 +302,56 @@ export function SettingsScreen({ onBack, onOpenCalibration }: SettingsScreenProp
                 {t('settings.poseDelegateCpu')}
               </button>
             </div>
+          </div>
+
+          {/* Save Export & Import (JSON) */}
+          <div className="p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-white">
+                  {t('settings.portabilityTitle')}
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {t('settings.portabilityDesc')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleExportSave}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{t('settings.exportSave')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors whitespace-nowrap"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{t('settings.importSave')}</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+              </div>
+            </div>
+            {portabilityStatus && (
+              <div
+                className={`text-xs font-medium px-3 py-2 rounded-lg border ${
+                  portabilityStatus.ok
+                    ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300'
+                    : 'bg-red-950/50 border-red-700/60 text-red-300'
+                }`}
+              >
+                {portabilityStatus.message}
+              </div>
+            )}
           </div>
 
           {/* Calibration Shortcut */}

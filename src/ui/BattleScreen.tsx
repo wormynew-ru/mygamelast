@@ -40,16 +40,19 @@ import {
   getAggregatedSanctuaryBuffs,
 } from '../game/data/sanctuary';
 import { type AchievementId } from '../game/data/achievements';
-import type { BattleRank, WeedId } from '../game/types';
+import { getAggregatedMutatorEffects } from '../game/data/programs';
+import type { BattleRank, MonsterStats, MutatorId, WeedId } from '../game/types';
 import { useTranslation, type TranslationKey } from '../i18n/useTranslation';
 import {
   ACHIEVEMENT_KEYS,
   ARCHETYPE_KEYS,
+  ARTIFACT_KEYS,
   CIRCUIT_KEYS,
   EXERCISE_NAME_KEYS,
   ITEM_NAME_KEYS,
   MONSTER_NAME_KEYS,
   MONSTER_TROPHY_KEYS,
+  MUTATOR_KEYS,
   SANCTUARY_MIX_KEYS,
   SANCTUARY_SYNERGY_KEYS,
 } from './gameKeys';
@@ -63,10 +66,21 @@ interface BattleScreenProps {
   circuitId?: CircuitId;
   gardenPlotId?: number;
   weedId?: WeedId;
+  activeMutatorsOverride?: MutatorId[];
+  weeklyWeekKey?: string;
+  programDayIndex?: number;
   onExit: () => void;
   onBackToGarden?: () => void;
   onStartNextLevel?: (nextLevelId: string, exerciseId: ExerciseId) => void;
 }
+
+const PR_METRIC_KEYS: Record<string, TranslationKey> = {
+  REPS: 'pr.REPS',
+  HOLD: 'pr.HOLD',
+  COMBO: 'pr.COMBO',
+  WEIGHT: 'pr.WEIGHT',
+  HIT: 'pr.HIT',
+};
 
 const PHASE_KEYS: Record<string, TranslationKey> = {
   IDLE: 'phase.IDLE',
@@ -131,6 +145,9 @@ export function BattleScreen({
   circuitId,
   gardenPlotId,
   weedId,
+  activeMutatorsOverride,
+  weeklyWeekKey,
+  programDayIndex,
   onExit,
   onBackToGarden,
   onStartNextLevel,
@@ -153,7 +170,8 @@ export function BattleScreen({
   const [justCleansed, setJustCleansed] = useState<boolean>(false);
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(() => {
-    const initialSanctuary = useGameStore.getState().sanctuary;
+    const storeState = useGameStore.getState();
+    const initialSanctuary = storeState.sanctuary;
     const initialBuffs = getAggregatedSanctuaryBuffs(
       initialSanctuary.activeBuffs,
       initialSanctuary.labTier
@@ -161,7 +179,7 @@ export function BattleScreen({
     return {
       state: 'STARTING',
       exerciseState: null,
-      currentEnemy: useGameStore.getState().currentEnemy,
+      currentEnemy: storeState.currentEnemy,
       autoPauseReason: null,
       isAudioUnlocked: true,
       bossPhase: 0,
@@ -180,12 +198,14 @@ export function BattleScreen({
       lastCombatEvent: null,
       lastMonsterAttackEvent: null,
       victorySummary: null,
-      poseDelegate: useGameStore.getState().settings.poseDelegate,
+      poseDelegate: storeState.settings.poseDelegate,
       poseDelegateFallback: false,
       activeSanctuaryBuffs: [...initialSanctuary.activeBuffs],
       activeSynergies: initialBuffs.activeSynergies,
       hasRiskyMutagen: initialBuffs.hasRiskyMutagen,
       toxicSurgeStacks: 0,
+      activeMutators: activeMutatorsOverride ?? [...storeState.activeMutators],
+      isScriptedPose: storeState.settings.scriptedPoseEnabled,
     };
   });
   const [isDamaged, setIsDamaged] = useState(false);
@@ -194,6 +214,9 @@ export function BattleScreen({
   const basePlayer = useGameStore((state) => state.player);
   const equippedItems = useGameStore((state) => state.inventory.equippedItems);
   const sanctuary = useGameStore((state) => state.sanctuary);
+  const talents = useGameStore((state) => state.talents);
+  const artifacts = useGameStore((state) => state.artifacts);
+  const scriptedPoseEnabled = useGameStore((state) => state.settings.scriptedPoseEnabled);
   const loadout = useGameStore((state) => state.loadout);
   const enemy = useGameStore((state) => state.currentEnemy);
   const startCombat = useGameStore((state) => state.startCombat);
@@ -202,7 +225,7 @@ export function BattleScreen({
 
   const effectivePlayer = useMemo(
     () => selectEffectivePlayerStats(useGameStore.getState()),
-    [basePlayer, equippedItems, sanctuary]
+    [basePlayer, equippedItems, sanctuary, talents, artifacts]
   );
 
   const circuitDef = circuitId ? getCircuitById(circuitId) : undefined;
@@ -214,6 +237,23 @@ export function BattleScreen({
   }
   const initialMonsterId =
     levelDef?.monsterId ?? weedId ?? initialEnemyIdRef.current ?? 'BURGER';
+
+  const applyMutatorScale = useCallback(
+    (monster: MonsterStats): MonsterStats => {
+      const muts = activeMutatorsOverride ?? useGameStore.getState().activeMutators;
+      if (muts.length === 0) return monster;
+      const fx = getAggregatedMutatorEffects(muts);
+      const maxHp = Math.max(10, Math.round(monster.maxHp * fx.enemyHpMultiplier));
+      const attack = Math.max(1, Math.round(monster.attack * fx.enemyAttackMultiplier));
+      return {
+        ...monster,
+        hp: maxHp,
+        maxHp,
+        attack,
+      };
+    },
+    [activeMutatorsOverride]
+  );
 
   useEffect(() => {
     setActiveExerciseId(exerciseId);
@@ -241,6 +281,10 @@ export function BattleScreen({
       circuitId,
       circuitRoomIndex: 0,
       gardenPlotId,
+      activeMutators: activeMutatorsOverride,
+      weeklyWeekKey,
+      programDayIndex,
+      scriptedPoseEnabled,
     });
     sessionRef.current = session;
 
@@ -308,7 +352,18 @@ export function BattleScreen({
       session.stop();
       sessionRef.current = null;
     };
-  }, [exerciseId, levelId, mode, initialWave, circuitId, gardenPlotId]);
+  }, [
+    exerciseId,
+    levelId,
+    mode,
+    initialWave,
+    circuitId,
+    gardenPlotId,
+    activeMutatorsOverride,
+    weeklyWeekKey,
+    programDayIndex,
+    scriptedPoseEnabled,
+  ]);
 
   const handleAdvanceCircuitRoom = useCallback(() => {
     if (!circuitDef) return;
@@ -317,7 +372,7 @@ export function BattleScreen({
     if (!nextRoom) return;
 
     const template = MONSTERS[nextRoom.monsterId] ?? MONSTERS.BURGER;
-    const nextEnemy = createMonster(template);
+    const nextEnemy = applyMutatorScale(createMonster(template));
 
     setCircuitRestSec(null);
     setCircuitRoomIndex(nextIndex);
@@ -327,7 +382,7 @@ export function BattleScreen({
       exerciseId: nextRoom.exerciseId,
       roomIndex: nextIndex,
     });
-  }, [circuitDef, circuitRoomIndex]);
+  }, [circuitDef, circuitRoomIndex, applyMutatorScale]);
 
   const isBetweenCircuitRooms =
     mode === 'CIRCUIT' &&
@@ -403,14 +458,16 @@ export function BattleScreen({
     }
     if (mode === 'ENDLESS') {
       setCurrentWave(1);
-      const freshEnemy = createEndlessWaveMonster(1);
+      const freshEnemy = applyMutatorScale(createEndlessWaveMonster(1));
       startCombat(freshEnemy);
       sessionRef.current?.reset(freshEnemy, 1);
       return;
     }
     if (mode === 'CIRCUIT' && circuitDef && circuitDef.rooms[0]) {
       const firstRoom = circuitDef.rooms[0];
-      const freshEnemy = createMonster(MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER);
+      const freshEnemy = applyMutatorScale(
+        createMonster(MONSTERS[firstRoom.monsterId] ?? MONSTERS.BURGER)
+      );
       setCircuitRoomIndex(0);
       setActiveExerciseId(firstRoom.exerciseId);
       sessionRef.current?.advanceCircuitRoom({
@@ -421,7 +478,7 @@ export function BattleScreen({
       return;
     }
     const template = MONSTERS[initialMonsterId] ?? MONSTERS.BURGER;
-    const freshEnemy = createMonster(template);
+    const freshEnemy = applyMutatorScale(createMonster(template));
     startCombat(freshEnemy);
     sessionRef.current?.reset(freshEnemy);
   };
@@ -429,7 +486,7 @@ export function BattleScreen({
   const handleNextEndlessWave = () => {
     const nextWave = currentWave + 1;
     setCurrentWave(nextWave);
-    const nextEnemy = createEndlessWaveMonster(nextWave);
+    const nextEnemy = applyMutatorScale(createEndlessWaveMonster(nextWave));
     startCombat(nextEnemy);
     sessionRef.current?.reset(nextEnemy, nextWave);
   };
@@ -543,11 +600,13 @@ export function BattleScreen({
             label={
               mode === 'ENDLESS'
                 ? `${t('battle.waveLabel')} ${currentWave} · ${monsterName}`
-                : mode === 'CIRCUIT' && circuitDef
-                  ? `${t(CIRCUIT_KEYS[circuitDef.id].name)} (${circuitRoomIndex + 1}/${circuitDef.rooms.length}) · ${monsterName}`
-                  : mode === 'WEED' && typeof gardenPlotId === 'number'
-                    ? `${t('battle.weedModeBadge')} #${gardenPlotId + 1} · ${monsterName}`
-                    : monsterName
+                : mode === 'WEEKLY'
+                  ? `${t('weekly.title')} · ${monsterName}`
+                  : mode === 'CIRCUIT' && circuitDef
+                    ? `${t(CIRCUIT_KEYS[circuitDef.id].name)} (${circuitRoomIndex + 1}/${circuitDef.rooms.length}) · ${monsterName}`
+                    : mode === 'WEED' && typeof gardenPlotId === 'number'
+                      ? `${t('battle.weedModeBadge')} #${gardenPlotId + 1} · ${monsterName}`
+                      : monsterName
             }
             tone="enemy"
           />
@@ -572,6 +631,12 @@ export function BattleScreen({
               </>
             )}
             <span className="font-semibold">{t(EXERCISE_NAME_KEYS[activeExerciseId])}</span>
+            {sessionStatus.isScriptedPose && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-semibold text-amber-400">{t('battle.scriptedBadge')}</span>
+              </>
+            )}
             {showLoadoutBadge && (
               <>
                 <span aria-hidden="true">·</span>
@@ -651,6 +716,16 @@ export function BattleScreen({
                 <span aria-hidden="true">·</span>
                 <span className="font-numeric text-lime-300 font-semibold">
                   ☣️ {t('battle.toxicSurge')} +{sessionStatus.toxicSurgeStacks * 20}%
+                </span>
+              </>
+            )}
+            {sessionStatus.activeMutators.length > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-rose-300 font-medium">
+                  {sessionStatus.activeMutators
+                    .map((id) => t(MUTATOR_KEYS[id].name))
+                    .join(' · ')}
                 </span>
               </>
             )}
@@ -820,6 +895,12 @@ export function BattleScreen({
                 </div>
               )}
             </div>
+
+            {sessionStatus.activeMutators.includes('NO_ITEMS') && (
+              <div className="w-full bg-rose-950/40 border border-rose-700/50 rounded-lg px-3 py-1.5 text-[11px] font-medium text-rose-300 text-center">
+                {t('battle.mutatorsBlockedItems')}
+              </div>
+            )}
 
             {/* Active Toxic Debuff Warning */}
             {sessionStatus.isPlayerDebuffed && (
@@ -1190,6 +1271,55 @@ export function BattleScreen({
                         {t('battle.levelUnlocked')}
                       </div>
                     )}
+
+                    {sessionStatus.victorySummary.weeklyBonus && (
+                      <div className="bg-amber-950/35 border border-amber-700/50 rounded-md px-3 py-2 text-xs text-amber-300 font-medium">
+                        <div>{t('battle.weeklyCleared')}</div>
+                        <div className="font-numeric mt-0.5">
+                          +{sessionStatus.victorySummary.weeklyBonus.bonusCoins}{' '}
+                          {t('talents.respecCost')} · +{sessionStatus.victorySummary.weeklyBonus.bonusXp} XP
+                        </div>
+                      </div>
+                    )}
+
+                    {sessionStatus.victorySummary.programBonus && (
+                      <div className="bg-emerald-950/35 border border-emerald-700/50 rounded-md px-3 py-2 text-xs text-emerald-300 font-medium">
+                        <div>
+                          {sessionStatus.victorySummary.programBonus.completedProgram
+                            ? t('battle.programFinished')
+                            : t('battle.programDayClear')}
+                        </div>
+                        <div className="font-numeric mt-0.5">
+                          +{sessionStatus.victorySummary.programBonus.bonusCoins}{' '}
+                          {t('talents.respecCost')} · +{sessionStatus.victorySummary.programBonus.bonusXp} XP
+                        </div>
+                      </div>
+                    )}
+
+                    {sessionStatus.victorySummary.unlockedArtifactId && (
+                      <div className="flex justify-between items-center text-xs pt-1 text-fuchsia-300 font-semibold">
+                        <span>{t('battle.artifactUnlocked')}</span>
+                        <span>
+                          {t(ARTIFACT_KEYS[sessionStatus.victorySummary.unlockedArtifactId].name)}
+                        </span>
+                      </div>
+                    )}
+
+                    {sessionStatus.victorySummary.brokenRecords &&
+                      sessionStatus.victorySummary.brokenRecords.length > 0 && (
+                        <div className="pt-2 border-t border-slate-800 text-left text-xs">
+                          <div className="font-semibold text-sky-400">
+                            {t('battle.newRecords')}
+                          </div>
+                          <div className="text-slate-200 mt-0.5">
+                            {sessionStatus.victorySummary.brokenRecords
+                              .map((key) =>
+                                PR_METRIC_KEYS[key] ? t(PR_METRIC_KEYS[key]) : key
+                              )
+                              .join(' · ')}
+                          </div>
+                        </div>
+                      )}
 
                     {sessionStatus.victorySummary.newlyUnlockedAchievements.length > 0 && (
                       <div className="pt-2 border-t border-slate-800 text-left space-y-1">

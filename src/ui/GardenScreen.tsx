@@ -132,8 +132,11 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
     const reward = harvestPlot(plotId);
     if (!reward) return;
 
+    const toastPrefix = reward.wasMutant
+      ? `✦ ${t('garden.mutantHarvestToast')}`
+      : t('garden.harvestToast');
     const parts = [
-      `${t('garden.harvestToast')}: ${SEEDS[seedId].icon} ${t(SEED_KEYS[seedId].name)} ×${reward.cropQty}`,
+      `${toastPrefix}: ${SEEDS[seedId].icon} ${t(SEED_KEYS[seedId].name)} ×${reward.cropQty}`,
       `+${reward.xp} XP`,
     ];
     if (reward.healHp > 0) {
@@ -156,6 +159,7 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
     let totalXp = 0;
     let totalHeal = 0;
     let anyLeveledUp = false;
+    let anyMutant = false;
     const droppedNames: string[] = [];
     let count = 0;
 
@@ -167,6 +171,7 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
           cropTotals[reward.cropId] = (cropTotals[reward.cropId] ?? 0) + reward.cropQty;
           totalXp += reward.xp;
           totalHeal += reward.healHp;
+          if (reward.wasMutant) anyMutant = true;
           if (reward.leveledUp) anyLeveledUp = true;
           if (reward.droppedItemId) {
             const itemName = ITEM_NAME_KEYS[reward.droppedItemId]
@@ -183,8 +188,11 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
       const cropSummary = SEED_ORDER.filter((id) => (cropTotals[id] ?? 0) > 0)
         .map((id) => `${SEEDS[id].icon} ${t(SEED_KEYS[id].name)} ×${cropTotals[id]}`)
         .join(', ');
+      const toastPrefix = anyMutant
+        ? `✦ ${t('garden.mutantHarvestToast')}`
+        : t('garden.harvestToast');
       const parts = [
-        `${t('garden.harvestToast')}: ${cropSummary}`,
+        `${toastPrefix}: ${cropSummary}`,
         `+${totalXp} XP`,
       ];
       if (totalHeal > 0) parts.push(`+${totalHeal} HP`);
@@ -563,24 +571,38 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
               const seedDef = SEEDS[plot.seedId];
               const ready = isPlotReadyToHarvest(plot);
               const stage = getPlantStage(plot);
+              const isMutant = Boolean(plot.isMutant);
               const pct = Math.min(100, Math.round((plot.growth / seedDef.growthRequired) * 100));
+              const yieldQty = isMutant ? seedDef.harvestCropYield * 2 : seedDef.harvestCropYield;
+              const yieldXp = isMutant ? Math.round(seedDef.harvestXp * 1.5) : seedDef.harvestXp;
 
               return (
                 <div
                   key={plot.id}
                   className={`rounded-xl border p-5 flex flex-col justify-between gap-4 min-h-[210px] ${
-                    ready
-                      ? 'bg-emerald-950/25 border-emerald-500'
-                      : 'bg-slate-900 border-slate-800'
+                    isMutant
+                      ? ready
+                        ? 'bg-amber-950/25 border-amber-400'
+                        : 'bg-slate-900 border-amber-400/80'
+                      : ready
+                        ? 'bg-emerald-950/25 border-emerald-500'
+                        : 'bg-slate-900 border-slate-800'
                   }`}
                 >
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="text-slate-400">
                       {t('garden.plotLabel')} #{idx + 1}
                     </span>
-                    <span className={ready ? 'text-emerald-400 font-bold' : 'text-amber-400 font-medium'}>
-                      {ready ? t('garden.readyBadge') : t(STAGE_KEYS[stage])}
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isMutant && (
+                        <span className="text-amber-300 font-bold">
+                          ✦ {t('garden.mutantLabel')}
+                        </span>
+                      )}
+                      <span className={ready ? 'text-emerald-400 font-bold' : 'text-amber-400 font-medium'}>
+                        {ready ? t('garden.readyBadge') : t(STAGE_KEYS[stage])}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-4">
@@ -600,23 +622,31 @@ export function GardenScreen({ onBack, onStartWeedBattle, onOpenSanctuary }: Gar
                       <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                         <div
                           className={`h-full transition-[width] duration-200 ${
-                            ready ? 'bg-emerald-400' : 'bg-sky-500'
+                            isMutant ? 'bg-amber-400' : ready ? 'bg-emerald-400' : 'bg-sky-500'
                           }`}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
+                      {isMutant && (
+                        <div className="text-[11px] text-amber-300/95 leading-snug">
+                          {t('garden.mutantBonusNote')}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {ready ? (
                     <button
                       onClick={() => handleHarvest(plot.id)}
-                      className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+                      className={`w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
+                        isMutant
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      }`}
                     >
                       <Sprout className="w-4 h-4" />
                       <span>
-                        {t('garden.harvest')} (+{seedDef.harvestCropYield} {t('garden.cropUnit')} · +
-                        {seedDef.harvestXp} XP)
+                        {t('garden.harvest')} (+{yieldQty} {t('garden.cropUnit')} · +{yieldXp} XP)
                       </span>
                     </button>
                   ) : (

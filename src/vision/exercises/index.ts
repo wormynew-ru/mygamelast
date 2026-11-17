@@ -25,3 +25,12 @@ export type { WallSitConfig } from './WallSitDetector';
 
 export { OverheadPressDetector } from './OverheadPressDetector';
 export type { OverheadPressConfig } from './OverheadPressDetector';
+
+export { LungeDetector } from './LungeDetector';
+export type { LungeConfig } from './LungeDetector';
+
+export { HighKneesDetector } from './HighKneesDetector';
+export type { HighKneesConfig } from './HighKneesDetector';
+
+export { FrontRaiseDetector } from './FrontRaiseDetector';
+export type { FrontRaiseConfig } from './FrontRaiseDetector';

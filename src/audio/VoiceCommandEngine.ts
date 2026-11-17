@@ -28,6 +28,7 @@ export type VoiceCommand =
   | { type: 'NAV_SETTINGS' }
   | { type: 'NAV_GARDEN' }
   | { type: 'NAV_SANCTUARY' }
+  | { type: 'NAV_TALENTS' }
   | { type: 'GARDEN_WATER' }
   | { type: 'GARDEN_HARVEST' }
   | { type: 'GARDEN_WEED' }
@@ -186,6 +187,18 @@ const PHRASE_RULES: readonly PhraseRule[] = [
     build: () => ({ type: 'SELECT_EXERCISE', exerciseId: 'PLANK' }),
   },
   {
+    phrases: ['высокое поднимание бедра', 'поднимание бедра', 'бег на месте', 'high knees', 'high knee'],
+    build: () => ({ type: 'SELECT_EXERCISE', exerciseId: 'HIGH_KNEES' }),
+  },
+  {
+    phrases: ['подъем рук вперед', 'подъемы вперед', 'махи вперед', 'front raise', 'front raises'],
+    build: () => ({ type: 'SELECT_EXERCISE', exerciseId: 'FRONT_RAISE' }),
+  },
+  {
+    phrases: ['выпады', 'выпад', 'lunge', 'lunges'],
+    build: () => ({ type: 'SELECT_EXERCISE', exerciseId: 'LUNGE' }),
+  },
+  {
     phrases: ['жим'],
     build: () => ({ type: 'SELECT_EXERCISE', exerciseId: 'OVERHEAD_PRESS' }),
   },
@@ -262,6 +275,10 @@ const PHRASE_RULES: readonly PhraseRule[] = [
   {
     phrases: ['убежище', 'фито лаборатория', 'миксы', 'mix lab', 'sanctuary', 'hideout'],
     build: () => ({ type: 'NAV_SANCTUARY' }),
+  },
+  {
+    phrases: ['дерево талантов', 'таланты', 'навыки', 'talent tree', 'talents', 'skills'],
+    build: () => ({ type: 'NAV_TALENTS' }),
   },
   {
     phrases: ['полить все', 'полить сад', 'полить', 'полив', 'лейка', 'water garden', 'water all', 'water'],

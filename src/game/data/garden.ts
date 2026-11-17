@@ -197,6 +197,7 @@ export function normalizeGardenState(raw: Partial<GardenState> | undefined): Gar
       seedId: validSeed,
       growth: validSeed ? Math.max(0, Math.min(maxGrowth, src.growth ?? 0)) : 0,
       weedId: validWeed,
+      isMutant: validSeed ? Boolean(src.isMutant) : false,
     };
   });
 
@@ -264,31 +265,37 @@ export function getPlantVisualEmoji(plot: GardenPlotState): string {
   }
 }
 
+export const BASE_MUTATION_CHANCE = 0.12;
+
 export interface HarvestReward {
   cropId: SeedId;
   cropQty: number;
   xp: number;
   healHp: number;
   droppedItemId: string | null;
+  wasMutant?: boolean;
 }
 
 export function computeHarvestReward(
   seedId: SeedId,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  isMutant: boolean = false
 ): HarvestReward {
   const def = SEEDS[seedId];
   let droppedItemId: string | null = null;
-  if (def.dropPool.length > 0 && rng() <= def.dropChance) {
+  const effectiveDropChance = isMutant ? Math.min(1, def.dropChance + 0.35) : def.dropChance;
+  if (def.dropPool.length > 0 && rng() <= effectiveDropChance) {
     const idx = Math.min(def.dropPool.length - 1, Math.floor(rng() * def.dropPool.length));
     droppedItemId = def.dropPool[idx] ?? null;
   }
 
   return {
     cropId: seedId,
-    cropQty: def.harvestCropYield,
-    xp: def.harvestXp,
+    cropQty: isMutant ? def.harvestCropYield * 2 : def.harvestCropYield,
+    xp: isMutant ? Math.round(def.harvestXp * 1.5) : def.harvestXp,
     healHp: def.healHp,
     droppedItemId,
+    wasMutant: isMutant,
   };
 }
 
@@ -423,12 +430,14 @@ export function applyWorkoutVictoryToGarden(
   garden: GardenState,
   options: {
     suppressWeedSpawn?: boolean;
+    mutationBonusChance?: number;
     rng?: () => number;
   } = {}
 ): GardenState {
   const rng = options.rng ?? Math.random;
   const can = WATERING_CANS[garden.wateringCanTier];
   const workoutGrowthStep = can.autoWaterOnWorkout ? 2 : 1;
+  const mutationChance = Math.min(0.6, BASE_MUTATION_CHANCE + (options.mutationBonusChance ?? 0));
 
   const nextPlots = garden.plots.map((p, idx) => {
     if (idx >= garden.unlockedPlots || !p.seedId || p.weedId !== null) {
@@ -436,9 +445,11 @@ export function applyWorkoutVictoryToGarden(
     }
     const maxG = SEEDS[p.seedId].growthRequired;
     if (p.growth >= maxG) return p;
+    const becameMutant = Boolean(p.isMutant) || rng() < mutationChance;
     return {
       ...p,
       growth: Math.min(maxG, p.growth + workoutGrowthStep),
+      isMutant: becameMutant,
     };
   });
 

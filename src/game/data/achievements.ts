@@ -25,7 +25,13 @@ export type AchievementId =
   | 'WEED_SLAYER'
   | 'BOTANICAL_ALCHEMIST'
   | 'SYNERGY_ARCHITECT'
-  | 'MASTER_ALCHEMIST';
+  | 'MASTER_ALCHEMIST'
+  | 'TALENT_AWAKENED'
+  | 'APEX_CHALLENGER'
+  | 'ARTIFACT_KEEPER'
+  | 'WEEKLY_CONQUEROR'
+  | 'PROGRAM_FINISHER'
+  | 'MUTANT_BOTANIST';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -134,6 +140,36 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'MASTER_ALCHEMIST',
     icon: '🧪',
     check: (state) => (state.sanctuary?.totalCrafted ?? 0) >= 10,
+  },
+  {
+    id: 'TALENT_AWAKENED',
+    icon: '🌟',
+    check: (state) => (state.talents?.spentPoints ?? 0) >= 1,
+  },
+  {
+    id: 'APEX_CHALLENGER',
+    icon: '👑',
+    check: (state) => (state.endlessStats?.bestWave ?? 0) >= 10,
+  },
+  {
+    id: 'ARTIFACT_KEEPER',
+    icon: '💎',
+    check: (state) => (state.artifacts?.unlockedIds?.length ?? 0) >= 1,
+  },
+  {
+    id: 'WEEKLY_CONQUEROR',
+    icon: '🗓️',
+    check: (state) => (state.weeklyChallenge?.totalCompleted ?? 0) >= 1,
+  },
+  {
+    id: 'PROGRAM_FINISHER',
+    icon: '📜',
+    check: (state) => (state.programs?.totalProgramsFinished ?? 0) >= 1,
+  },
+  {
+    id: 'MUTANT_BOTANIST',
+    icon: '🧬',
+    check: (state) => (state.garden?.plots ?? []).some((p) => Boolean(p.isMutant)),
   },
 ];
 

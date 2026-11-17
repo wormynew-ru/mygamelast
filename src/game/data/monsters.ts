@@ -232,6 +232,60 @@ export const MONSTERS: Record<string, MonsterTemplate> = {
     description: 'A supreme deep-dish overlord commanding endless waves.',
   },
 
+  BOSS_DONUT_TITAN: {
+    id: 'BOSS_DONUT_TITAN',
+    name: 'Glazed Donut Titan',
+    maxHp: 280,
+    attack: 18,
+    defense: 6,
+    xpReward: 210,
+    coinReward: 150,
+    isBoss: true,
+    archetype: 'BOSS',
+    weakTo: 'LUNGE',
+    resistantTo: 'HIGH_KNEES',
+    shieldHits: 3,
+    maxShieldHits: 3,
+    phaseThresholds: [0.7, 0.35],
+    sprite: '👑🍩',
+    description: 'An armored frosting colossus cracked open by deep lunges.',
+  },
+
+  BOSS_SODA_OVERLORD: {
+    id: 'BOSS_SODA_OVERLORD',
+    name: 'Carbonated Overlord',
+    maxHp: 320,
+    attack: 20,
+    defense: 6,
+    xpReward: 240,
+    coinReward: 180,
+    isBoss: true,
+    archetype: 'BOSS',
+    weakTo: 'FRONT_RAISE',
+    resistantTo: 'ARM_HOLD',
+    phaseThresholds: [0.7, 0.35],
+    sprite: '👑🥤',
+    description: 'A pressurized soda sovereign destabilized by crisp front raises.',
+  },
+
+  BOSS_FRIES_EMPEROR: {
+    id: 'BOSS_FRIES_EMPEROR',
+    name: 'Golden Fries Emperor',
+    maxHp: 350,
+    attack: 22,
+    defense: 7,
+    xpReward: 280,
+    coinReward: 210,
+    isBoss: true,
+    archetype: 'BOSS',
+    weakTo: 'HIGH_KNEES',
+    resistantTo: 'SQUAT',
+    attackIntervalMs: 4600,
+    phaseThresholds: [0.75, 0.4],
+    sprite: '👑🍟',
+    description: 'A hyper-speed crisp monarch outpaced only by rapid high knees.',
+  },
+
   WEED_DANDELION: {
     id: 'WEED_DANDELION',
     name: 'Grease Dandelion',
@@ -297,12 +351,15 @@ const ENDLESS_REGULAR_POOL: MonsterTemplate[] = [
 
 const ENDLESS_BOSS_POOL: MonsterTemplate[] = [
   MONSTERS.BOSS_KING_BURGER,
+  MONSTERS.BOSS_DONUT_TITAN,
+  MONSTERS.BOSS_SODA_OVERLORD,
+  MONSTERS.BOSS_FRIES_EMPEROR,
   MONSTERS.BOSS_PIZZA_EMPEROR,
 ];
 
 /**
  * Generate a scaled enemy for Endless Arena wave N (1-indexed).
- * Every 5th wave spawns an Elite Boss.
+ * Every 5th wave spawns an Elite Boss (Waves 5/10/15/20 feature escalating bosses).
  */
 export function createEndlessWaveMonster(wave: number): MonsterStats {
   const safeWave = Math.max(1, Math.floor(wave));

@@ -1113,4 +1113,124 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('constructs v3.5 detectors (LUNGE, HIGH_KNEES, FRONT_RAISE) with custom calibration', () => {
+    const custom = {
+      ...DEFAULT_EXERCISE_CALIBRATION,
+      lungeBottomAngle: 112,
+      highKneesLiftAngle: 120,
+      frontRaisePeakAngle: 78,
+    };
+
+    const lunge = createExerciseDetector('LUNGE', custom);
+    const highKnees = createExerciseDetector('HIGH_KNEES', custom);
+    const frontRaise = createExerciseDetector('FRONT_RAISE', custom);
+
+    expect((lunge.getConfig() as { bottomAngle: number }).bottomAngle).toBe(112);
+    expect((highKnees.getConfig() as { liftAngle: number }).liftAngle).toBe(120);
+    expect((frontRaise.getConfig() as { peakAngle: number }).peakAngle).toBe(78);
+  });
+
+  it('applies talents, equipped artifacts, and run mutators (TOXIC_MIST, BLITZ_CLOCK) in combat', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      useGameStore.setState((state) => ({
+        player: { ...state.player, level: 4 },
+      }));
+      const store = useGameStore.getState();
+      expect(store.upgradeTalent('MIGHT_STRIKE')).toBe(true); // +2 ATK
+      expect(store.upgradeTalent('BASTION_VITALITY')).toBe(true); // +15 maxHP
+      expect(store.upgradeTalent('BASTION_AEGIS')).toBe(true); // +2 DEF
+      expect(store.unlockArtifact('TITAN_CORE')).toBe(true); // +1 ATK, +4 DEF, +10 thorns
+      expect(store.equipArtifact('TITAN_CORE')).toBe(true);
+
+      store.startCombat({ ...createMonster(MONSTERS.BURGER), hp: 100, attack: 10 });
+      const detector = createStubDetector([
+        { phase: 'DOWN', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 200 },
+        { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 500 },
+      ]);
+      const tracker = createMockTracker();
+      const session = new WorkoutSession({
+        videoElement: document.createElement('video'),
+        canvasElement: document.createElement('canvas'),
+        exerciseDetector: detector,
+        exerciseDamageMultiplier: 1.25,
+        exerciseId: 'LUNGE',
+        activeMutators: ['TOXIC_MIST', 'BLITZ_CLOCK'],
+        poseTracker: tracker,
+        soundFX: createMockSoundFX(),
+      });
+
+      await session.start();
+      const statusBefore = session.getStatus();
+      expect(statusBefore.activeMutators).toEqual(['TOXIC_MIST', 'BLITZ_CLOCK']);
+      // 7000ms * 0.78 = 5460ms
+      expect(statusBefore.monsterAttackIntervalMs).toBe(5460);
+
+      // First frame triggers TOXIC_MIST debuff
+      tracker.triggerPose(1000);
+      expect(session.getStatus().isPlayerDebuffed).toBe(true);
+
+      // 6500ms >= 1000 + 5460ms -> counter-attack fires (blocked with 10 thorns from TITAN_CORE!)
+      tracker.triggerPose(6500);
+      expect(session.getStatus().lastMonsterAttackEvent?.wasBlocked).toBe(true);
+      expect(session.getStatus().lastMonsterAttackEvent?.thornsDamage).toBe(10);
+
+      session.stop();
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('completes Weekly Challenge, advances Program Day, unlocks VAMPIRIC_FANG, and records PRs', async () => {
+    const store = useGameStore.getState();
+    store.startProgram('STARTER_3D', '2026-11-17');
+    store.startCombat({
+      ...createMonster(MONSTERS.BOSS_KING_BURGER),
+      maxHp: 12,
+      hp: 12,
+      defense: 0,
+      shieldHits: 0,
+      maxShieldHits: 0,
+      phaseThresholds: [],
+    });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 1, progress: 0, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.25,
+      exerciseId: 'SQUAT',
+      mode: 'WEEKLY',
+      weeklyWeekKey: '2026-W47',
+      programDayIndex: 0,
+      poseTracker: tracker,
+      soundFX: createMockSoundFX(),
+    });
+
+    await session.start();
+    tracker.triggerPose(500);
+    tracker.triggerPose(1000);
+
+    const status = session.getStatus();
+    expect(status.state).toBe('VICTORY');
+    expect(status.victorySummary?.weeklyBonus?.firstCompletion).toBe(true);
+    expect(status.victorySummary?.programBonus?.completedProgram).toBe(false);
+    expect(status.victorySummary?.unlockedArtifactId).toBe('VAMPIRIC_FANG');
+    expect(status.victorySummary?.brokenRecords).toContain('REPS');
+    expect(status.victorySummary?.brokenRecords).toContain('HIT');
+
+    const finalState = useGameStore.getState();
+    expect(finalState.weeklyChallenge.completedWeekKeys).toContain('2026-W47');
+    expect(finalState.artifacts.unlockedIds).toContain('VAMPIRIC_FANG');
+    expect(finalState.programs.active?.completedDays).toEqual([0]);
+    expect(finalState.personalRecords.SQUAT.bestBattleReps).toBe(1);
+
+    session.stop();
+  });
 });

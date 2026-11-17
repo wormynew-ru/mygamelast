@@ -246,5 +246,32 @@ describe('PoseTracker', () => {
       // Stop on IDLE tracker keeps it IDLE
       expect(tracker.getStatus()).toBe('IDLE');
     });
+
+    it('runs scripted mode cleanly without camera or MediaPipe model download', async () => {
+      const scriptedTracker = new PoseTracker(
+        {},
+        {
+          scriptedPoseGenerator: () => ({
+            landmarks: Array(33).fill(null).map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.99 })),
+            worldLandmarks: [],
+          }),
+        }
+      );
+      const onPose = vi.fn();
+      scriptedTracker.onPose(onPose);
+
+      await scriptedTracker.loadModel();
+      expect(scriptedTracker.isScriptedMode()).toBe(true);
+      expect(scriptedTracker.getStatus()).toBe('READY');
+
+      const video = document.createElement('video');
+      await scriptedTracker.startCamera(video);
+      scriptedTracker.start();
+      expect(scriptedTracker.getStatus()).toBe('RUNNING');
+      expect(onPose).toHaveBeenCalledTimes(1);
+
+      scriptedTracker.dispose();
+      expect(scriptedTracker.getStatus()).toBe('IDLE');
+    });
   });
 });

@@ -9,16 +9,22 @@
 import type { Landmark, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { ExerciseDetector, ExerciseState } from '../vision/types';
 import type {
+  ArtifactId,
   BattleRank,
   EquipmentLoadout,
   ExerciseCalibrationSettings,
   ExerciseMatchup,
   MonsterStats,
   MonsterTrophyId,
+  MutatorId,
   SanctuaryMixId,
   SanctuarySynergyId,
 } from '../game/types';
 import { PoseTracker, type PoseDelegate, type TrackerError } from '../vision/PoseTracker';
+import {
+  createScriptedPoseGenerator,
+  type ScriptedPoseGenerator,
+} from '../vision/ScriptedPoseSource';
 import {
   SquatDetector,
   PushUpDetector,
@@ -27,6 +33,9 @@ import {
   ArmHoldDetector,
   WallSitDetector,
   OverheadPressDetector,
+  LungeDetector,
+  HighKneesDetector,
+  FrontRaiseDetector,
 } from '../vision/exercises';
 import {
   COMBO_WINDOW_BASE_MS,
@@ -61,6 +70,9 @@ import {
   getSanctuaryDamageMultiplierForExercise,
   getTrophyForArchetype,
 } from '../game/data/sanctuary';
+import { getAggregatedTalentModifiers } from '../game/data/talents';
+import { getAggregatedArtifactEffects, getArtifactUnlockForWave } from '../game/data/artifacts';
+import { getAggregatedMutatorEffects, getISOWeekKey } from '../game/data/programs';
 import { SoundFX } from '../audio/SoundFX';
 import { DEFAULT_EXERCISE_CALIBRATION, useGameStore } from '../game/store';
 import { t } from '../i18n';
@@ -75,7 +87,7 @@ export type SessionState =
   | 'ERROR';
 
 export type AutoPauseReason = 'USER' | 'LOW_VISIBILITY' | 'TAB_HIDDEN' | null;
-export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'WEED';
+export type BattleMode = 'CAMPAIGN' | 'ENDLESS' | 'CIRCUIT' | 'WEED' | 'WEEKLY';
 
 export interface CombatEvent {
   id: number;
@@ -123,6 +135,11 @@ export interface VictorySummary {
   circuitCompleted?: boolean;
   gardenPlotId?: number;
   gardenPlotCleared?: boolean;
+  brokenRecords?: string[];
+  unlockedArtifactId?: ArtifactId | null;
+  programBonus?: { completedProgram: boolean; bonusCoins: number; bonusXp: number } | null;
+  weeklyBonus?: { firstCompletion: boolean; bonusCoins: number; bonusXp: number } | null;
+  mutatorsApplied?: MutatorId[];
 }
 
 export interface SessionStatus {
@@ -156,6 +173,8 @@ export interface SessionStatus {
   activeSynergies: SanctuarySynergyId[];
   hasRiskyMutagen: boolean;
   toxicSurgeStacks: number;
+  activeMutators: MutatorId[];
+  isScriptedPose: boolean;
 }
 
 export type SessionStateChangeCallback = (status: SessionStatus) => void;
@@ -172,6 +191,8 @@ export interface PoseTrackerLike {
   getError?(): TrackerError | null;
   getActiveDelegate?(): PoseDelegate | null;
   didFallbackToCpu?(): boolean;
+  setScriptedPoseGenerator?(generator: ScriptedPoseGenerator | null): void;
+  isScriptedMode?(): boolean;
 }
 
 export interface SoundFXLike {
@@ -211,6 +232,10 @@ export interface WorkoutSessionConfig {
   cameraFacingMode?: 'user' | 'environment';
   targetPoseFps?: 15 | 30 | 60;
   poseDelegate?: PoseDelegate;
+  activeMutators?: MutatorId[];
+  weeklyWeekKey?: string;
+  programDayIndex?: number;
+  scriptedPoseEnabled?: boolean;
   /** Optional dependency injection for testing */
   poseTracker?: PoseTrackerLike;
   soundFX?: SoundFXLike;
@@ -241,6 +266,10 @@ export class WorkoutSession {
   private circuitRoomIndex: number;
   private gardenPlotId?: number;
   private loadoutOverride?: EquipmentLoadout;
+  private activeMutators: MutatorId[];
+  private weeklyWeekKey?: string;
+  private programDayIndex?: number;
+  private scriptedPoseEnabled: boolean;
 
   private videoElement: HTMLVideoElement;
   private canvasElement: HTMLCanvasElement;
@@ -272,12 +301,14 @@ export class WorkoutSession {
   private debuffRemainingSec = 0;
   private debuffCleansedId = 0;
   private toxicSurgeStacks = 0;
+  private initialToxicApplied = false;
   private battleActiveStartTs: number | null = null;
   private battleAccumulatedMs = 0;
   private totalDamageTakenInBattle = 0;
   private battleReps = 0;
   private battleHoldSeconds = 0;
   private battleTonnageKg = 0;
+  private bestHitDamageInBattle = 0;
   private lastRecordedTimestamp = 0;
 
   private lastCombatEvent: CombatEvent | null = null;
@@ -321,6 +352,10 @@ export class WorkoutSession {
     this.circuitRoomIndex = config.circuitRoomIndex ?? 0;
     this.gardenPlotId = config.gardenPlotId;
     this.loadoutOverride = config.loadout;
+    this.activeMutators = config.activeMutators ? [...config.activeMutators] : [];
+    this.weeklyWeekKey = config.weeklyWeekKey;
+    this.programDayIndex = config.programDayIndex;
+    this.scriptedPoseEnabled = Boolean(config.scriptedPoseEnabled);
     this.enableSound = config.enableSound ?? true;
     this.enableVoice = config.enableVoice ?? false;
     this.requestedPoseDelegate = config.poseDelegate ?? 'GPU';
@@ -338,6 +373,10 @@ export class WorkoutSession {
         {
           delegate: this.requestedPoseDelegate,
           targetInferenceFPS: targetPoseFps,
+          scriptedPoseGenerator:
+            this.scriptedPoseEnabled && this.exerciseId
+              ? createScriptedPoseGenerator(this.exerciseId)
+              : null,
         }
       );
 
@@ -510,6 +549,9 @@ export class WorkoutSession {
     this.exerciseDetector =
       params.detector ??
       createExerciseDetector(params.exerciseId, store.settings.exerciseCalibration);
+    if (this.scriptedPoseEnabled) {
+      this.poseTracker.setScriptedPoseGenerator?.(createScriptedPoseGenerator(params.exerciseId));
+    }
     this.circuitRoomIndex = params.roomIndex;
 
     this.resetTrackingCounters();
@@ -548,7 +590,10 @@ export class WorkoutSession {
   getStatus(): SessionStatus {
     const store = useGameStore.getState();
     const enemy = store.currentEnemy;
-    const attackIntervalMs = enemy ? getMonsterAttackIntervalMs(enemy) : 7000;
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+    const attackIntervalMs = enemy
+      ? Math.max(2200, Math.round(getMonsterAttackIntervalMs(enemy) * mutatorEffects.enemyIntervalMultiplier))
+      : 7000;
     const matchup: ExerciseMatchup = enemy
       ? getExerciseMatchup(enemy, this.exerciseId)
       : 'NEUTRAL';
@@ -587,6 +632,8 @@ export class WorkoutSession {
       activeSynergies: sanctuaryBuffs.activeSynergies,
       hasRiskyMutagen: sanctuaryBuffs.hasRiskyMutagen,
       toxicSurgeStacks: this.toxicSurgeStacks,
+      activeMutators: [...this.activeMutators],
+      isScriptedPose: this.poseTracker.isScriptedMode?.() ?? this.scriptedPoseEnabled,
     };
   }
 
@@ -639,12 +686,14 @@ export class WorkoutSession {
     this.debuffRemainingSec = 0;
     this.debuffCleansedId = 0;
     this.toxicSurgeStacks = 0;
+    this.initialToxicApplied = false;
     this.battleActiveStartTs = null;
     this.battleAccumulatedMs = 0;
     this.totalDamageTakenInBattle = 0;
     this.battleReps = 0;
     this.battleHoldSeconds = 0;
     this.battleTonnageKg = 0;
+    this.bestHitDamageInBattle = 0;
     this.lastRecordedTimestamp = 0;
 
     this.lastHudNotifyTime = -Infinity;
@@ -674,6 +723,22 @@ export class WorkoutSession {
       this.battleActiveStartTs = timestamp;
     }
     this.lastRecordedTimestamp = timestamp;
+
+    if (!this.initialToxicApplied) {
+      this.initialToxicApplied = true;
+      const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+      if (mutatorEffects.startsToxic) {
+        const store = useGameStore.getState();
+        const sanctuaryBuffs = getAggregatedSanctuaryBuffs(
+          store.sanctuary?.activeBuffs ?? [],
+          store.sanctuary?.labTier ?? 1
+        );
+        if (!sanctuaryBuffs.toxicImmunity) {
+          this.debuffExpiresAt = timestamp + TOXIC_DEBUFF_DURATION_MS;
+          this.debuffRemainingSec = Math.ceil(TOXIC_DEBUFF_DURATION_MS / 1000);
+        }
+      }
+    }
 
     this.updateFps(timestamp);
     this.updateComboAndDebuffTimers(timestamp);
@@ -834,12 +899,18 @@ export class WorkoutSession {
 
   private updateComboAndDebuffTimers(timestamp: number): void {
     const store = useGameStore.getState();
+    const talentMods = getAggregatedTalentModifiers(store.talents);
+    const artifactIds = store.artifacts?.equippedIds ?? [];
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
     const effective = getEffectivePlayerStats(
       store.player,
       store.inventory.equippedItems,
       ITEMS,
       store.sanctuary?.activeBuffs ?? [],
-      store.sanctuary?.labTier ?? 1
+      store.sanctuary?.labTier ?? 1,
+      talentMods,
+      artifactIds,
+      mutatorEffects.playerDefenseDelta
     );
     const windowMs = Math.max(1200, COMBO_WINDOW_BASE_MS + (effective.comboWindowBonusMs ?? 0));
 
@@ -888,7 +959,11 @@ export class WorkoutSession {
       return;
     }
 
-    const intervalMs = getMonsterAttackIntervalMs(enemy);
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+    const intervalMs = Math.max(
+      2200,
+      Math.round(getMonsterAttackIntervalMs(enemy) * mutatorEffects.enemyIntervalMultiplier)
+    );
     const elapsed = Math.max(0, timestamp - this.lastMonsterAttackTime);
     this.nextAttackProgress = Math.min(1, elapsed / intervalMs);
 
@@ -918,12 +993,18 @@ export class WorkoutSession {
     const activeBuffs = store.sanctuary?.activeBuffs ?? [];
     const labTier = store.sanctuary?.labTier ?? 1;
     const sanctuaryBuffs = getAggregatedSanctuaryBuffs(activeBuffs, labTier);
+    const talentMods = getAggregatedTalentModifiers(store.talents);
+    const artifactIds = store.artifacts?.equippedIds ?? [];
+    const artifactEffects = getAggregatedArtifactEffects(artifactIds);
     const effectivePlayer = getEffectivePlayerStats(
       basePlayer,
       store.inventory.equippedItems,
       ITEMS,
       activeBuffs,
-      labTier
+      labTier,
+      talentMods,
+      artifactIds,
+      mutatorEffects.playerDefenseDelta
     );
 
     const { damageTaken, wasBlocked } = calculateMonsterCounterAttack(
@@ -942,14 +1023,25 @@ export class WorkoutSession {
       this.debuffExpiresAt = null;
       this.debuffRemainingSec = 0;
 
-      if (damageTaken === 0 && sanctuaryBuffs.thornsReflectDamage > 0) {
-        thornsDamage = sanctuaryBuffs.thornsReflectDamage;
+      const perfectSanctuaryThorns =
+        damageTaken === 0 ? sanctuaryBuffs.thornsReflectDamage : 0;
+      const totalThorns =
+        perfectSanctuaryThorns +
+        talentMods.thornsDamageOnBlock +
+        artifactEffects.thornsReflectDamage;
+
+      if (totalThorns > 0) {
+        thornsDamage = totalThorns;
         reflectedEnemy = {
           ...enemy,
           hp: Math.max(0, enemy.hp - thornsDamage),
         };
         store.updateEnemy(reflectedEnemy);
-        if (sanctuaryBuffs.thornsUltChargeGain > 0) {
+        if (
+          damageTaken === 0 &&
+          sanctuaryBuffs.thornsReflectDamage > 0 &&
+          sanctuaryBuffs.thornsUltChargeGain > 0
+        ) {
           this.ultimateCharge = Math.min(
             ULTIMATE_CHARGE_MAX,
             this.ultimateCharge + sanctuaryBuffs.thornsUltChargeGain
@@ -1013,7 +1105,9 @@ export class WorkoutSession {
       const latest = useGameStore.getState();
       const xpMult =
         getLoadoutXpMultiplier(this.getActiveLoadout(), this.exerciseId) *
-        sanctuaryBuffs.xpMultiplier;
+        sanctuaryBuffs.xpMultiplier *
+        talentMods.xpMultiplier *
+        mutatorEffects.xpMultiplier;
       const xpGained = Math.round(reflectedEnemy.xpReward * xpMult);
       let nextPlayer = { ...latest.player, xp: latest.player.xp + xpGained };
       let leveledUp = false;
@@ -1039,11 +1133,16 @@ export class WorkoutSession {
 
     const activeLoadout = this.getActiveLoadout();
 
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+
     for (let i = 0; i < hits; i++) {
       const latestStore = useGameStore.getState();
       const activeBuffs = latestStore.sanctuary?.activeBuffs ?? [];
       const labTier = latestStore.sanctuary?.labTier ?? 1;
       const sanctuaryBuffs = getAggregatedSanctuaryBuffs(activeBuffs, labTier);
+      const talentMods = getAggregatedTalentModifiers(latestStore.talents);
+      const artifactIds = latestStore.artifacts?.equippedIds ?? [];
+      const artifactEffects = getAggregatedArtifactEffects(artifactIds);
 
       this.comboCount += 1;
       this.lastComboTimestamp = timestamp;
@@ -1055,7 +1154,10 @@ export class WorkoutSession {
       const chargeGain = calculateUltimateChargeGain({
         isHoldTick,
         comboCount: this.comboCount,
-        chargeMultiplier: sanctuaryBuffs.ultimateChargeMultiplier,
+        chargeMultiplier:
+          sanctuaryBuffs.ultimateChargeMultiplier *
+          talentMods.ultimateChargeMultiplier *
+          artifactEffects.ultimateChargeMultiplier,
       });
       this.ultimateCharge = Math.min(ULTIMATE_CHARGE_MAX, this.ultimateCharge + chargeGain);
       const isUltimate = this.ultimateCharge >= ULTIMATE_CHARGE_MAX;
@@ -1072,8 +1174,9 @@ export class WorkoutSession {
       let basePlayer = latestStore.player;
       if (isUltimate) {
         let nextUltHp = basePlayer.hp;
-        if (sanctuaryBuffs.healOnUlt > 0) {
-          nextUltHp = Math.min(basePlayer.maxHp, nextUltHp + sanctuaryBuffs.healOnUlt);
+        const totalUltHeal = sanctuaryBuffs.healOnUlt + artifactEffects.healOnOverdrive;
+        if (totalUltHeal > 0) {
+          nextUltHp = Math.min(basePlayer.maxHp, nextUltHp + totalUltHeal);
         }
         if (sanctuaryBuffs.selfDamageOnUlt > 0) {
           nextUltHp = Math.max(1, nextUltHp - sanctuaryBuffs.selfDamageOnUlt);
@@ -1089,7 +1192,10 @@ export class WorkoutSession {
         latestStore.inventory.equippedItems,
         ITEMS,
         activeBuffs,
-        labTier
+        labTier,
+        talentMods,
+        artifactIds,
+        mutatorEffects.playerDefenseDelta
       );
 
       const isDebuffed = this.debuffExpiresAt !== null && timestamp < this.debuffExpiresAt;
@@ -1110,17 +1216,23 @@ export class WorkoutSession {
           isDebuffed,
           loadout: activeLoadout,
           isUltimate,
-          xpMultiplier: sanctuaryBuffs.xpMultiplier,
+          xpMultiplier:
+            sanctuaryBuffs.xpMultiplier * talentMods.xpMultiplier * mutatorEffects.xpMultiplier,
           sanctuaryDamageMultiplier,
           armorPierceRatio: sanctuaryBuffs.armorPierceRatio,
-          shieldBreakBonus: sanctuaryBuffs.shieldBreakBonus,
+          shieldBreakBonus: sanctuaryBuffs.shieldBreakBonus + artifactEffects.shieldBreakBonus,
           breakAllShieldsOnUlt: sanctuaryBuffs.breakAllShieldsOnUlt,
           ultimateDamageMultiplier:
             sanctuaryBuffs.ultimateDamageMultiplierOverride ?? ULTIMATE_DAMAGE_MULTIPLIER,
           extraCritChance,
           dumbbellDamageBonus: sanctuaryBuffs.dumbbellDamageBonus,
+          executeBonusRatio: talentMods.executeDamageBonus + artifactEffects.executeBonusRatio,
         }
       );
+
+      if (result.damageDealt > this.bestHitDamageInBattle) {
+        this.bestHitDamageInBattle = result.damageDealt;
+      }
 
       const currentBossPhase = hitMonster.isBoss ? getBossPhase(hitMonster) : 0;
       const bossPhaseChanged = currentBossPhase !== this.lastBossPhase;
@@ -1204,13 +1316,19 @@ export class WorkoutSession {
     const activeBuffs = store.sanctuary?.activeBuffs ?? [];
     const labTier = store.sanctuary?.labTier ?? 1;
     const sanctuaryBuffs = getAggregatedSanctuaryBuffs(activeBuffs, labTier);
+    const talentMods = getAggregatedTalentModifiers(store.talents);
+    const artifactIds = store.artifacts?.equippedIds ?? [];
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
 
     const effectivePlayer = getEffectivePlayerStats(
       store.player,
       store.inventory.equippedItems,
       ITEMS,
       activeBuffs,
-      labTier
+      labTier,
+      talentMods,
+      artifactIds,
+      mutatorEffects.playerDefenseDelta
     );
 
     const { rank, rewardMultiplier } = calculateBattleRank({
@@ -1221,7 +1339,13 @@ export class WorkoutSession {
     });
 
     const baseCoins = defeatedEnemy.coinReward ?? 20;
-    let coinsEarned = Math.round(baseCoins * rewardMultiplier * sanctuaryBuffs.coinMultiplier);
+    let coinsEarned = Math.round(
+      baseCoins *
+        rewardMultiplier *
+        sanctuaryBuffs.coinMultiplier *
+        talentMods.coinMultiplier *
+        mutatorEffects.coinMultiplier
+    );
     let totalXpGained = xpGained;
     let finalLeveledUp = leveledUp;
 
@@ -1239,6 +1363,7 @@ export class WorkoutSession {
 
     let droppedItemId: string | null = null;
     let unlockedLevelId: string | null = null;
+    let unlockedArtifactId: ArtifactId | null = null;
     let circuitRoomNumber: number | undefined;
     let circuitTotalRooms: number | undefined;
     let circuitCompleted = false;
@@ -1262,6 +1387,10 @@ export class WorkoutSession {
       }
     } else if (this.mode === 'ENDLESS') {
       store.updateEndlessProgress(this.endlessWave, true);
+      const waveArtifact = getArtifactUnlockForWave(this.endlessWave);
+      if (waveArtifact && store.unlockArtifact(waveArtifact)) {
+        unlockedArtifactId = waveArtifact;
+      }
       droppedItemId = rollItemDrop(ENDLESS_DROP_TABLE);
       if (droppedItemId) {
         store.addItem(droppedItemId, 1);
@@ -1284,6 +1413,10 @@ export class WorkoutSession {
           }
           store.updatePlayer(updatedPlayer);
 
+          if (store.unlockArtifact('CHRONO_HOURGLASS')) {
+            unlockedArtifactId = 'CHRONO_HOURGLASS';
+          }
+
           if (circuit.guaranteedLootPool.length > 0) {
             const idx = Math.floor(Math.random() * circuit.guaranteedLootPool.length);
             droppedItemId = circuit.guaranteedLootPool[idx];
@@ -1305,6 +1438,52 @@ export class WorkoutSession {
         store.addItem(droppedItemId, 1);
       }
     }
+
+    let weeklyBonus: VictorySummary['weeklyBonus'] = null;
+    if (this.mode === 'WEEKLY') {
+      const wk = store.completeWeeklyChallenge(this.weeklyWeekKey ?? getISOWeekKey(), rank);
+      weeklyBonus = {
+        firstCompletion: wk.firstCompletion,
+        bonusCoins: wk.bonusCoins,
+        bonusXp: wk.bonusXp,
+      };
+      if (wk.unlockedArtifactId) {
+        unlockedArtifactId = wk.unlockedArtifactId;
+      }
+      if (wk.leveledUp) {
+        finalLeveledUp = true;
+      }
+      droppedItemId = rollItemDrop(ENDLESS_DROP_TABLE);
+      if (droppedItemId) {
+        store.addItem(droppedItemId, 1);
+      }
+    }
+
+    let programBonus: VictorySummary['programBonus'] = null;
+    if (typeof this.programDayIndex === 'number') {
+      const progRes = store.advanceProgramDay(this.programDayIndex);
+      if (progRes) {
+        programBonus = {
+          completedProgram: progRes.completedProgram,
+          bonusCoins: progRes.bonusCoins,
+          bonusXp: progRes.bonusXp,
+        };
+        if (progRes.leveledUp) {
+          finalLeveledUp = true;
+        }
+      }
+    }
+
+    const brokenRecords = this.exerciseId
+      ? store.recordPersonalRecords({
+          exerciseId: this.exerciseId,
+          battleReps: this.battleReps,
+          holdSec: this.battleHoldSeconds,
+          maxCombo: this.maxComboInBattle,
+          weightKg: loadoutWeightKg,
+          bestHitDamage: this.bestHitDamageInBattle,
+        })
+      : [];
 
     const droppedTrophyId = getTrophyForArchetype(defeatedEnemy.archetype);
     const droppedTrophyQty = defeatedEnemy.isBoss ? 2 : 1;
@@ -1373,6 +1552,11 @@ export class WorkoutSession {
       circuitCompleted,
       gardenPlotId: this.mode === 'WEED' ? this.gardenPlotId : undefined,
       gardenPlotCleared,
+      brokenRecords,
+      unlockedArtifactId,
+      programBonus,
+      weeklyBonus,
+      mutatorsApplied: this.activeMutators.length > 0 ? [...this.activeMutators] : undefined,
     };
 
     if (this.enableSound) {
@@ -1382,6 +1566,7 @@ export class WorkoutSession {
     const shouldConsumeBuffs =
       this.mode === 'CAMPAIGN' ||
       this.mode === 'WEED' ||
+      this.mode === 'WEEKLY' ||
       (this.mode === 'CIRCUIT' && circuitCompleted);
     if (shouldConsumeBuffs) {
       store.consumeActiveSanctuaryBuffs();
@@ -1516,6 +1701,12 @@ export function createExerciseDetector(
       return new WallSitDetector({ maxKneeAngle: calibration.wallSitMaxKneeAngle });
     case 'OVERHEAD_PRESS':
       return new OverheadPressDetector({ topAngle: calibration.overheadPressTopAngle });
+    case 'LUNGE':
+      return new LungeDetector({ bottomAngle: calibration.lungeBottomAngle });
+    case 'HIGH_KNEES':
+      return new HighKneesDetector({ liftAngle: calibration.highKneesLiftAngle });
+    case 'FRONT_RAISE':
+      return new FrontRaiseDetector({ peakAngle: calibration.frontRaisePeakAngle });
   }
 }
 
@@ -1560,6 +1751,21 @@ export function applyExerciseCalibration(
         detector.configure({ topAngle: calibration.overheadPressTopAngle });
       }
       break;
+    case 'LUNGE':
+      if (detector instanceof LungeDetector) {
+        detector.configure({ bottomAngle: calibration.lungeBottomAngle });
+      }
+      break;
+    case 'HIGH_KNEES':
+      if (detector instanceof HighKneesDetector) {
+        detector.configure({ liftAngle: calibration.highKneesLiftAngle });
+      }
+      break;
+    case 'FRONT_RAISE':
+      if (detector instanceof FrontRaiseDetector) {
+        detector.configure({ peakAngle: calibration.frontRaisePeakAngle });
+      }
+      break;
   }
 }
 
@@ -1573,6 +1779,10 @@ export function createWorkoutSessionForBattle(params: {
   circuitId?: string;
   circuitRoomIndex?: number;
   gardenPlotId?: number;
+  activeMutators?: MutatorId[];
+  weeklyWeekKey?: string;
+  programDayIndex?: number;
+  scriptedPoseEnabled?: boolean;
 }): WorkoutSession {
   const store = useGameStore.getState();
   const exerciseDef = EXERCISES[params.exerciseId];
@@ -1592,6 +1802,10 @@ export function createWorkoutSessionForBattle(params: {
     circuitId: params.circuitId,
     circuitRoomIndex: params.circuitRoomIndex,
     gardenPlotId: params.gardenPlotId,
+    activeMutators: params.activeMutators ?? store.activeMutators,
+    weeklyWeekKey: params.weeklyWeekKey,
+    programDayIndex: params.programDayIndex,
+    scriptedPoseEnabled: params.scriptedPoseEnabled ?? store.settings.scriptedPoseEnabled,
     loadout: store.loadout,
     enableSound: store.settings.soundEnabled,
     enableVoice: store.settings.voiceEnabled,
