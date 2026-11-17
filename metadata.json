@@ -1,0 +1,8 @@
+{
+  "name": "Junk Slayer — Fitness RPG",
+  "description": "Fitness RPG where you defeat fast-food monsters with real-world squats, push-ups, planks, and jumping jacks tracked locally via webcam.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
