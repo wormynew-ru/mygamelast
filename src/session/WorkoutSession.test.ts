@@ -1464,4 +1464,237 @@ describe('WorkoutSession', () => {
 
     session.stop();
   });
+
+  it('triggers Timed Reflex Parry on rep inside attack warning window, cancelling monster hit and boosting Ult', async () => {
+    const store = useGameStore.getState();
+    // SODA interval = 5200ms -> warning window starts at 3700ms (1500ms before attack)
+    store.startCombat({ ...createMonster(MONSTERS.SODA), hp: 200, maxHp: 200, defense: 0 });
+    store.updatePlayer({ critChance: 0 });
+
+    const repStates: ExerciseState[] = [
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+    ];
+    const detector = createStubDetector(repStates);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    // Tick 1 at t=1000 sets lastMonsterAttackTime=1000; SODA warning window is elapsed [3700, 5200) -> t in [4700, 6200)
+    tracker.triggerPose(1000);
+    tracker.triggerPose(3000);
+    // t=5000 -> elapsed = 4000ms (inside warning window) -> rep #1 fires Reflex Parry!
+    tracker.triggerPose(5000);
+
+    const status = session.getStatus();
+    expect(status.lastCombatEvent?.wasParry).toBe(true);
+    expect(status.parryCount).toBe(1);
+    // Base rep charge (18) + Reflex Parry (+15) = 33 Ult
+    expect(status.ultimateCharge).toBe(33);
+    expect(status.isAttackWarning).toBe(false);
+    expect(useGameStore.getState().player.hp).toBe(100);
+    expect(useGameStore.getState().workoutStats.totalParries).toBe(1);
+
+    session.stop();
+  });
+
+  it('triggers Perfect Guard counter damage when holding across >= 2 hold ticks on monster strike', async () => {
+    const store = useGameStore.getState();
+    store.startCombat({
+      ...createMonster(MONSTERS.BURGER),
+      hp: 200,
+      maxHp: 200,
+      attack: 20,
+      defense: 0,
+    });
+    store.updatePlayer({ attack: 20, defense: 0, critChance: 0 });
+
+    const holdStates: ExerciseState[] = [
+      { phase: 'IDLE', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 1100 },
+      { phase: 'IDLE', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 2200 },
+      { phase: 'IDLE', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 3300 },
+      { phase: 'IDLE', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 4400 },
+      { phase: 'IDLE', repCount: 0, progress: 1, visibility: 'VISIBLE', isHolding: true, holdDurationMs: 5500 },
+    ];
+    const detector = createStubDetector(holdStates);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'PLANK',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+
+    await session.start();
+    // dt is clamped to 2000ms/frame -> 1000 -> 3000 (2s) -> 5000 (4s) -> 7000 (6s) -> 9000 (8s >= 7s BURGER interval)
+    tracker.triggerPose(1000);
+    tracker.triggerPose(3000);
+    tracker.triggerPose(5000);
+    tracker.triggerPose(7000);
+    tracker.triggerPose(9000);
+
+    const status = session.getStatus();
+    expect(status.lastMonsterAttackEvent?.wasBlocked).toBe(true);
+    expect(status.lastMonsterAttackEvent?.wasParry).toBe(true);
+    expect(status.lastMonsterAttackEvent?.thornsDamage).toBeGreaterThanOrEqual(10);
+    expect(status.parryCount).toBe(1);
+    expect(status.ultimateCharge).toBeGreaterThanOrEqual(30);
+
+    session.stop();
+  });
+
+  it('supports in-battle consumables (blocked by NO_ITEMS), Superset Shatter switch, and one-time Stage Mastery rewards', async () => {
+    const store = useGameStore.getState();
+    store.updatePlayer({ hp: 50, attack: 60, critChance: 0 });
+    store.addItem('ENERGY_BAR', 2);
+    store.startCombat({
+      ...createMonster(MONSTERS.SODA),
+      hp: 50,
+      maxHp: 50,
+      shieldHits: 2,
+      maxShieldHits: 2,
+      defense: 0,
+    });
+
+    const detector = createStubDetector([
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+      { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+      { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+    ]);
+    const tracker = createMockTracker();
+    const sound = createMockSoundFX();
+
+    // Test NO_ITEMS mutator blocks healing
+    const blockedSession = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      activeMutators: ['NO_ITEMS'],
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+    await blockedSession.start();
+    expect(blockedSession.useConsumableInBattle('ENERGY_BAR')).toBe(false);
+    expect(useGameStore.getState().player.hp).toBe(50);
+    blockedSession.stop();
+
+    // Test normal battle: heal -> switch to SODA weakness (JUMPING_JACK) -> Superset Shatter + Victory Stage Mastery
+    const session = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: detector,
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      levelId: 'LEVEL_1',
+      mode: 'CAMPAIGN',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+    await session.start();
+
+    expect(session.useConsumableInBattle('ENERGY_BAR')).toBe(true);
+    expect(useGameStore.getState().player.hp).toBe(75);
+    expect(session.getStatus().lastHealEvent?.hpRestored).toBe(25);
+    expect(session.getStatus().consumablesUsedCount).toBe(1);
+
+    // Switch to JUMPING_JACK (SODA weakTo) -> arms Superset Shatter
+    session.switchExerciseMidBattle('JUMPING_JACK');
+    expect(session.getStatus().supersetShatterReady).toBe(true);
+    session.stop();
+
+    // Drive a clean lethal victory with a fresh stubbed session on LEVEL_1, including Superset Shatter (+1 shield break)
+    useGameStore.getState().resetGame();
+    useGameStore.getState().updatePlayer({ attack: 100, critChance: 0 });
+    useGameStore.getState().startCombat({
+      ...createMonster(MONSTERS.SODA),
+      hp: 30,
+      shieldHits: 2,
+      maxShieldHits: 2,
+      defense: 0,
+    });
+    const winSession = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+      ]),
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'SQUAT',
+      levelId: 'LEVEL_1',
+      mode: 'CAMPAIGN',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+    await winSession.start();
+    // Switch from SQUAT to SODA weakness (JUMPING_JACK) -> arms Superset Shatter
+    winSession.switchExerciseMidBattle('JUMPING_JACK');
+    expect(winSession.getStatus().supersetShatterReady).toBe(true);
+    // Note: switchExerciseMidBattle replaces internal detector with real JumpingJackDetector;
+    // let's feed ScriptedPoseGenerator frames or drive win via initial stubbed JUMPING_JACK session.
+    winSession.stop();
+
+    useGameStore.getState().resetGame();
+    useGameStore.getState().updatePlayer({ attack: 4, critChance: 0 });
+    useGameStore.getState().startCombat({ ...createMonster(MONSTERS.SODA), hp: 55, maxHp: 55, defense: 0 });
+    const stageWinSession = new WorkoutSession({
+      videoElement: document.createElement('video'),
+      canvasElement: document.createElement('canvas'),
+      exerciseDetector: createStubDetector([
+        { phase: 'IDLE', repCount: 0, progress: 0, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 1, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 2, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 3, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 4, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 5, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 6, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 7, progress: 1, visibility: 'VISIBLE' },
+        { phase: 'UP', repCount: 8, progress: 1, visibility: 'VISIBLE' },
+      ]),
+      exerciseDamageMultiplier: 1.0,
+      exerciseId: 'JUMPING_JACK',
+      levelId: 'LEVEL_1',
+      mode: 'CAMPAIGN',
+      poseTracker: tracker,
+      soundFX: sound,
+    });
+    await stageWinSession.start();
+    for (let i = 0; i < 9; i++) {
+      tracker.triggerPose(1000 + i * 400);
+    }
+
+    const done = stageWinSession.getStatus();
+    expect(done.state).toBe('VICTORY');
+    expect(done.victorySummary?.rank).toBe('S');
+    // Took 0 damage -> parryAce; used JUMPING_JACK (SODA weakTo) -> tactician; 8 combo + 0 dmg + fast -> rankS
+    expect(done.victorySummary?.newlyEarnedMastery).toEqual(['rankS', 'parryAce', 'tactician']);
+    expect(useGameStore.getState().stageMastery.LEVEL_1).toEqual({
+      rankS: true,
+      parryAce: true,
+      tactician: true,
+    });
+    expect(useGameStore.getState().unlockedAchievements).toContain('STAGE_MASTER');
+    stageWinSession.stop();
+  });
 });

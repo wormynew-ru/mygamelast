@@ -16,6 +16,7 @@ import {
   Plus,
   Repeat,
   FlaskConical,
+  Star,
   Timer,
   Trash2,
 } from 'lucide-react';
@@ -37,7 +38,12 @@ import {
   MUTATORS,
   getAggregatedMutatorEffects,
 } from '../game/data/programs';
-import type { CustomCircuitRoom, TabataConfig, TabataPresetId } from '../game/types';
+import type {
+  CustomCircuitRoom,
+  StageMasteryBadge,
+  TabataConfig,
+  TabataPresetId,
+} from '../game/types';
 import { useGameStore } from '../game/store';
 import { useTranslation } from '../i18n/useTranslation';
 import {
@@ -50,8 +56,10 @@ import {
   MUTATOR_KEYS,
   SANCTUARY_MIX_KEYS,
   SANCTUARY_SYNERGY_KEYS,
+  STAGE_MASTERY_KEYS,
   TABATA_PRESET_KEYS,
 } from './gameKeys';
+import { MonsterArtwork } from './MonsterArtwork';
 import { useVoiceCommandHandler } from './VoiceControl';
 
 interface LevelSelectScreenProps {
@@ -66,6 +74,7 @@ interface LevelSelectScreenProps {
 }
 
 const WEIGHT_PRESETS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
+const MASTERY_BADGES: StageMasteryBadge[] = ['rankS', 'parryAce', 'tactician'];
 
 export function LevelSelectScreen({
   initialTab = 'CAMPAIGN',
@@ -94,6 +103,7 @@ export function LevelSelectScreen({
   const warmUpEnabled = useGameStore((state) => state.settings.warmUpEnabled);
   const updateSettings = useGameStore((state) => state.updateSettings);
   const bestBenchmarkByExercise = useGameStore((state) => state.bestBenchmarkByExercise);
+  const stageMastery = useGameStore((state) => state.stageMastery);
   const mutatorEffects = getAggregatedMutatorEffects(activeMutators);
 
   const defaultLevel =
@@ -495,6 +505,8 @@ export function LevelSelectScreen({
 
               const nameKey = MONSTER_NAME_KEYS[level.monsterId];
               const monsterName = nameKey ? t(nameKey) : monster.name;
+              const mastery = stageMastery[level.id];
+              const earnedStars = MASTERY_BADGES.filter((b) => Boolean(mastery?.[b])).length;
 
               return (
                 <button
@@ -510,9 +522,13 @@ export function LevelSelectScreen({
                   }`}
                 >
                   <div className="flex items-center gap-4 min-w-0">
-                    <div className="text-3xl shrink-0" aria-hidden="true">
-                      {monster.sprite}
-                    </div>
+                    <MonsterArtwork
+                      monsterId={level.monsterId}
+                      archetype={monster.archetype}
+                      size="sm"
+                      shieldHits={monster.shieldHits}
+                      maxShieldHits={monster.maxShieldHits}
+                    />
                     <div className="min-w-0">
                       <div className="text-xs text-slate-400">
                         {t('levels.stage')} {level.order} · {t(ARCHETYPE_KEYS[monster.archetype])}
@@ -527,18 +543,37 @@ export function LevelSelectScreen({
                     </div>
                   </div>
 
-                  <div className="shrink-0 text-xs font-medium">
+                  <div className="shrink-0 flex flex-col items-end gap-1 text-xs font-medium">
                     {!isUnlocked ? (
                       <span className="inline-flex items-center gap-1 text-slate-500">
                         <Lock className="w-4 h-4" />
                         <span>{t('levels.locked')}</span>
                       </span>
-                    ) : isCompleted ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-400">
-                        <Check className="w-4 h-4" />
-                        <span>{t('levels.completed')}</span>
-                      </span>
-                    ) : null}
+                    ) : (
+                      <>
+                        {isCompleted && (
+                          <span className="inline-flex items-center gap-1 text-emerald-400">
+                            <Check className="w-4 h-4" />
+                            <span>{t('levels.completed')}</span>
+                          </span>
+                        )}
+                        <span
+                          className="inline-flex items-center gap-0.5"
+                          aria-label={`${earnedStars}/3`}
+                        >
+                          {MASTERY_BADGES.map((badge) => (
+                            <Star
+                              key={`${level.id}-${badge}`}
+                              className={`w-3.5 h-3.5 ${
+                                mastery?.[badge]
+                                  ? 'text-amber-400 fill-amber-400'
+                                  : 'text-slate-700'
+                              }`}
+                            />
+                          ))}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </button>
               );
@@ -550,10 +585,14 @@ export function LevelSelectScreen({
             <div className="space-y-6">
               {/* Selected Monster Info */}
               <div className="flex items-start gap-4 pb-6 border-b border-slate-800">
-                <div className="text-5xl shrink-0" aria-hidden="true">
-                  {selectedMonster.sprite}
-                </div>
-                <div>
+                <MonsterArtwork
+                  monsterId={selectedLevel.monsterId}
+                  archetype={selectedMonster.archetype}
+                  size="md"
+                  shieldHits={selectedMonster.shieldHits}
+                  maxShieldHits={selectedMonster.maxShieldHits}
+                />
+                <div className="min-w-0 flex-1">
                   <div className="text-xs text-amber-400 font-medium">
                     {t('levels.stage')} {selectedLevel.order} ·{' '}
                     {t(ARCHETYPE_KEYS[selectedMonster.archetype])}
@@ -588,6 +627,41 @@ export function LevelSelectScreen({
                       </span>
                     </span>
                   </div>
+                </div>
+              </div>
+
+              {/* Stage Tactical Mastery Checklist */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-amber-300">{t('mastery.title')}</span>
+                  <span className="text-[11px] text-slate-400">{t('mastery.rewardHint')}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {MASTERY_BADGES.map((badge) => {
+                    const earned = Boolean(stageMastery[selectedLevel.id]?.[badge]);
+                    return (
+                      <div
+                        key={`selected-mastery-${badge}`}
+                        className={`rounded-md border px-2.5 py-2 text-xs ${
+                          earned
+                            ? 'bg-amber-950/35 border-amber-500/60 text-amber-100'
+                            : 'bg-slate-900/70 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        <div className="flex items-start gap-1.5 font-semibold leading-tight">
+                          <Star
+                            className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                              earned ? 'text-amber-400 fill-amber-400' : 'text-slate-600'
+                            }`}
+                          />
+                          <span>{t(STAGE_MASTERY_KEYS[badge].name)}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1 leading-snug">
+                          {t(STAGE_MASTERY_KEYS[badge].desc)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

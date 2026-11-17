@@ -122,6 +122,10 @@ describe('VoiceCommandEngine parser', () => {
     expect(parseVoiceCommand('битва с сорняками')?.command).toEqual({ type: 'GARDEN_WEED' });
     expect(parseVoiceCommand('табата')?.command).toEqual({ type: 'NAV_TABATA' });
     expect(parseVoiceCommand('фитнес тест')?.command).toEqual({ type: 'START_BENCHMARK' });
+    expect(parseVoiceCommand('использовать предмет')?.command).toEqual({ type: 'USE_CONSUMABLE' });
+    expect(parseVoiceCommand('аптечка')?.command).toEqual({ type: 'USE_CONSUMABLE' });
+    expect(parseVoiceCommand('potion')?.command).toEqual({ type: 'USE_CONSUMABLE' });
+    expect(parseVoiceCommand('heal')?.command).toEqual({ type: 'USE_CONSUMABLE' });
     expect(parseVoiceCommand('вы')).toBeNull();
     expect(parseVoiceCommand('просто случайный шум')).toBeNull();
   });

@@ -22,6 +22,8 @@ import type {
   MutatorId,
   SanctuaryMixId,
   SanctuarySynergyId,
+  StageMasteryBadge,
+  StageMasteryRecord,
   TabataConfig,
 } from '../game/types';
 import { PoseTracker, type PoseDelegate, type TrackerError } from '../vision/PoseTracker';
@@ -43,6 +45,9 @@ import {
 } from '../vision/exercises';
 import {
   COMBO_WINDOW_BASE_MS,
+  PARRY_DAMAGE_MULTIPLIER,
+  PARRY_ULT_CHARGE_GAIN,
+  PERFECT_GUARD_ULT_CHARGE_GAIN,
   TOXIC_DEBUFF_DURATION_MS,
   ULTIMATE_CHARGE_MAX,
   ULTIMATE_DAMAGE_MULTIPLIER,
@@ -50,6 +55,7 @@ import {
   applyDamageToMonster,
   calculateBattleRank,
   calculateMonsterCounterAttack,
+  calculateParryCounterDamage,
   calculateTonnageDelta,
   calculateUltimateChargeGain,
   estimateWorkoutKcal,
@@ -127,6 +133,7 @@ export interface CombatEvent {
   comboMultiplier: number;
   shieldHit: boolean;
   shieldBroken: boolean;
+  wasParry?: boolean;
   timestamp: number;
 }
 
@@ -134,6 +141,7 @@ export interface MonsterAttackEvent {
   id: number;
   damageTaken: number;
   wasBlocked: boolean;
+  wasParry?: boolean;
   appliedToxicDebuff: boolean;
   thornsDamage?: number;
   timestamp: number;
@@ -171,6 +179,16 @@ export interface VictorySummary {
   benchmarkEntry?: BenchmarkEntry | null;
   benchmarkIsNewBest?: boolean;
   exerciseSwitchesCount?: number;
+  parryCount?: number;
+  consumablesUsedCount?: number;
+  newlyEarnedMastery?: StageMasteryBadge[];
+}
+
+export interface HealEvent {
+  id: number;
+  itemId: string;
+  hpRestored: number;
+  timestamp: number;
 }
 
 export interface SessionStatus {
@@ -195,6 +213,7 @@ export interface SessionStatus {
   debuffCleansedId: number;
   lastCombatEvent: CombatEvent | null;
   lastMonsterAttackEvent: MonsterAttackEvent | null;
+  lastHealEvent: HealEvent | null;
   victorySummary: VictorySummary | null;
   fps?: number;
   lastFrameTime?: number;
@@ -217,7 +236,10 @@ export interface SessionStatus {
   warmUpCompleted: boolean;
   benchmarkRemainingSec: number | null;
   freshSwitchRemainingSec: number;
+  supersetShatterReady: boolean;
   exerciseSwitchesCount: number;
+  parryCount: number;
+  consumablesUsedCount: number;
 }
 
 export type SessionStateChangeCallback = (status: SessionStatus) => void;
@@ -373,7 +395,13 @@ export class WorkoutSession {
   private warmUpCompleted = false;
   private benchmarkElapsedMs = 0;
   private freshSwitchRemainingMs = 0;
+  private supersetShatterReady = false;
+  private usedWeaknessInBattle = false;
   private exerciseSwitchesCount = 0;
+  private parryCount = 0;
+  private consumablesUsedCount = 0;
+  private healEventCounter = 0;
+  private lastHealEvent: HealEvent | null = null;
   private repTimestampsMs: number[] = [];
   private lastMetronomeBeatTimestamp: number | null = null;
 
@@ -658,6 +686,9 @@ export class WorkoutSession {
     }
 
     const store = useGameStore.getState();
+    const prevTrackingType = this.exerciseId ? EXERCISES[this.exerciseId]?.trackingType : undefined;
+    const nextTrackingType = EXERCISES[nextExerciseId]?.trackingType;
+
     this.exerciseId = nextExerciseId;
     this.exerciseDamageMultiplier = EXERCISES[nextExerciseId].damageMultiplier;
     this.exerciseDetector = createExerciseDetector(
@@ -676,11 +707,20 @@ export class WorkoutSession {
     this.freshSwitchRemainingMs = FRESH_SWITCH_BONUS_DURATION_MS;
     this.exerciseSwitchesCount += 1;
 
-    if (store.currentEnemy) {
+    const enemy = store.currentEnemy;
+    const hitsWeakness = Boolean(enemy && enemy.weakTo === nextExerciseId);
+    if (hitsWeakness) {
+      this.usedWeaknessInBattle = true;
+    }
+    this.supersetShatterReady = Boolean(
+      (prevTrackingType && nextTrackingType && prevTrackingType !== nextTrackingType) || hitsWeakness
+    );
+
+    if (enemy) {
       store.recordMonsterBestiary({
-        monsterId: store.currentEnemy.id,
+        monsterId: enemy.id,
         defeated: false,
-        weaknessDiscovered: store.currentEnemy.weakTo === nextExerciseId,
+        weaknessDiscovered: hitsWeakness,
       });
     }
 
@@ -688,6 +728,90 @@ export class WorkoutSession {
       this.soundFX.play('POWER_UP');
     }
     this.notifyStateChange();
+  }
+
+  /**
+   * Use a healing consumable during active/paused combat (disabled under NO_ITEMS or BENCHMARK).
+   */
+  useConsumableInBattle(itemId?: string): boolean {
+    if (this.state !== 'ACTIVE' && this.state !== 'PAUSED') {
+      return false;
+    }
+    if (this.mode === 'BENCHMARK' || this.activeMutators.includes('NO_ITEMS')) {
+      return false;
+    }
+
+    const store = useGameStore.getState();
+    const preferredOrder = [
+      'ENERGY_BAR',
+      'ISOTONIC_FLASK',
+      'PROTEIN_SHAKE',
+      'MEGA_RECOVERY_SMOOTHIE',
+    ];
+    const targetId =
+      itemId ??
+      preferredOrder.find((id) => (store.inventory.items.get(id) ?? 0) > 0);
+    if (!targetId) {
+      return false;
+    }
+
+    const item = ITEMS[targetId];
+    if (!item || item.type !== 'CONSUMABLE') {
+      return false;
+    }
+
+    const activeBuffs = store.sanctuary?.activeBuffs ?? [];
+    const labTier = store.sanctuary?.labTier ?? 1;
+    const talentMods = getAggregatedTalentModifiers(store.talents);
+    const artifactIds = store.artifacts?.equippedIds ?? [];
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+
+    const beforeEff = getEffectivePlayerStats(
+      store.player,
+      store.inventory.equippedItems,
+      ITEMS,
+      activeBuffs,
+      labTier,
+      talentMods,
+      artifactIds,
+      mutatorEffects.playerDefenseDelta
+    );
+
+    const used = store.useConsumable(targetId);
+    if (!used) {
+      return false;
+    }
+
+    const afterStore = useGameStore.getState();
+    const afterEff = getEffectivePlayerStats(
+      afterStore.player,
+      afterStore.inventory.equippedItems,
+      ITEMS,
+      activeBuffs,
+      labTier,
+      talentMods,
+      artifactIds,
+      mutatorEffects.playerDefenseDelta
+    );
+    const hpRestored = Math.max(
+      1,
+      afterEff.hp - beforeEff.hp || (item.effect?.hpRestore ?? 1)
+    );
+
+    this.consumablesUsedCount += 1;
+    this.healEventCounter += 1;
+    this.lastHealEvent = {
+      id: this.healEventCounter,
+      itemId: targetId,
+      hpRestored,
+      timestamp: Date.now(),
+    };
+
+    if (this.enableSound) {
+      this.soundFX.play('POWER_UP');
+    }
+    this.notifyStateChange();
+    return true;
   }
 
   skipWarmUp(): void {
@@ -775,6 +899,7 @@ export class WorkoutSession {
       debuffCleansedId: this.debuffCleansedId,
       lastCombatEvent: this.lastCombatEvent,
       lastMonsterAttackEvent: this.lastMonsterAttackEvent,
+      lastHealEvent: this.lastHealEvent,
       victorySummary: this.victorySummary,
       fps: this.currentFps,
       poseDelegate: this.poseTracker.getActiveDelegate?.() ?? this.requestedPoseDelegate,
@@ -796,7 +921,10 @@ export class WorkoutSession {
       warmUpCompleted: this.warmUpCompleted,
       benchmarkRemainingSec,
       freshSwitchRemainingSec,
+      supersetShatterReady: this.supersetShatterReady && this.freshSwitchRemainingMs > 0,
       exerciseSwitchesCount: this.exerciseSwitchesCount,
+      parryCount: this.parryCount,
+      consumablesUsedCount: this.consumablesUsedCount,
     };
   }
 
@@ -872,9 +1000,17 @@ export class WorkoutSession {
     this.warmUpCompleted = false;
     this.benchmarkElapsedMs = 0;
     this.freshSwitchRemainingMs = 0;
+    this.supersetShatterReady = false;
+    this.usedWeaknessInBattle = Boolean(
+      store.currentEnemy && this.exerciseId && store.currentEnemy.weakTo === this.exerciseId
+    );
     if (!skipWarmUp) {
       this.exerciseSwitchesCount = 0;
+      this.parryCount = 0;
+      this.consumablesUsedCount = 0;
     }
+    this.healEventCounter = 0;
+    this.lastHealEvent = null;
     this.repTimestampsMs = [];
     this.lastMetronomeBeatTimestamp = null;
 
@@ -913,6 +1049,9 @@ export class WorkoutSession {
 
     if (this.freshSwitchRemainingMs > 0 && dtMs > 0) {
       this.freshSwitchRemainingMs = Math.max(0, this.freshSwitchRemainingMs - dtMs);
+      if (this.freshSwitchRemainingMs === 0) {
+        this.supersetShatterReady = false;
+      }
     }
 
     if (!this.initialToxicApplied && !this.warmUpActive && this.mode !== 'BENCHMARK') {
@@ -1088,7 +1227,10 @@ export class WorkoutSession {
             this.soundFX.play('REP_COMPLETE');
           }
         } else {
-          this.applyCombatHits(newReps, timestamp, false);
+          const parryWindowActive =
+            !tabataInRest &&
+            (this.isAttackWarning || this.evaluateAttackWarningWindow(timestamp));
+          this.applyCombatHits(newReps, timestamp, false, parryWindowActive);
           if (this.state !== 'ACTIVE') {
             return;
           }
@@ -1351,6 +1493,23 @@ export class WorkoutSession {
     }
   }
 
+  private evaluateAttackWarningWindow(timestamp: number): boolean {
+    if (this.warmUpActive || this.mode === 'BENCHMARK') {
+      return false;
+    }
+    const enemy = useGameStore.getState().currentEnemy;
+    if (!enemy || isMonsterDead(enemy) || this.lastMonsterAttackTime === null) {
+      return false;
+    }
+    const mutatorEffects = getAggregatedMutatorEffects(this.activeMutators);
+    const intervalMs = Math.max(
+      2200,
+      Math.round(getMonsterAttackIntervalMs(enemy) * mutatorEffects.enemyIntervalMultiplier)
+    );
+    const elapsed = Math.max(0, timestamp - this.lastMonsterAttackTime);
+    return isMonsterAttackWarningActive(elapsed, intervalMs);
+  }
+
   private processMonsterCounterAttack(timestamp: number, isBlocking: boolean): void {
     const store = useGameStore.getState();
     const enemy = store.currentEnemy;
@@ -1429,6 +1588,7 @@ export class WorkoutSession {
     let appliedToxicDebuff = false;
     let thornsDamage = 0;
     let reflectedEnemy = enemy;
+    let wasPerfectGuardParry = false;
 
     if (wasBlocked) {
       this.debuffExpiresAt = null;
@@ -1436,10 +1596,21 @@ export class WorkoutSession {
 
       const perfectSanctuaryThorns =
         damageTaken === 0 ? sanctuaryBuffs.thornsReflectDamage : 0;
-      const totalThorns =
+      let totalThorns =
         perfectSanctuaryThorns +
         talentMods.thornsDamageOnBlock +
         artifactEffects.thornsReflectDamage;
+
+      if (this.consecutiveHoldTicks >= 2) {
+        wasPerfectGuardParry = true;
+        this.parryCount += 1;
+        store.recordWorkoutProgress({ parries: 1 });
+        this.ultimateCharge = Math.min(
+          ULTIMATE_CHARGE_MAX,
+          this.ultimateCharge + PERFECT_GUARD_ULT_CHARGE_GAIN
+        );
+        totalThorns += calculateParryCounterDamage(effectivePlayer.attack, enemy.defense);
+      }
 
       if (totalThorns > 0) {
         thornsDamage = totalThorns;
@@ -1492,13 +1663,14 @@ export class WorkoutSession {
       id: this.monsterAttackCounter,
       damageTaken,
       wasBlocked,
+      ...(wasPerfectGuardParry ? { wasParry: true } : {}),
       appliedToxicDebuff,
       thornsDamage: thornsDamage > 0 ? thornsDamage : undefined,
       timestamp: Date.now(),
     };
 
     if (this.enableSound) {
-      if (wasBlocked && damageTaken === 0) {
+      if (wasPerfectGuardParry || (wasBlocked && damageTaken === 0)) {
         this.soundFX.play('POWER_UP');
       } else if (wasBlocked) {
         this.soundFX.play('BOTTOM_HIT');
@@ -1531,7 +1703,12 @@ export class WorkoutSession {
     }
   }
 
-  private applyCombatHits(hits: number, timestamp: number, isHoldTick: boolean): void {
+  private applyCombatHits(
+    hits: number,
+    timestamp: number,
+    isHoldTick: boolean,
+    isReflexParry: boolean = false
+  ): void {
     const store = useGameStore.getState();
     let enemy = store.currentEnemy;
 
@@ -1562,14 +1739,26 @@ export class WorkoutSession {
         this.maxComboInBattle = this.comboCount;
       }
 
-      const chargeGain = calculateUltimateChargeGain({
-        isHoldTick,
-        comboCount: this.comboCount,
-        chargeMultiplier:
-          sanctuaryBuffs.ultimateChargeMultiplier *
-          talentMods.ultimateChargeMultiplier *
-          artifactEffects.ultimateChargeMultiplier,
-      });
+      const wasParryHit = isReflexParry && i === 0;
+      if (wasParryHit) {
+        this.parryCount += 1;
+        latestStore.recordWorkoutProgress({ parries: 1 });
+        // Reflex Parry cancels & resets enemy's incoming attack windup
+        this.lastMonsterAttackTime = timestamp;
+        this.nextAttackProgress = 0;
+        this.isAttackWarning = false;
+        this.attackWarningTriggered = false;
+      }
+
+      const chargeGain =
+        calculateUltimateChargeGain({
+          isHoldTick,
+          comboCount: this.comboCount,
+          chargeMultiplier:
+            sanctuaryBuffs.ultimateChargeMultiplier *
+            talentMods.ultimateChargeMultiplier *
+            artifactEffects.ultimateChargeMultiplier,
+        }) + (wasParryHit ? PARRY_ULT_CHARGE_GAIN : 0);
       this.ultimateCharge = Math.min(ULTIMATE_CHARGE_MAX, this.ultimateCharge + chargeGain);
       const isUltimate = this.ultimateCharge >= ULTIMATE_CHARGE_MAX;
       if (isUltimate) {
@@ -1619,7 +1808,15 @@ export class WorkoutSession {
         this.freshSwitchRemainingMs > 0
           ? baseSanctuaryMultiplier * FRESH_SWITCH_DAMAGE_MULTIPLIER
           : baseSanctuaryMultiplier;
-      const extraCritChance = this.comboCount >= 6 ? sanctuaryBuffs.highComboCritBonus : 0;
+
+      const supersetShatterProc = this.supersetShatterReady && this.freshSwitchRemainingMs > 0;
+      if (supersetShatterProc) {
+        this.supersetShatterReady = false;
+      }
+
+      const extraCritChance =
+        (this.comboCount >= 6 ? sanctuaryBuffs.highComboCritBonus : 0) +
+        (supersetShatterProc ? 0.25 : 0);
 
       const { monster: hitMonster, player: updatedEffective, result } = applyDamageToMonster(
         effectivePlayer,
@@ -1640,15 +1837,24 @@ export class WorkoutSession {
               : 1),
           sanctuaryDamageMultiplier,
           armorPierceRatio: sanctuaryBuffs.armorPierceRatio,
-          shieldBreakBonus: sanctuaryBuffs.shieldBreakBonus + artifactEffects.shieldBreakBonus,
+          shieldBreakBonus:
+            sanctuaryBuffs.shieldBreakBonus +
+            artifactEffects.shieldBreakBonus +
+            (wasParryHit ? 1 : 0) +
+            (supersetShatterProc ? 1 : 0),
           breakAllShieldsOnUlt: sanctuaryBuffs.breakAllShieldsOnUlt,
           ultimateDamageMultiplier:
             sanctuaryBuffs.ultimateDamageMultiplierOverride ?? ULTIMATE_DAMAGE_MULTIPLIER,
           extraCritChance,
           dumbbellDamageBonus: sanctuaryBuffs.dumbbellDamageBonus,
           executeBonusRatio: talentMods.executeDamageBonus + artifactEffects.executeBonusRatio,
+          parryDamageMultiplier: wasParryHit ? PARRY_DAMAGE_MULTIPLIER : 1.0,
         }
       );
+
+      if (result.matchup === 'WEAK') {
+        this.usedWeaknessInBattle = true;
+      }
 
       if (result.damageDealt > this.bestHitDamageInBattle) {
         this.bestHitDamageInBattle = result.damageDealt;
@@ -1695,11 +1901,12 @@ export class WorkoutSession {
         comboMultiplier: result.comboMultiplier,
         shieldHit: result.shieldHit,
         shieldBroken: result.shieldBroken,
+        ...(result.wasParry ? { wasParry: true } : {}),
         timestamp: Date.now(),
       };
 
       if (this.enableSound) {
-        if (result.wasUltimate || result.playerLeveledUp) {
+        if (result.wasUltimate || result.playerLeveledUp || result.wasParry) {
           this.soundFX.play('POWER_UP');
         } else if (result.shieldBroken || result.wasCritical) {
           this.soundFX.play('COMBO');
@@ -1790,6 +1997,8 @@ export class WorkoutSession {
     let circuitCompleted = false;
     let circuitsDelta = 0;
 
+    let newlyEarnedMastery: StageMasteryBadge[] | undefined;
+
     if (this.mode === 'CAMPAIGN' && this.levelId) {
       const level = getLevelById(this.levelId);
       if (level) {
@@ -1804,6 +2013,21 @@ export class WorkoutSession {
         droppedItemId = rollItemDrop(level.dropTable);
         if (droppedItemId) {
           store.addItem(droppedItemId, 1);
+        }
+
+        const masteryEarned: Partial<StageMasteryRecord> = {
+          rankS: rank === 'S',
+          parryAce: this.parryCount >= 1 || this.totalDamageTakenInBattle === 0,
+          tactician: this.usedWeaknessInBattle || this.exerciseSwitchesCount >= 1,
+        };
+        const masteryRes = store.recordStageMastery(level.id, masteryEarned);
+        if (masteryRes.newlyEarnedBadges.length > 0) {
+          newlyEarnedMastery = masteryRes.newlyEarnedBadges;
+          totalXpGained += masteryRes.bonusXp;
+          if (masteryRes.leveledUp) {
+            finalLeveledUp = true;
+          }
+          // Add bonus coins separately from workoutProgress delta (recordStageMastery already added to store.coins)
         }
       }
     } else if (this.mode === 'ENDLESS') {
@@ -1980,9 +2204,11 @@ export class WorkoutSession {
 
     const uniqueAchievements = Array.from(new Set(this.sessionAchievements));
 
+    const masteryCoinsAdded = (newlyEarnedMastery?.length ?? 0) * 35;
+
     this.victorySummary = {
       xpGained: totalXpGained,
-      coinsEarned,
+      coinsEarned: coinsEarned + masteryCoinsAdded,
       rank,
       maxCombo: this.maxComboInBattle,
       durationSec,
@@ -2015,6 +2241,9 @@ export class WorkoutSession {
             : tabataSnap?.round ?? 1
           : undefined,
       exerciseSwitchesCount: this.exerciseSwitchesCount,
+      parryCount: this.parryCount,
+      consumablesUsedCount: this.consumablesUsedCount,
+      newlyEarnedMastery,
     };
 
     if (this.enableSound) {

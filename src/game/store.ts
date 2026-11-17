@@ -30,6 +30,8 @@ import type {
   ProgramId,
   SanctuaryMixId,
   SeedId,
+  StageMasteryBadge,
+  StageMasteryRecord,
   StreakState,
   TalentId,
   WorkoutStats,
@@ -112,7 +114,7 @@ import {
 import { isSerializedMap, type SerializedMap } from './portability';
 import { setCurrentLanguage, type Language } from '../i18n';
 
-export const SAVE_SCHEMA_VERSION = 15;
+export const SAVE_SCHEMA_VERSION = 16;
 
 export const DEFAULT_EXERCISE_CALIBRATION: ExerciseCalibrationSettings = {
   squatBottomAngle: 90,
@@ -153,6 +155,7 @@ function createInitialWorkoutStats(): WorkoutStats {
     totalEstimatedKcal: 0,
     totalDurationSec: 0,
     totalCoinsEarned: 0,
+    totalParries: 0,
   };
 }
 
@@ -226,6 +229,7 @@ function createInitialState(): GameState {
     customCircuits: [],
     benchmarks: [],
     bestBenchmarkByExercise: {},
+    stageMastery: {},
     settings: {
       soundEnabled: true,
       voiceEnabled: false,
@@ -302,6 +306,7 @@ interface GameStore extends GameState {
     circuitsCompleted?: number;
     tabataCompleted?: number;
     durationSec?: number;
+    parries?: number;
     dateKey?: string;
     suppressWeedSpawn?: boolean;
   }) => void;
@@ -387,6 +392,15 @@ interface GameStore extends GameState {
     avgCadenceRpm: number;
     dateKey?: string;
   }) => { entry: BenchmarkEntry; isNewBest: boolean };
+  recordStageMastery: (
+    levelId: string,
+    earned: Partial<StageMasteryRecord>
+  ) => {
+    newlyEarnedBadges: StageMasteryBadge[];
+    bonusCoins: number;
+    bonusXp: number;
+    leveledUp: boolean;
+  };
 
   updateSettings: (settings: Partial<GameState['settings']>) => void;
   updateExerciseCalibration: (calibration: Partial<ExerciseCalibrationSettings>) => void;
@@ -415,6 +429,22 @@ function normalizePersonalRecords(
     };
   }
   return base;
+}
+
+function normalizeStageMastery(
+  raw?: Partial<Record<string, Partial<StageMasteryRecord>>>
+): Record<string, StageMasteryRecord> {
+  const clean: Record<string, StageMasteryRecord> = {};
+  if (!raw || typeof raw !== 'object') return clean;
+  for (const [levelId, entry] of Object.entries(raw)) {
+    if (!entry || typeof entry !== 'object') continue;
+    clean[levelId] = {
+      rankS: Boolean(entry.rankS),
+      parryAce: Boolean(entry.parryAce),
+      tactician: Boolean(entry.tactician),
+    };
+  }
+  return clean;
 }
 
 export function migrateGameState(persistedState: unknown, version: number): GameState {
@@ -469,6 +499,7 @@ export function migrateGameState(persistedState: unknown, version: number): Game
       workoutStats: {
         ...base.workoutStats,
         ...(state.workoutStats ?? {}),
+        totalParries: Math.max(0, Math.floor(state.workoutStats?.totalParries ?? 0)),
       },
       exerciseTotals: {
         ...base.exerciseTotals,
@@ -513,6 +544,7 @@ export function migrateGameState(persistedState: unknown, version: number): Game
         }
         return clean;
       })(),
+      stageMastery: normalizeStageMastery(state.stageMastery),
       settings: {
         ...base.settings,
         ...(state.settings ?? {}),
@@ -654,11 +686,7 @@ export const useGameStore = create<GameStore>()(
         const state = get();
         const item = ITEMS[itemId];
         const qty = state.inventory.items.get(itemId) ?? 0;
-        const effective = getEffectivePlayerStats(
-          state.player,
-          state.inventory.equippedItems,
-          ITEMS
-        );
+        const effective = selectEffectivePlayerStats(state);
         if (!item || item.type !== 'CONSUMABLE' || qty <= 0) {
           return false;
         }
@@ -668,7 +696,7 @@ export const useGameStore = create<GameStore>()(
 
         const healedEffective = useConsumableItem(effective, item);
         const hpGained = healedEffective.hp - effective.hp;
-        const nextBaseHp = Math.min(state.player.maxHp, state.player.hp + hpGained);
+        const nextBaseHp = Math.min(effective.maxHp, state.player.hp + hpGained);
 
         const newItems = new Map(state.inventory.items);
         if (qty - 1 <= 0) {
@@ -775,6 +803,7 @@ export const useGameStore = create<GameStore>()(
           const circuitsDelta = delta.circuitsCompleted ?? 0;
           const tabataDelta = delta.tabataCompleted ?? 0;
           const durationDelta = delta.durationSec ?? 0;
+          const parriesDelta = delta.parries ?? 0;
 
           const nextQuests = normalizeDailyQuests(state.dailyQuests, todayKey);
           const updatedDailyQuests: DailyQuestState = {
@@ -857,6 +886,7 @@ export const useGameStore = create<GameStore>()(
                 Math.round(((state.workoutStats.totalEstimatedKcal ?? 0) + kcalDelta) * 10) / 10,
               totalDurationSec: (state.workoutStats.totalDurationSec ?? 0) + durationDelta,
               totalCoinsEarned: (state.workoutStats.totalCoinsEarned ?? 0) + coinsDelta,
+              totalParries: (state.workoutStats.totalParries ?? 0) + parriesDelta,
             },
             exerciseTotals: nextExerciseTotals,
             dailyQuests: updatedDailyQuests,
@@ -1821,6 +1851,44 @@ export const useGameStore = create<GameStore>()(
         });
         get().syncAchievements();
         return { entry, isNewBest };
+      },
+
+      recordStageMastery: (levelId, earned) => {
+        const state = get();
+        const prev = state.stageMastery[levelId] ?? {};
+        const badges: StageMasteryBadge[] = ['rankS', 'parryAce', 'tactician'];
+        const newlyEarnedBadges: StageMasteryBadge[] = [];
+
+        for (const badge of badges) {
+          if (earned[badge] && !prev[badge]) {
+            newlyEarnedBadges.push(badge);
+          }
+        }
+
+        const nextRecord: StageMasteryRecord = {
+          rankS: Boolean(prev.rankS || earned.rankS),
+          parryAce: Boolean(prev.parryAce || earned.parryAce),
+          tactician: Boolean(prev.tactician || earned.tactician),
+        };
+
+        const bonusCoins = newlyEarnedBadges.length * 35;
+        const bonusXp = 0;
+
+        set({
+          coins: state.coins + bonusCoins,
+          stageMastery: {
+            ...state.stageMastery,
+            [levelId]: nextRecord,
+          },
+        });
+        get().syncAchievements();
+
+        return {
+          newlyEarnedBadges,
+          bonusCoins,
+          bonusXp,
+          leveledUp: false,
+        };
       },
 
       updateSettings: (settingsUpdate) =>

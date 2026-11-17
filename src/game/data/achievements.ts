@@ -34,7 +34,9 @@ export type AchievementId =
   | 'MUTANT_BOTANIST'
   | 'TABATA_FINISHER'
   | 'CUSTOM_ARCHITECT'
-  | 'BENCHMARK_TESTED';
+  | 'BENCHMARK_TESTED'
+  | 'PARRY_MASTER'
+  | 'STAGE_MASTER';
 
 export interface AchievementDefinition {
   id: AchievementId;
@@ -188,6 +190,19 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     id: 'BENCHMARK_TESTED',
     icon: '📈',
     check: (state) => (state.benchmarks?.length ?? 0) >= 1,
+  },
+  {
+    id: 'PARRY_MASTER',
+    icon: '⚔️',
+    check: (state) => (state.workoutStats?.totalParries ?? 0) >= 3,
+  },
+  {
+    id: 'STAGE_MASTER',
+    icon: '🎖️',
+    check: (state) =>
+      Object.values(state.stageMastery ?? {}).some(
+        (m) => Boolean(m?.rankS && m?.parryAce && m?.tactician)
+      ),
   },
 ];
 

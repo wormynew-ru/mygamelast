@@ -43,6 +43,7 @@ import {
   MONSTER_NAME_KEYS,
   MONSTER_TROPHY_KEYS,
 } from './gameKeys';
+import { MonsterArtwork } from './MonsterArtwork';
 import { useVoiceCommandHandler } from './VoiceControl';
 
 interface BestiaryAnalyticsScreenProps {
@@ -804,9 +805,13 @@ export function BestiaryAnalyticsScreen({ onBack }: BestiaryAnalyticsScreenProps
                 >
                   {/* Header */}
                   <div className="flex items-start gap-4">
-                    <div className="text-4xl shrink-0" aria-hidden="true">
-                      {monster.sprite}
-                    </div>
+                    <MonsterArtwork
+                      monsterId={monster.id}
+                      archetype={monster.archetype}
+                      size="md"
+                      shieldHits={monster.shieldHits}
+                      maxShieldHits={monster.maxShieldHits}
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
                         <h3 className="text-base font-bold text-white truncate">{name}</h3>

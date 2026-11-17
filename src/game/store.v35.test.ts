@@ -41,7 +41,7 @@ describe('Store v3.5 Meta Progression & Migration v13 -> v14', () => {
     expect(migrated.benchmarks).toEqual([]);
     expect(migrated.bestBenchmarkByExercise).toEqual({});
     expect(migrated.workoutStats.tabataCompleted).toBe(0);
-    expect(SAVE_SCHEMA_VERSION).toBe(15);
+    expect(SAVE_SCHEMA_VERSION).toBe(16);
   });
 
   it('supports talent upgrades, effective stats boost, and Fit-Coin respec', () => {
@@ -220,5 +220,53 @@ describe('Store v3.5 Meta Progression & Migration v13 -> v14', () => {
     });
     expect(bm2.isNewBest).toBe(false);
     expect(useGameStore.getState().bestBenchmarkByExercise.SQUAT).toBe(26);
+  });
+
+  it('migrates v15 -> v16, clamps consumables to effective maxHp, and pays Stage Mastery bonuses once', () => {
+    const migratedV16 = migrateGameState(
+      {
+        coins: 300,
+        workoutStats: { totalParries: 4 },
+      },
+      15
+    );
+    expect(migratedV16.coins).toBe(300);
+    expect(migratedV16.workoutStats.totalParries).toBe(4);
+    expect(migratedV16.stageMastery).toEqual({});
+
+    // Effective maxHp via Artifact (+40 maxHp from TITAN_CORE -> 140 maxHp)
+    const store = useGameStore.getState();
+    store.unlockArtifact('TITAN_CORE');
+    store.equipArtifact('TITAN_CORE');
+    store.updatePlayer({ hp: 100 });
+    store.addItem('ENERGY_BAR', 1); // +25 HP -> 125 HP (> base 100, <= effective 140)
+    expect(useGameStore.getState().useConsumable('ENERGY_BAR')).toBe(true);
+    expect(useGameStore.getState().player.hp).toBe(125);
+
+    // One-time Stage Mastery reward (first earn grants +70 coins for 2 stars, replay grants 0)
+    const coinsBefore = useGameStore.getState().coins;
+    const firstMastery = useGameStore.getState().recordStageMastery('LEVEL_1', {
+      rankS: true,
+      tactician: true,
+    });
+    expect(firstMastery.newlyEarnedBadges).toEqual(['rankS', 'tactician']);
+    expect(firstMastery.bonusCoins).toBe(70);
+    expect(firstMastery.bonusXp).toBe(0);
+    expect(useGameStore.getState().coins).toBe(coinsBefore + 70);
+
+    const replayMastery = useGameStore.getState().recordStageMastery('LEVEL_1', {
+      rankS: true,
+      tactician: true,
+    });
+    expect(replayMastery.newlyEarnedBadges).toEqual([]);
+    expect(replayMastery.bonusCoins).toBe(0);
+    expect(useGameStore.getState().coins).toBe(coinsBefore + 70);
+
+    // Completing 3rd star unlocks STAGE_MASTER; recording 3 parries unlocks PARRY_MASTER
+    useGameStore.getState().recordStageMastery('LEVEL_1', { parryAce: true });
+    useGameStore.getState().recordWorkoutProgress({ parries: 3 });
+    useGameStore.getState().syncAchievements();
+    expect(useGameStore.getState().unlockedAchievements).toContain('STAGE_MASTER');
+    expect(useGameStore.getState().unlockedAchievements).toContain('PARRY_MASTER');
   });
 });

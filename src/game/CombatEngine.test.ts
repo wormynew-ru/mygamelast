@@ -31,6 +31,8 @@ import {
   getMonsterAttackIntervalMs,
   ATTACK_WARNING_WINDOW_MS,
   isMonsterAttackWarningActive,
+  PARRY_DAMAGE_MULTIPLIER,
+  calculateParryCounterDamage,
 } from './CombatEngine';
 import { getCircuitById } from './data/circuits';
 import { ITEMS } from './data/items';
@@ -624,6 +626,7 @@ describe('CombatEngine', () => {
         customCircuits: [],
         benchmarks: [],
         bestBenchmarkByExercise: {},
+        stageMastery: {},
         settings: {
           soundEnabled: true,
           voiceEnabled: false,
@@ -834,6 +837,61 @@ describe('CombatEngine', () => {
       const heavyBlock = calculateMonsterCounterAttack(zeroDefPlayer, 30, true, 1.0, 0.9);
       expect(heavyBlock.wasBlocked).toBe(true);
       expect(heavyBlock.damageTaken).toBe(3);
+    });
+  });
+
+  describe('v4.0 Parry, Counter & Boss Phase 2 Mechanics', () => {
+    it('applies parryDamageMultiplier and sets wasParry flag cleanly', () => {
+      const player = { ...createPlayer(), attack: 20, critChance: 0 };
+      const monster: MonsterStats = {
+        id: 'BURGER',
+        name: 'Burger',
+        hp: 100,
+        maxHp: 100,
+        attack: 8,
+        defense: 0,
+        xpReward: 25,
+        isBoss: false,
+      };
+
+      const parryHit = applyDamageToMonster(player, monster, 1.0, {
+        parryDamageMultiplier: PARRY_DAMAGE_MULTIPLIER,
+      });
+      // 20 * 1.35 = 27
+      expect(parryHit.result.damageDealt).toBe(27);
+      expect(parryHit.result.wasParry).toBe(true);
+
+      const normalHit = applyDamageToMonster(player, monster, 1.0);
+      expect(normalHit.result.damageDealt).toBe(20);
+      expect(normalHit.result.wasParry).toBeUndefined();
+    });
+
+    it('calculates Perfect Guard counter damage with 4 HP minimum floor', () => {
+      expect(calculateParryCounterDamage(20, 4)).toBe(10); // (20 - 2) * 0.6 = 10.8 -> 10
+      expect(calculateParryCounterDamage(4, 10)).toBe(4);
+    });
+
+    it('arms escalating shields and attack boost on Boss Phase 1 and Phase 2 transitions', () => {
+      const boss: MonsterStats = {
+        id: 'BOSS_KING_BURGER',
+        name: 'King Burger',
+        hp: 100,
+        maxHp: 200,
+        attack: 20,
+        defense: 5,
+        xpReward: 150,
+        isBoss: true,
+      };
+
+      const phase1 = applyBossPhaseTransition(boss, 0, 1);
+      expect(phase1.shieldHits).toBe(2);
+      expect(phase1.maxShieldHits).toBe(2);
+      expect(phase1.attack).toBe(20);
+
+      const phase2 = applyBossPhaseTransition({ ...phase1, shieldHits: 0 }, 1, 2);
+      expect(phase2.shieldHits).toBe(3);
+      expect(phase2.maxShieldHits).toBe(3);
+      expect(phase2.attack).toBe(23); // +15%
     });
   });
 });

@@ -27,6 +27,9 @@ export const TOXIC_DEBUFF_DURATION_MS = 6000;
 export const TOXIC_DEBUFF_DAMAGE_MULTIPLIER = 0.75;
 export const ULTIMATE_CHARGE_MAX = 100;
 export const ULTIMATE_DAMAGE_MULTIPLIER = 1.8;
+export const PARRY_DAMAGE_MULTIPLIER = 1.35;
+export const PARRY_ULT_CHARGE_GAIN = 15;
+export const PERFECT_GUARD_ULT_CHARGE_GAIN = 10;
 export const DUMBBELL_WEIGHT_OPTIONS = [1, 2, 3, 5, 7.5, 10, 12.5, 15] as const;
 
 /**
@@ -127,6 +130,17 @@ export function calculateBaseDamage(
 }
 
 /**
+ * Counter-strike damage reflected when blocking a monster attack during a sustained static hold.
+ */
+export function calculateParryCounterDamage(
+  playerAttack: number,
+  monsterDefense: number
+): number {
+  const net = Math.max(1, playerAttack - Math.floor(monsterDefense * 0.5));
+  return Math.max(4, Math.floor(net * 0.6));
+}
+
+/**
  * Combo multiplier tier based on consecutive reps within tempo window.
  */
 export function getComboMultiplier(comboCount: number): number {
@@ -178,6 +192,7 @@ export interface CombatAttackOptions {
   extraCritChance?: number;
   dumbbellDamageBonus?: number;
   executeBonusRatio?: number;
+  parryDamageMultiplier?: number;
 }
 
 /**
@@ -213,6 +228,7 @@ export function applyDamageToMonster(
     (options.executeBonusRatio ?? 0) > 0 && monster.maxHp > 0 && monster.hp / monster.maxHp <= 0.3
       ? 1 + (options.executeBonusRatio ?? 0)
       : 1.0;
+  const parryMultiplier = options.parryDamageMultiplier ?? 1.0;
 
   // Calculate base + tactical damage
   let damage = calculateBaseDamage(player.attack, effectiveMonsterDefense, exerciseMultiplier);
@@ -226,7 +242,8 @@ export function applyDamageToMonster(
         loadoutMultiplier *
         ultimateMultiplier *
         sanctuaryDamageMultiplier *
-        executeMultiplier
+        executeMultiplier *
+        parryMultiplier
     )
   );
 
@@ -295,6 +312,7 @@ export function applyDamageToMonster(
     loadoutMultiplier,
     shieldHit,
     shieldBroken,
+    ...(parryMultiplier > 1 ? { wasParry: true } : {}),
   };
 
   const updatedMonster: MonsterStats = {
@@ -327,6 +345,15 @@ export function applyBossPhaseTransition(
       ...monster,
       shieldHits: 2,
       maxShieldHits: 2,
+    };
+  }
+
+  if (nextPhase >= 2) {
+    return {
+      ...monster,
+      shieldHits: Math.max(monster.shieldHits ?? 0, 3),
+      maxShieldHits: Math.max(monster.maxShieldHits ?? 0, 3),
+      attack: monster.attack + Math.max(2, Math.round(monster.attack * 0.15)),
     };
   }
 

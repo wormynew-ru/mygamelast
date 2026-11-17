@@ -73,6 +73,7 @@ export interface CombatResult {
   loadoutMultiplier: number;
   shieldHit: boolean;
   shieldBroken: boolean;
+  wasParry?: boolean;
 }
 
 /**
@@ -147,6 +148,7 @@ export interface WorkoutStats {
   totalEstimatedKcal?: number;
   totalDurationSec?: number;
   totalCoinsEarned?: number;
+  totalParries?: number;
 }
 
 export interface ExerciseTotals {
@@ -410,6 +412,14 @@ export interface BenchmarkEntry {
   rating: BenchmarkRating;
 }
 
+export interface StageMasteryRecord {
+  rankS?: boolean;
+  parryAce?: boolean;
+  tactician?: boolean;
+}
+
+export type StageMasteryBadge = keyof StageMasteryRecord;
+
 /**
  * Persistent game state (saved/loaded via Zustand).
  */
@@ -450,6 +460,9 @@ export interface GameState {
   customCircuits: CustomCircuitDefinition[];
   benchmarks: BenchmarkEntry[];
   bestBenchmarkByExercise: Partial<Record<ExerciseId, number>>;
+
+  /** Tactical Campaign Stage Mastery (non-grind 3-star objectives) */
+  stageMastery: Record<string, StageMasteryRecord>;
 
   /** Settings and calibration */
   settings: {

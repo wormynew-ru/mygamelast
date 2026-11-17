@@ -37,6 +37,7 @@ export type VoiceCommand =
   | { type: 'SELECT_EXERCISE'; exerciseId: ExerciseId }
   | { type: 'START_CIRCUIT'; circuitId: CircuitId }
   | { type: 'SET_LOADOUT'; weightKg: number | null }
+  | { type: 'USE_CONSUMABLE' }
   | { type: 'ANALYTICS_PERIOD'; period: VoiceAnalyticsPeriod }
   | { type: 'ANALYTICS_METRIC'; metric: VoiceAnalyticsMetric };
 
@@ -301,6 +302,22 @@ const PHRASE_RULES: readonly PhraseRule[] = [
   {
     phrases: ['битва с сорняками', 'прополоть', 'сорняки', 'сорняк', 'clear weeds', 'fight weed', 'weed'],
     build: () => ({ type: 'GARDEN_WEED' }),
+  },
+  {
+    phrases: [
+      'использовать предмет',
+      'выпей зелье',
+      'аптечка',
+      'зелье',
+      'лечение',
+      'энергетик',
+      'протеин',
+      'восстановление',
+      'use item',
+      'heal',
+      'potion',
+    ],
+    build: () => ({ type: 'USE_CONSUMABLE' }),
   },
   {
     phrases: ['настройки', 'параметры', 'settings'],

@@ -18,6 +18,7 @@ import type {
   SanctuaryLabTier,
   SanctuaryMixCategory,
   SeedId,
+  StageMasteryBadge,
   TabataPresetId,
   TalentBranch,
   TalentId,
@@ -289,6 +290,14 @@ export const ACHIEVEMENT_KEYS: Record<
     name: 'achievement.BENCHMARK_TESTED.name',
     description: 'achievement.BENCHMARK_TESTED.description',
   },
+  PARRY_MASTER: {
+    name: 'achievement.PARRY_MASTER.name',
+    description: 'achievement.PARRY_MASTER.description',
+  },
+  STAGE_MASTER: {
+    name: 'achievement.STAGE_MASTER.name',
+    description: 'achievement.STAGE_MASTER.description',
+  },
 };
 
 export const SEED_KEYS: Record<
@@ -547,4 +556,13 @@ export const BENCHMARK_RATING_KEYS: Record<BenchmarkRating, TranslationKey> = {
   SILVER: 'benchmark.rating.SILVER',
   GOLD: 'benchmark.rating.GOLD',
   ELITE: 'benchmark.rating.ELITE',
+};
+
+export const STAGE_MASTERY_KEYS: Record<
+  StageMasteryBadge,
+  { name: TranslationKey; desc: TranslationKey }
+> = {
+  rankS: { name: 'mastery.rankS.name', desc: 'mastery.rankS.desc' },
+  parryAce: { name: 'mastery.parryAce.name', desc: 'mastery.parryAce.desc' },
+  tactician: { name: 'mastery.tactician.name', desc: 'mastery.tactician.desc' },
 };
